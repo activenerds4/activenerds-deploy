@@ -1,0 +1,359 @@
+---
+title: "Keyless CI/CD & Cloud Workload Identity Federation Guide"
+description: "Eliminate static cloud credentials from your CI/CD pipelines — OIDC federation architecture, zero static IAM keys, scoped role trust policies, and the migration path from long-lived secrets to short-lived tokens."
+category: devsecops
+slug: keyless-cicd-workload-identity-guide
+lastUpdated: "2026-08-28"
+tags: ["devsecops", "ci-cd", "oidc", "iam"]
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Keyless CI/CD & Cloud Workload Identity Federation Guide
+
+**Every static cloud credential in your CI/CD is a breach path.** A long-lived AWS access key stored as a GitHub Actions secret is a key that works whether the pipeline is running or not, whether the person who created it is employed or not, until someone manually rotates it. Keyless authentication — using short-lived, workload-specific tokens via OIDC federation — eliminates the credential entirely. This guide covers the architecture, the migration path, and the trust policies that make keyless CI/CD both secure and practical.
+
+---
+
+## Table of Contents
+
+1. [The Static Credential Problem](#1-the-static-credential-problem)
+2. [OIDC Federation Architecture](#2-oidc-federation-architecture)
+3. [Trust Policy Design](#3-trust-policy-design)
+4. [The Migration Path](#4-the-migration-path)
+5. [Per-Cloud Implementation](#5-per-cloud-implementation)
+6. [Operational Considerations](#6-operational-considerations)
+
+---
+
+## 1. The Static Credential Problem
+
+Before the keyless architecture, understand why static credentials are the problem keyless solves.
+
+### The Lifecycle of a Static Credential
+
+```text
+1. Engineer creates access key → stored as CI secret
+2. Key used by every pipeline run
+3. Engineer leaves the company → key still works
+4. Key compromised (leaked log, misconfigured repo) → still works
+5. Months later: rotation reminder (if it exists) → maybe rotated
+6. Or: key found in a breach → cloud account compromised
+```
+
+The fundamental issue: a static credential is a bearer token with no context. It doesn't know who's using it, when, or why. It works for anyone who has it, for as long as it exists.
+
+### The Failure Modes
+
+| Failure | Static credential | Keyless |
+|---|---|---|
+| Credential leak | Works for the attacker | Token is per-run, useless after |
+| Employee departure | Key still works | No key to revoke |
+| Rotation | Manual, often skipped | Automatic (every run) |
+| Scope creep | Key has fixed permissions | Token scoped per-run |
+| Audit trail | "Key was used" | "This specific pipeline run used it" |
+| Compromise window | Until rotation (months) | Token lifetime (minutes) |
+
+<Callout variant="warning" title="The 'we rotate annually' myth">
+  Annual rotation is not a security control — it's a compliance ritual. A credential compromised in January is exploitable until the next January rotation. The only real protection is short-lived credentials, where the compromise window is minutes, not months. Keyless makes every credential short-lived by default, without any rotation process to forget.
+</Callout>
+
+---
+
+## 2. OIDC Federation Architecture
+
+Keyless CI/CD uses OpenID Connect (OIDC) federation. The CI provider (GitHub Actions, GitLab CI, etc.) is a trusted identity provider; the cloud (AWS, GCP, Azure) trusts tokens from that provider and issues short-lived credentials in return.
+
+### The Token Flow
+
+```text
+1. CI pipeline starts (e.g., GitHub Actions run)
+       ↓
+2. CI provider generates an OIDC token
+   (signed, includes: repo, branch, workflow, run ID, actor)
+       ↓
+3. CI job requests cloud credentials using the OIDC token
+       ↓
+4. Cloud validates the token signature (trusts the CI provider)
+       ↓
+5. Cloud checks the trust policy (does this token match allowed conditions?)
+       ↓
+6. Cloud issues short-lived credentials (STS AssumeRoleWithWebIdentity)
+   (scoped to the role, valid for the session duration — e.g., 1 hour)
+       ↓
+7. CI job uses the short-lived credentials to deploy
+       ↓
+8. Credentials expire automatically (no rotation needed)
+```
+
+The key insight: **no static credential exists anywhere.** The CI provider proves who it is with a signed token; the cloud verifies the signature and issues a short-lived credential. The credential expires; there's nothing to leak, rotate, or revoke.
+
+### What the Token Contains
+
+The OIDC token is a JWT that contains claims about the specific pipeline run. These claims are what the trust policy matches against:
+
+| Claim | Example | Use in trust policy |
+|---|---|---|
+| `repository` | `org/app` | Restrict to specific repos |
+| `ref` | `refs/heads/main` | Restrict to specific branches |
+| `workflow` | `deploy.yml` | Restrict to specific workflows |
+| `event` | `push`, `pull_request` | Restrict to specific triggers |
+| `actor` | `github-actions[bot]` | Restrict to service actors |
+| `run_id` | `1234567890` | Unique per run (audit) |
+| `aud` | `sts.amazonaws.com` | Intended audience (cloud) |
+
+<Callout variant="tip" title="The token is the authorization context">
+  The OIDC token isn't just an identity — it's an authorization context. The trust policy can require that the token came from a specific repo, on a specific branch, from a specific workflow. This means a token from a PR on a fork can be denied production access, while a token from main on the deploy workflow gets it. The claims let you scope access precisely, which static credentials can't do at all.
+</Callout>
+
+---
+
+## 3. Trust Policy Design
+
+The trust policy is the security boundary. It defines which OIDC tokens (which pipeline runs) are allowed to assume which cloud roles. A loose trust policy is as dangerous as a static credential; a tight one is the core of keyless security.
+
+### The Trust Policy Anatomy
+
+A trust policy (AWS example) has three parts:
+
+1. **The trusted issuer** — which OIDC provider (the CI provider's URL)
+2. **The allowed conditions** — which token claims must match
+3. **The resulting role** — what permissions the assumed role has
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::ACCOUNT:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:org/app:ref:refs/heads/main"
+        }
+      }
+    }
+  ]
+}
+```
+
+This policy allows tokens from `org/app` on the `main` branch to assume the role — and nothing else.
+
+### The Tightening Spectrum
+
+| Policy tightness | Condition | Security |
+|---|---|---|
+| Too loose | `sub: repo:org/*` | Any repo in the org can assume — dangerous |
+| Loose | `sub: repo:org/app:*` | Any branch/workflow in the app — risky |
+| Tight | `sub: repo:org/app:ref:refs/heads/main` | Only main branch — good |
+| Tightest | `sub: repo:org/app:ref:refs/heads/main` + `workflow: deploy.yml` | Only main + deploy workflow — best |
+
+<Callout variant="warning" title="The wildcard trap">
+  The most common trust policy mistake is using wildcards in the `sub` condition: `repo:org/app:*`. This allows any branch and any workflow in the repo to assume the role — including a malicious PR's workflow. Always pin to the specific branch (`ref:refs/heads/main`) and, for production roles, the specific workflow. A PR shouldn't be able to assume the production deploy role, even in the same repo.
+</Callout>
+
+### Per-Environment Roles
+
+Don't use one role for everything. Separate roles per environment, each with its own trust policy:
+
+```text
+Role: deploy-staging
+  Trust: repo:org/app:ref:refs/heads/main + workflow: deploy-staging.yml
+  Permissions: staging account, deploy-only
+
+Role: deploy-production
+  Trust: repo:org/app:ref:refs/heads/main + workflow: deploy-production.yml
+  Permissions: production account, deploy-only, narrower scope
+
+Role: deploy-pr (optional)
+  Trust: repo:org/app:pull_request + workflow: preview.yml
+  Permissions: ephemeral preview environment, destroy-only
+```
+
+The separation means a staging deploy can't touch production, and a PR preview can't touch either.
+
+---
+
+## 4. The Migration Path
+
+Migrating from static credentials to keyless isn't a flip — it's a phased transition. Doing it wrong leaves pipelines broken and teams reverting to static credentials.
+
+### Phase 1 — Inventory & Prioritize
+
+Before touching anything, inventory every static credential in CI:
+
+<ChecklistBox
+  title="Credential Inventory"
+  items={[
+    "Every cloud credential stored as a CI secret (AWS keys, GCP service account keys, Azure SP secrets)",
+    "Which pipelines use each credential",
+    "What permissions each credential has (often over-broad)",
+    "When each was last rotated (often: never)",
+    "Which credentials have access to production",
+    "Which credentials are shared across pipelines (highest risk)",
+  ]}
+/>
+
+Prioritize: production credentials first, shared credentials second, over-broad credentials third.
+
+### Phase 2 — Set Up Federation
+
+For each cloud provider, set up the OIDC federation:
+
+1. **Add the CI provider as an OIDC identity provider** in the cloud
+2. **Create the roles** with trust policies (per environment)
+3. **Test** with a non-production pipeline first
+
+### Phase 3 — Migrate Pipeline by Pipeline
+
+Don't migrate all pipelines at once. Migrate one, verify, then proceed:
+
+1. **Pick a non-critical pipeline** (e.g., a staging deploy)
+2. **Add the OIDC token request** to the pipeline (the CI provider's mechanism)
+3. **Replace the static credential** with the keyless assume-role step
+4. **Run the pipeline** and verify it works
+5. **Remove the static credential** from CI secrets
+6. **Verify the credential is no longer used** (check cloud access logs)
+7. **Delete the static credential** from the cloud (the key itself, not just the CI secret)
+
+<Callout variant="tip" title="Delete the static key, don't just remove the secret">
+  The migration isn't complete when you remove the credential from CI secrets — it's complete when you delete the underlying cloud key. A key removed from CI but still existing in the cloud is still a valid credential. After migrating a pipeline to keyless, delete the IAM access key (or service account key) in the cloud. Until the key is deleted, the static credential risk remains.
+</Callout>
+
+### Phase 4 — Production Migration
+
+Once non-production pipelines are migrated and stable, migrate production:
+
+1. **Migrate the production deploy pipeline** to keyless
+2. **Run a production deploy via keyless** to verify
+3. **Delete the production static credential**
+4. **Monitor** for any pipeline that fails (a forgotten credential dependency)
+
+---
+
+## 5. Per-Cloud Implementation
+
+The keyless pattern is the same across clouds; the implementation differs.
+
+### AWS — IAM OIDC + STS
+
+1. Create an IAM OIDC identity provider (URL: `token.actions.githubusercontent.com`)
+2. Create an IAM role with the trust policy (conditions on `sub` and `aud`)
+3. In the pipeline: request the OIDC token, call `sts:AssumeRoleWithWebIdentity`
+4. Use the resulting temporary credentials (1 hour default)
+
+```yaml
+# GitHub Actions example (AWS)
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+
+jobs:
+  deploy:
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::ACCOUNT:role/deploy-production
+          aws-region: us-east-1
+```
+
+### GCP — Workload Identity Federation
+
+1. Create a Workload Identity Provider (OIDC, with the CI provider's URL)
+2. Create a service account with the needed permissions
+3. Create an IAM policy binding allowing the provider to impersonate the service account
+4. In the pipeline: exchange the OIDC token for a GCP access token
+
+```yaml
+# GitHub Actions example (GCP)
+permissions:
+  id-token: write
+
+jobs:
+  deploy:
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/PROJECT/locations/global/workloadIdentityPools/POOL/providers/PROVIDER
+          service_account: deploy@PROJECT.iam.gserviceaccount.com
+```
+
+### Azure — OIDC Federation
+
+1. Register an app or use workload identity federation
+2. Add the CI provider as a federated credential (with subject matching)
+3. In the pipeline: use the OIDC token to get an Azure AD token
+
+<Callout variant="note" title="The pattern is universal, the syntax varies">
+  All three clouds implement the same pattern: trust the CI provider's OIDC token, match claims in a trust policy, issue short-lived credentials. The syntax differs (IAM role vs service account vs app registration), but the architecture is identical. Once you understand the pattern for one cloud, the others are translations.
+</Callout>
+
+---
+
+## 6. Operational Considerations
+
+Keyless CI/CD changes the operational model. Understanding these changes prevents outages during and after migration.
+
+### Token Lifetime & Pipeline Duration
+
+The short-lived credentials have a lifetime (typically 1 hour for AWS STS). If a pipeline runs longer than the credential lifetime, it fails mid-run. Solutions:
+
+- **Request a longer session** (up to the cloud's max — AWS allows up to 12 hours for STS)
+- **Refresh the credential** mid-pipeline if the job is long
+- **Split long pipelines** into shorter jobs, each requesting fresh credentials
+
+### The "No Fallback" Rule
+
+Once migrated, there should be no static credential fallback. If a pipeline fails because it can't get a keyless credential, the fix is to fix the federation, not to re-add a static credential. A static fallback defeats the entire security model.
+
+<Callout variant="warning" title="Beware the 'emergency' static credential">
+  The most common keyless failure: during an incident, someone re-adds a static credential "just to get the deploy through," and it never gets removed. The static credential becomes the permanent fallback, and the keyless investment is wasted. The rule: if keyless is broken, fix keyless. An incident is not a reason to reintroduce the vulnerability you just eliminated.
+</Callout>
+
+### Monitoring & Audit
+
+Keyless improves auditability — every credential use is tied to a specific pipeline run. Leverage this:
+
+- **Cloud access logs** now show the pipeline run (via the role session name)
+- **Alert on unexpected role assumptions** — a role assumed from an unexpected repo/branch
+- **Periodic trust policy review** — ensure policies haven't drifted loose
+- **Rotate the OIDC provider thumbprint** if the CI provider rotates their signing keys (rare, but monitored)
+
+<ChecklistBox
+  title="Keyless CI/CD Operations"
+  items={[
+    "No static cloud credentials remain in CI (verified by inventory re-check)",
+    "Trust policies pinned to specific repo + branch + workflow (no wildcards)",
+    "Per-environment roles (staging and production are separate)",
+    "Pipeline duration within credential lifetime (or refresh mechanism in place)",
+    "No static credential fallback (fix federation, don't re-add keys)",
+    "Cloud access logs show pipeline run context (role session name)",
+    "Alerts on unexpected role assumptions (wrong repo/branch/workflow)",
+    "Periodic trust policy review (quarterly) for drift",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Keyless CI/CD Sign-off"
+  items={[
+    "All static cloud credentials inventoried and prioritized for migration",
+    "OIDC federation set up for each cloud provider in use",
+    "Trust policies tight: specific repo + branch + workflow, no wildcards",
+    "Per-environment roles deployed (staging, production, PR-preview separate)",
+    "Migration phased: non-production first, verified, then production",
+    "Static credentials deleted from the cloud (not just removed from CI secrets)",
+    "No static fallback; federation issues are fixed, not bypassed",
+    "Audit trail leveraged: every credential use tied to a pipeline run",
+  ]}
+/>

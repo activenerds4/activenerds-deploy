@@ -1,0 +1,65 @@
+---
+title: "Container Image Registry Comparison"
+slug: container-image-registry-comparison
+description: "Compare container image registries — Docker Hub, ECR, GCR, Harbor, and GHCR — on pricing, security, self-hosting, and CI integration."
+date: "2026-07-11"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["docker", "devsecops"]
+featured: false
+relatedArticles: ["container-image-signing-cosign", "container-image-security-scanning", "distroless-container-images-security", "sbom-generation-tools-comparison", "containerd-vs-cri-o-runtime-comparison"]
+image: https://cdn.activenerds.com/images/posts/container-image-registry-comparison.png
+imageAlt: "Container image registry comparison — Docker Hub vs ECR vs GCR vs GHCR feature comparison and performance benchmarks"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Compare container image registries.
+- **Key Capabilities**: Docker Hub, ECR, GCR, Harbor, and GHCR.
+- **What a Registry Needs to Do**: Apply structured configurations and validated production patterns.
+- **Managed Options**: Apply structured configurations and validated production patterns.
+</Callout>
+
+A container registry is the single source of truth for what actually runs in your clusters. Every deployment pulls from it, every CI pipeline pushes to it, and every security policy you write about "trusted images" is really a policy about what's allowed in the registry. The choice sounds trivial — they all store OCI artifacts — but the differences in pricing model, access control, scanning, and operational overhead show up fast once you're pushing hundreds of images a day across multiple environments.
+
+This is a practical comparison of the registries most teams actually choose between: Docker Hub, AWS ECR, Google GCR (and Artifact Registry), GitHub Container Registry, and self-hosted Harbor. The goal isn't to declare a winner — it's to map each option to the context where it makes sense.
+
+## What a Registry Needs to Do
+
+At a minimum, a registry stores layers and serves them to a pull. Beyond that, the features that matter in production are access control (who can push to which repo), vulnerability scanning (do you know what's in the image), replication (can you pull fast from multiple regions), and lifecycle management (do old images get garbage collected). The free tier of any registry handles the first; the rest is where the products diverge.
+
+**Storage and pull speed.** A registry that's far from your cluster makes every deploy slower and every autoscale event a gamble. Managed registries in the same cloud as your cluster (ECR in AWS, Artifact Registry in GCP) give you network-local pulls with no egress cost. Docker Hub's free tier rate-limits anonymous pulls, which breaks the moment a fleet of nodes all pull the same base image on a cold start. If you're using a public image as a base, mirror it into your own registry to avoid the rate limit and to pin a digest you control.
+
+**Security and scanning.** Scanning is where registries differentiate most. ECR and GCR have built-in scanning that flags CVEs on push. Harbor integrates Trivy and Clair and lets you enforce image-signing and vulnerability policies at admission time — see our guide to [container image signing with cosign](/blog/container-image-signing-cosign) for the signing side. Docker Hub's scanning is a paid feature. For a supply-chain security posture, the question is whether scanning is enforced (blocks the deploy) or advisory (just a report), and most managed registries default to advisory.
+
+** Who can push, who can pull, and whether pulls are anonymous. ECR uses IAM policies, which are powerful but verbose. GCR and Artifact Registry use IAM plus repository-level permissions. GHCR inherits GitHub's permission model, which is convenient if your CI is GitHub Actions and awkward if it isn't.
+
+Harbor has its own RBAC. The practical test: can you give a CI bot push-only access to one repo without granting it anything else? If the answer requires a paragraph of policy JSON, the access model is going to bite you.
+
+## Managed Options
+
+**Docker Hub tradeoffs.** Docker Hub is the default and the most familiar, which is its main advantage. The free tier's pull rate limits and the paid tier's per-user pricing make it a poor fit for production fleets — you end up paying for seats that only exist to raise rate limits. It's fine for public images and personal projects, and as a source to mirror from, but not as your production registry.
+
+**ECR and GCR.** The cloud-native managed registries are the default choice if you're already in that cloud. ECR integrates with IAM, has private replication across regions, and charges by storage and data transfer with no per-user cost — you pay for what you store and what you pull. GCR is being superseded by Artifact Registry, which adds multi-OS package support and finer-grained permissions. Both have built-in scanning and both are invisible to operate, which is the point. The downside is lock-in: pulling ECR images from a GCP cluster means paying egress, and migrating off means re-pushing everything.
+
+**GitHub Container Registry.** GHCR is the natural choice if your entire workflow lives in GitHub. Permissions map to GitHub orgs and teams, CI can push with the built-in `GITHUB_TOKEN`, and there's no separate auth system to maintain. It's free for public images and cheap for private. The limitation is that it's a fairly bare registry — scanning is basic, there's no replication control, and the feature set is "store and serve." For a small team on GitHub Actions, it's hard to beat; for a multi-cloud fleet, it's a round peg in a square hole.
+
+## Self-Hosted: Harbor
+
+**Why self-host.** The case for Harbor is control: you run it in your own network, you own the data, and you can replicate images across regions and clouds without egress costs from a third party. For regulated environments or air-gapped setups, self-hosting is often the only option that satisfies the policy. Harbor also has features the managed registries charge extra for or lack — policy-based [image signing](/articles/container-image-signing-cosign), replication to upstream registries, and project-level quotas.
+
+**Harbor features.** Harbor wraps Clair/Trivy for scanning, Notation/cosign for signing, and OIDC for auth. The replication feature is genuinely useful: you can configure Harbor to pull images from Docker Hub on a schedule, so your cluster pulls from Harbor locally and never hits Docker Hub's rate limits. The vulnerability policy can block pulls of images with critical CVEs at the proxy level.
+
+**Operational cost.** The catch is that you're now running a registry. Harbor needs a database, a Redis cache, storage backing, and regular upgrades. For a team without platform capacity, this is real overhead. The honest assessment: Harbor is worth it if you need its specific features (signing enforcement, multi-cloud replication, air-gap) and you have someone willing to own its operation. Otherwise a managed registry is less work for the same outcome.
+
+## Choosing for Your Context
+
+** The pricing models are different enough that the cheapest option depends on your usage pattern. ECR and GCR charge for storage (cheap) and data transfer out (the variable cost). If you pull the same images constantly within the same region, transfer stays low.
+
+If you pull across regions or clouds, transfer dominates. Docker Hub charges per user, which favors small teams and punishes fleets. Harbor's cost is the infrastructure to run it plus the engineer-hours to maintain it.
+
+**Multi-cloud needs.** If you run in more than one cloud, a self-hosted Harbor with replication, or a registry with multi-region replication (ECR supports this), avoids the cross-cloud egress tax. A single managed registry in one cloud, pulled from another, is the most expensive configuration there is.
+
+**Migration paths.** Registries are sticky because every deployment references image digests. Migrating means re-pushing images and updating references, which is mechanical but disruptive. Choose with the expectation that you'll stay for years: pick the option whose pricing and feature trajectory you can live with long-term, not the one that's cheapest on day one. And whatever you choose, pin to digests and mirror your base images — the registry you don't control (Docker Hub) is the one that will rate-limit you at the worst moment.
+
+

@@ -1,0 +1,84 @@
+---
+title: "Kubernetes Resource Quotas & Limits"
+slug: kubernetes-resource-quotas-limits
+description: "Govern cluster resources with quotas and limits — namespace isolation, request/limit tuning, and avoiding noisy-neighbor and OOM headaches."
+date: "2026-04-30"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: true
+relatedArticles: ["devsecops-hardening-checklist", "k8s-crashloopbackoff-troubleshooting", "kubernetes-autcaling-hpa-keda", "blue-green-deployment-kubernetes", "canary-deployment-strategies-kubernetes"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-resource-quotas-limits.png
+imageAlt: "Kubernetes resource quotas and limits — namespace compute budgets preventing noisy neighbor issues"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Govern cluster resources with quotas and limits.
+- **Key Capabilities**: namespace isolation, request/limit tuning, and avoiding noisy-neighbor and OOM headaches.
+- **Why Resource Governance**: Apply structured configurations and validated production patterns.
+- **Requests vs Limits**: Apply structured configurations and validated production patterns.
+</Callout>
+
+A Kubernetes cluster without resource controls is a tragedy of the commons. One team deploys a memory-hungry batch job with no limits, it gets scheduled on a node alongside a latency-sensitive service, the node comes under memory pressure, the kernel OOM-kills something — often the wrong thing — and the service degrades for everyone. The fix isn't more nodes; it's governance. Requests, limits, quotas, and LimitRanges are the levers, and they're the difference between a cluster that scales and one that eats itself.
+
+This is the practical guide to using them — what each one actually does, the difference between requests and limits that bites everyone, and the operational failures they cause when misconfigured.
+
+## Why Resource Governance
+
+Three problems resource governance solves. **Noisy neighbors**: a workload that consumes disproportionate resources degrades everything sharing its node. **Cluster starvation**: too many pods requesting resources the cluster can't satisfy, leaving workloads Pending indefinitely. **Cost sprawl**: no one knows what's actually using the cluster, so capacity gets added instead of waste being cut. All three come from the same root cause: without explicit resource declarations, the scheduler and kubelet guess, and they guess badly.
+
+The scheduler uses requests to decide where to place pods — it sums the requests of all pods on a node and won't overcommit beyond capacity. The kubelet uses limits to enforce ceilings — a container exceeding its memory limit gets OOM-killed, a container exceeding its CPU limit gets throttled. Quotas cap the total resources a namespace can request, preventing one team from consuming the cluster. LimitRanges set defaults and minimums so individual pods can't be created without sensible resource declarations. Together they form a governance layer; missing any one of them leaves a gap.
+
+## Requests vs Limits
+
+This is the distinction that causes the most confusion and the most incidents. A **request** is what the scheduler reserves — the resources guaranteed to the container, used for placement decisions, and the basis for quota accounting. A **limit** is the ceiling the kubelet enforces at runtime. They're independent: a container can request 100m CPU and have a limit of 500m (it's guaranteed 100m, may burst to 500m, gets throttled above that), or it can have request equal to limit (it's guaranteed exactly that amount, no bursting).
+
+```yaml
+resources:
+  requests:
+    cpu: 250m      # guaranteed 0.25 core for scheduling
+    memory: 512Mi  # guaranteed 512Mi, reserved on the node
+  limits:
+    cpu: 1000m     # may burst to 1 core, throttled above
+    memory: 1Gi    # OOM-killed above 1Gi
+```
+
+The CPU vs memory semantics differ in ways that matter. CPU is compressible — when you exceed the limit, you're throttled (your process runs slower but keeps running). Memory is incompressible — when you exceed the limit, you're killed (OOMKilled, a hard restart). This asymmetry means mis-set memory limits cause restarts while mis-set CPU limits cause latency, and they need different tuning instincts. A memory limit set too low causes predictable OOMKill loops; a CPU limit set too low causes mysterious latency spikes under load that don't show up as errors.
+
+The Quality of Service (QoS) classes tie this together. A pod with requests equal to limits for all containers is **Guaranteed** — last to be evicted under node pressure. A pod with requests and limits set but not equal is **Burstable** — evicted before Guaranteed under pressure. A pod with no requests or limits is **BestEffort** — first to be evicted.
+
+For anything that matters, you want Guaranteed, which means setting requests equal to limits. The Burstable pattern (low request, high limit) is a common mistake: it lets the scheduler overcommit the node (because it places based on the low request), then the pods burst and the node runs out of memory, and the kubelet evicts BestEffort and Burstable pods to recover. Setting request equal to limit prevents this by making the scheduler's placement honest.
+
+## Quotas and LimitRanges
+
+ResourceQuota caps a namespace. It limits the total CPU, memory, object counts (pods, services, PVCs), and storage a namespace can consume. The point is blast-radius control: one namespace (one team, one environment) can't consume the whole cluster, so a runaway deployment in `team-a` doesn't starve `team-b`.
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-a-quota
+  namespace: team-a
+spec:
+  hard:
+    requests.cpu: "10"
+    requests.memory: 20Gi
+    limits.cpu: "20"
+    limits.memory: 40Gi
+    pods: "50"
+```
+
+LimitRanges complement quotas by governing individual pods. They set default requests/limits (so pods created without resource declarations get sensible values instead of BestEffort), minimums (so no one creates a pod requesting 1m CPU that can't actually run), and maximums (so no one creates a single pod that would blow the namespace quota). Without a LimitRange, a namespace with a quota forces every pod to declare resources (because the quota can't account for pods without requests) — which is either a feature (it enforces discipline) or an annoyance (it breaks deployments that don't set resources), depending on your perspective.
+
+## Operational Pitfalls
+
+The over-commit ratio is the silent killer. When the sum of requests across all pods on a node exceeds the node's capacity, the scheduler stops placing — that's correct. But when the sum of *limits* exceeds capacity, pods can still be placed, and at runtime they can collectively demand more than the node has. CPU over-commit is usually fine (throttling is graceful); memory over-commit leads to OOMKill, and the kernel's choice of victim is often not the one you'd choose. Monitor the ratio of requests to capacity (should be < 1) and limits to capacity (can exceed 1 for CPU, should be ~1 for memory), and alert when memory limits exceed node capacity.
+
+OOMKill diagnosis is a recurring [debugging task](/blog/debugging-oom-pytorch). A pod restarting with `Reason: OOMKilled` means it exceeded its memory limit — the fix is usually either raising the limit (if the workload genuinely needs more) or fixing a leak (if it doesn't). A pod restarting with `Reason: Evicted` means the *node* came under memory pressure and the kubelet evicted it — the fix is node-level (over-commit, or a noisy neighbor), not pod-level. Distinguishing these is the first diagnostic step, and it comes from `kubectl describe pod` and the node's conditions, not from the pod's logs.
+
+Quota-induced scheduling failures show up as pods stuck in `Pending` with the message `Insufficient cpu` or `exceeded quota`. The first means the cluster is full (add capacity or reduce requests); the second means the namespace hit its quota (raise the quota or free up resources in the namespace). They look similar from outside but have opposite fixes, so reading the actual failure message matters — guessing leads to adding capacity when the real problem is a quota ceiling, which solves nothing.
+
+The honest framing: resource governance is unglamorous and it's the single highest-leverage thing you can do for cluster stability. A cluster with honest requests, limits set to match, quotas per namespace, and LimitRanges for defaults will run reliably at high utilization; a cluster without these will run unreliably at low utilization and you'll add nodes to compensate. Pair this with [cost optimization](/blog/kubernetes-cost-optimization-finops) practices and [autoscaling](/blog/kubernetes-autcaling-hpa-keda) tuned to real requests, and the cluster becomes predictable rather than a source of 3am pages.
+
+

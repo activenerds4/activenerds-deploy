@@ -1,0 +1,153 @@
+---
+title: "CI/CD Supply Chain Security Audit Checklist"
+description: "Audit a CI/CD pipeline for supply-chain attacks — OIDC keyless auth, Cosign signing, SLSA Level 3 provenance, SBOM generation, and pinned action SHAs."
+category: devsecops
+slug: ci-cd-supply-chain-security-checklist
+lastUpdated: "2026-08-28"
+tags: ["devsecops", "ci-cd", "supply-chain", "security"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# CI/CD Supply Chain Security Audit Checklist
+
+**Your build pipeline is now part of your attack surface. Treat it that way.**
+
+Solarwinds, Codecov, npm package hijacks — the supply chain is where modern attackers aim because a single compromised build compromises every downstream deployment. This checklist covers the controls that make a pipeline trustworthy: keyless auth, signed artifacts, provenance, SBOMs, and pinned dependencies.
+
+---
+
+## Table of Contents
+
+1. [Pipeline Identity & Secrets](#1-pipeline-identity--secrets)
+2. [Dependency & Action Pinning](#2-dependency--action-pinning)
+3. [Artifact Signing & Provenance](#3-artifact-signing--provenance)
+4. [SBOM & Vulnerability Scanning](#4-sbom--vulnerability-scanning)
+5. [Build Provenance & SLSA](#5-build-provenance--slsa)
+6. [Admission & Deployment Gates](#6-admission--deployment-gates)
+
+---
+
+## 1. Pipeline Identity & Secrets
+
+<ChecklistBox
+  title="Pipeline Identity & Secrets"
+  items={[
+    "OIDC keyless auth to cloud providers (no long-lived static cloud keys in CI)",
+    "OIDC trust policy scoped to the specific repo + branch + workflow, not wildcard",
+    "No secrets in plaintext env vars or committed files (use the secret store / OIDC)",
+    "Secrets scoped to least privilege (a deploy token can deploy, not admin the account)",
+    "Fork-PR pipelines cannot access secrets (pull_request_target pitfalls avoided)",
+    "Runner tokens / self-hosted runner registration rotated periodically",
+    "Pipeline service accounts reviewed and stale ones removed",
+  ]}
+/>
+
+<Callout variant="warning" title="Kill the long-lived key">
+  A static AWS/GCP key in your CI secrets is a standing target. OIDC lets the pipeline assume a role with a short-lived token, scoped to exactly the repo and workflow that needs it. If the token leaks, it's useless in minutes. If a static key leaks, it's useful until someone notices.
+</Callout>
+
+---
+
+## 2. Dependency & Action Pinning
+
+<ChecklistBox
+  title="Dependency & Action Pinning"
+  items={[
+    "Third-party GitHub Actions pinned to a full commit SHA, not a tag or @v1",
+    "Action versions reviewed on update (dependabot/renovate with SHA verification)",
+    "Container base images pinned to a digest, not a floating tag like :latest",
+    "Package dependencies (npm, pip, go) lockfile committed and verified on build",
+    "No `curl | bash` from the internet in pipeline scripts (download, verify, then run)",
+    "Private package registries used for internal packages with authentication",
+    "Dependency update PRs require review and pass the full pipeline before merge",
+  ]}
+/>
+
+---
+
+## 3. Artifact Signing & Provenance
+
+<ChecklistBox
+  title="Artifact Signing & Provenance"
+  items={[
+    "Container images signed with Cosign (Sigstore) in the build pipeline",
+    "Signing key is keyless (OIDC-backed Fulcio) or from a managed KMS/HSM",
+    "Signature stored alongside the image in the registry (or a transparency log)",
+    "Image signature verified at deploy time by an admission controller",
+    "Build artifacts (binaries, packages) signed, not just container images",
+    "Signing happens in the pipeline, never as a manual post-build step",
+    "Signature verification tested: an unsigned image is rejected at deploy",
+  ]}
+/>
+
+---
+
+## 4. SBOM & Vulnerability Scanning
+
+<ChecklistBox
+  title="SBOM & Vulnerability Scanning"
+  items={[
+    "SBOM generated for every build (Syft for images, cycloneDX for packages)",
+    "SBOM stored alongside the artifact and referenced in provenance",
+    "Vulnerability scan (Trivy/Grype) runs on every build, not nightly",
+    "Scan gates the pipeline on critical/high CVEs (fail the build, don't just warn)",
+    "Base images scanned, not just the final image (catch upstream CVEs)",
+    "Scan results exported to a central location for trending and audit",
+    "Fix-By-SLA defined for critical/high vulnerabilities (e.g. 7 days / 30 days)",
+  ]}
+/>
+
+---
+
+## 5. Build Provenance & SLSA
+
+<ChecklistBox
+  title="Build Provenance & SLSA"
+  items={[
+    "SLSA provenance attestation generated for every artifact (SLSA Level 3 target)",
+    "Provenance records: source repo, commit SHA, build command, builder identity, materials",
+    "Provenance signed and stored in a transparency log (Rekor)",
+    "Build runs in an isolated, ephemeral environment (no shared mutable build host)",
+    "Build steps are reproducible from the provenance (same inputs → same output)",
+    "Provenance verified at admission: an artifact without valid provenance is rejected",
+    "Builder identity attested so a stolen token can't forge provenance from elsewhere",
+  ]}
+/>
+
+<Callout variant="tip" title="SLSA Level 3 in practice">
+  SLSA L3 means: builds run on an isolated, ephemeral builder; provenance is generated by the build platform (not the build script); provenance is signed and tamper-evident; and the source is verified at the commit. You can't self-attest L3 — the build platform has to attest it. Use a managed builder (GitHub Actions, Cloud Build) that emits provenance for you.
+</Callout>
+
+---
+
+## 6. Admission & Deployment Gates
+
+<ChecklistBox
+  title="Admission & Deployment Gates"
+  items={[
+    "Admission controller (e.g. Cosign + policy engine) verifies image signatures before deploy",
+    "Admission verifies provenance attestation, not just the signature",
+    "Admission policy rejects unsigned or unprovenanced images in production namespaces",
+    "Deploy only from the approved registry — no direct docker.io pulls in prod",
+    "Policy-as-code (OPA/Kyverno) enforces the supply-chain rules at admission",
+    "Policy exceptions audited and time-boxed (no permanent allow-lists)",
+    "Failed admission events alerted so a bypass attempt is visible",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Audit Sign-off"
+  items={[
+    "Unsigned image deploy attempt rejected by admission (tested in staging)",
+    "SBOM + provenance present and verifiable for the latest production artifact",
+    "OIDC trust policy reviewed and scoped (no wildcards)",
+    "Dependency pinning audit: zero unpinned actions or floating base image tags",
+  ]}
+/>

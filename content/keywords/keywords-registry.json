@@ -1,0 +1,1446 @@
+{
+  "lastUpdated": "2026-08-25T00:00:00.000Z",
+  "totalTerms": 195,
+  "terms": {
+    "how to optimize pytorch training speed": {
+      "batch": "keywords-batch-01",
+      "id": "kw-001",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "optimize-pytorch-training-speed",
+      "publishedPost": "content/posts/optimize-pytorch-training-speed.mdx"
+    },
+    "debugging OOM errors in pytorch": {
+      "batch": "keywords-batch-01",
+      "id": "kw-002",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "debugging-oom-pytorch",
+      "publishedPost": "content/posts/debugging-oom-pytorch.mdx"
+    },
+    "LLM inference optimization techniques": {
+      "batch": "keywords-batch-01",
+      "id": "kw-003",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "llm-inference-optimization",
+      "publishedPost": "content/posts/llm-inference-optimization.mdx"
+    },
+    "fine-tuning large language models guide": {
+      "batch": "keywords-batch-01",
+      "id": "kw-004",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "fine-tuning-llms-guide",
+      "publishedPost": "content/posts/fine-tuning-llms-guide.mdx"
+    },
+    "MLOps pipeline best practices": {
+      "batch": "keywords-batch-01",
+      "id": "kw-005",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "mlops-pipeline-best-practices",
+      "publishedPost": "content/posts/mlops-pipeline-best-practices.mdx"
+    },
+    "model versioning and registry comparison": {
+      "batch": "keywords-batch-01",
+      "id": "kw-006",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "model-versioning-registry-comparison",
+      "publishedPost": null
+    },
+    "GPU vs TPU for model training": {
+      "batch": "keywords-batch-01",
+      "id": "kw-007",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "gpu-vs-tpu-model-training",
+      "publishedPost": null
+    },
+    "ML training cost calculator template": {
+      "batch": "keywords-batch-01",
+      "id": "kw-008",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "ml-training-cost-calculator",
+      "publishedPost": null
+    },
+    "kubernetes pod CrashLoopBackOff troubleshooting": {
+      "batch": "keywords-batch-01",
+      "id": "kw-009",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "k8s-crashloopbackoff-troubleshooting",
+      "publishedPost": "content/posts/k8s-crashloopbackoff-troubleshooting.mdx"
+    },
+    "deploying secure kubernetes cluster cilium": {
+      "batch": "keywords-batch-01",
+      "id": "kw-010",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "deploy-secure-k8s-cilium",
+      "publishedPost": "content/posts/deploy-secure-k8s-cilium.mdx"
+    },
+    "kubernetes operators explained simply": {
+      "batch": "keywords-batch-01",
+      "id": "kw-011",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "k8s-operators-explained",
+      "publishedPost": "content/posts/k8s-operators-explained.mdx"
+    },
+    "service mesh comparison istio linkerd": {
+      "batch": "keywords-batch-01",
+      "id": "kw-012",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "service-mesh-istio-linkerd",
+      "publishedPost": null
+    },
+    "kubectl commands cheat sheet template": {
+      "batch": "keywords-batch-01",
+      "id": "kw-013",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "docker multi-stage builds best practices": {
+      "batch": "keywords-batch-01",
+      "id": "kw-014",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "docker-multistage-builds-best-practices",
+      "publishedPost": null
+    },
+    "container image security scanning tools": {
+      "batch": "keywords-batch-01",
+      "id": "kw-015",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "container-image-security-scanning",
+      "publishedPost": null
+    },
+    "desk stretches during long coding sessions": {
+      "batch": "keywords-batch-01",
+      "id": "kw-016",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "desk-stretches-coding-sessions",
+      "publishedPost": "content/posts/desk-stretches-coding-sessions.mdx"
+    },
+    "micro-exercise routines for developers": {
+      "batch": "keywords-batch-01",
+      "id": "kw-017",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "micro-exercise-routines-developers",
+      "publishedPost": null
+    },
+    "ergonomic desk setup for programmers": {
+      "batch": "keywords-batch-01",
+      "id": "kw-018",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "ergonomic-desk-setup-programmers",
+      "publishedPost": "content/posts/ergonomic-desk-setup-programmers.mdx"
+    },
+    "habit building for irregular work schedules": {
+      "batch": "keywords-batch-01",
+      "id": "kw-019",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "habit-building-irregular-schedules",
+      "publishedPost": "content/posts/habit-building-irregular-schedules.mdx"
+    },
+    "standing desk benefits and drawbacks": {
+      "batch": "keywords-batch-01",
+      "id": "kw-020",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "standing-desk-benefits-drawbacks",
+      "publishedPost": null
+    },
+    "desk stretch timer app comparison": {
+      "batch": "keywords-batch-01",
+      "id": "kw-021",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "desk-stretch-timer-app-comparison",
+      "publishedPost": null
+    },
+    "movement snack checklist for desk workers": {
+      "batch": "keywords-batch-01",
+      "id": "kw-022",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "movement-snack-checklist-desk-workers",
+      "publishedPost": null
+    },
+    "cloud-native security best practices guide": {
+      "batch": "keywords-batch-01",
+      "id": "kw-023",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "cloud-native-security-best-practices",
+      "publishedPost": "content/posts/cloud-native-security-best-practices.mdx"
+    },
+    "supply chain security for kubernetes": {
+      "batch": "keywords-batch-01",
+      "id": "kw-024",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "supply-chain-security-k8s",
+      "publishedPost": "content/posts/supply-chain-security-k8s.mdx"
+    },
+    "policy as code tools comparison opa kyverno": {
+      "batch": "keywords-batch-01",
+      "id": "kw-025",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "policy-as-code-opa-kyverno",
+      "publishedPost": "content/posts/policy-as-code-opa-kyverno.mdx"
+    },
+    "threat modeling for cloud workloads": {
+      "batch": "keywords-batch-01",
+      "id": "kw-026",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "threat-modeling-cloud-workloads",
+      "publishedPost": null
+    },
+    "devsecops hardening checklist template": {
+      "batch": "keywords-batch-01",
+      "id": "kw-027",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "devsecops-hardening-checklist",
+      "publishedPost": null
+    },
+    "compliance automation for kubernetes": {
+      "batch": "keywords-batch-01",
+      "id": "kw-028",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "compliance-automation-kubernetes",
+      "publishedPost": null
+    },
+    "best standing desks for developers 2026": {
+      "batch": "keywords-batch-01",
+      "id": "kw-029",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "best-standing-desks-developers",
+      "publishedPost": "content/posts/best-standing-desks-developers.mdx"
+    },
+    "under-desk treadmill review for office": {
+      "batch": "keywords-batch-01",
+      "id": "kw-030",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "under-desk-treadmill-review",
+      "publishedPost": "content/posts/under-desk-treadmill-review.mdx"
+    },
+    "fitness tracker comparison for desk workers": {
+      "batch": "keywords-batch-01",
+      "id": "kw-031",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "fitness-tracker-comparison-desk-workers",
+      "publishedPost": null
+    },
+    "ergonomic keyboard and mouse reviews": {
+      "batch": "keywords-batch-01",
+      "id": "kw-032",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "ergonomic-keyboard-mouse-reviews",
+      "publishedPost": null
+    },
+    "best ergonomic gear for programmers": {
+      "batch": "keywords-batch-01",
+      "id": "kw-033",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "best-ergonomic-gear-programmers",
+      "publishedPost": null
+    },
+    "kubecon conference attendance guide": {
+      "batch": "keywords-batch-01",
+      "id": "kw-034",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "kubecon-attendance-guide",
+      "publishedPost": "content/posts/kubecon-attendance-guide.mdx"
+    },
+    "tech hackathons 2026 calendar": {
+      "batch": "keywords-batch-01",
+      "id": "kw-035",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "tech-hackathons-2026-calendar",
+      "publishedPost": null
+    },
+    "how to speak at tech conferences": {
+      "batch": "keywords-batch-01",
+      "id": "kw-036",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "speak-at-tech-conferences",
+      "publishedPost": null
+    },
+    "local tech meetups finding guide": {
+      "batch": "keywords-batch-01",
+      "id": "kw-037",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "local-tech-meetups-finding-guide",
+      "publishedPost": null
+    },
+    "CI/CD pipeline optimization for speed": {
+      "batch": "keywords-batch-01",
+      "id": "kw-038",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "cicd-pipeline-optimization",
+      "publishedPost": "content/posts/cicd-pipeline-optimization.mdx"
+    },
+    "infrastructure as code tools comparison": {
+      "batch": "keywords-batch-01",
+      "id": "kw-039",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "observability stack for kubernetes": {
+      "batch": "keywords-batch-01",
+      "id": "kw-040",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "developer environment setup checklist": {
+      "batch": "keywords-batch-01",
+      "id": "kw-041",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "developer-environment-setup-checklist",
+      "publishedPost": null
+    },
+    "deep work techniques for engineers": {
+      "batch": "keywords-batch-01",
+      "id": "kw-042",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "deep-work-techniques-engineers",
+      "publishedPost": "content/posts/deep-work-techniques-engineers.mdx"
+    },
+    "burnout prevention for on-call engineers": {
+      "batch": "keywords-batch-01",
+      "id": "kw-043",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-01.json",
+      "assignedSlug": "burnout-prevention-on-call",
+      "publishedPost": "content/posts/burnout-prevention-on-call.mdx"
+    },
+    "focus management during long training runs": {
+      "batch": "keywords-batch-01",
+      "id": "kw-044",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "focus-management-long-training-runs",
+      "publishedPost": null
+    },
+    "sustainable pacing for on-call rotations": {
+      "batch": "keywords-batch-01",
+      "id": "kw-045",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "sustainable-pacing-oncall-rotations",
+      "publishedPost": null
+    },
+    "pomodoro for deep work engineering": {
+      "batch": "keywords-batch-01",
+      "id": "kw-046",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "pomodoro-deep-work-engineering",
+      "publishedPost": null
+    },
+    "AI ML news roundup weekly": {
+      "batch": "keywords-batch-01",
+      "id": "kw-047",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "ai-ml-news-roundup-weekly",
+      "publishedPost": null
+    },
+    "kubernetes security news monthly": {
+      "batch": "keywords-batch-01",
+      "id": "kw-048",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "kubernetes-security-news-monthly",
+      "publishedPost": null
+    },
+    "devops tools benchmark comparison": {
+      "batch": "keywords-batch-01",
+      "id": "kw-049",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "devops-tools-benchmark-comparison",
+      "publishedPost": null
+    },
+    "ML model deployment workflow template": {
+      "batch": "keywords-batch-01",
+      "id": "kw-050",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "ml-model-deployment-workflow",
+      "publishedPost": null
+    },
+    "distributed training with torchrun and DDP": {
+      "batch": "keywords-batch-02",
+      "id": "kw-051",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "distributed-training-torchrun-ddp",
+      "publishedPost": null
+    },
+    "tensorrt inference acceleration guide": {
+      "batch": "keywords-batch-02",
+      "id": "kw-052",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "tensorrt-inference-acceleration",
+      "publishedPost": null
+    },
+    "rag pipeline architecture best practices": {
+      "batch": "keywords-batch-02",
+      "id": "kw-053",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "rag-pipeline-architecture",
+      "publishedPost": null
+    },
+    "model quantization techniques comparison": {
+      "batch": "keywords-batch-02",
+      "id": "kw-054",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "model-quantization-techniques",
+      "publishedPost": null
+    },
+    "pytorch lightning vs vanilla pytorch": {
+      "batch": "keywords-batch-02",
+      "id": "kw-055",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "pytorch-lightning-vs-vanilla-pytorch",
+      "publishedPost": null
+    },
+    "experiment tracking tools mlflow vs wandb": {
+      "batch": "keywords-batch-02",
+      "id": "kw-056",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "experiment-tracking-mlflow-vs-wandb",
+      "publishedPost": null
+    },
+    "kubernetes autoscaling HPA and KEDA": {
+      "batch": "keywords-batch-02",
+      "id": "kw-057",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "kubernetes-autcaling-hpa-keda",
+      "publishedPost": null
+    },
+    "kubernetes network policies tutorial": {
+      "batch": "keywords-batch-02",
+      "id": "kw-058",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "kubernetes-network-policies-tutorial",
+      "publishedPost": null
+    },
+    "helm charts best practices guide": {
+      "batch": "keywords-batch-02",
+      "id": "kw-059",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "helm-charts-best-practices",
+      "publishedPost": null
+    },
+    "kubernetes debugging with k9s and kubectl": {
+      "batch": "keywords-batch-02",
+      "id": "kw-060",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "kubernetes-debugging-k9s-kubectl",
+      "publishedPost": null
+    },
+    "docker container optimization for production": {
+      "batch": "keywords-batch-02",
+      "id": "kw-061",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "container runtime comparison docker containerd": {
+      "batch": "keywords-batch-02",
+      "id": "kw-062",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "ergonomic chair buying guide for programmers": {
+      "batch": "keywords-batch-02",
+      "id": "kw-063",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "ergonomic-chair-buying-guide-programmers",
+      "publishedPost": null
+    },
+    "eye strain reduction for screen workers": {
+      "batch": "keywords-batch-02",
+      "id": "kw-064",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "eye-strain-reduction-screen-workers",
+      "publishedPost": null
+    },
+    "walking meeting guide for remote teams": {
+      "batch": "keywords-batch-02",
+      "id": "kw-065",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "walking-meetings-remote-teams",
+      "publishedPost": null
+    },
+    "desk workout equipment essentials": {
+      "batch": "keywords-batch-02",
+      "id": "kw-066",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "desk-workout-equipment-essentials",
+      "publishedPost": null
+    },
+    "kubernetes RBAC configuration guide": {
+      "batch": "keywords-batch-02",
+      "id": "kw-067",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "kubernetes-rbac-configuration",
+      "publishedPost": null
+    },
+    "secrets management in kubernetes vault": {
+      "batch": "keywords-batch-02",
+      "id": "kw-068",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "secrets-management-kubernetes-vault",
+      "publishedPost": null
+    },
+    "runtime security falco vs tetragon": {
+      "batch": "keywords-batch-02",
+      "id": "kw-069",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "runtime-security-falco-tetragon",
+      "publishedPost": null
+    },
+    "kubernetes penetration testing guide": {
+      "batch": "keywords-batch-02",
+      "id": "kw-070",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "kubernetes-penetration-testing",
+      "publishedPost": null
+    },
+    "fitness tracker for standing desk users": {
+      "batch": "keywords-batch-02",
+      "id": "kw-071",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "fitness-tracker-standing-desk-users",
+      "publishedPost": null
+    },
+    "ergonomic mouse for wrist pain relief": {
+      "batch": "keywords-batch-02",
+      "id": "kw-072",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "ergonomic-mouse-wrist-pain-relief",
+      "publishedPost": null
+    },
+    "monitor arm mount review for standing desk": {
+      "batch": "keywords-batch-02",
+      "id": "kw-073",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "monitor-arm-mount-standing-desk",
+      "publishedPost": null
+    },
+    "blue light glasses effectiveness review": {
+      "batch": "keywords-batch-02",
+      "id": "kw-074",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "blue-light-glasses-effectiveness",
+      "publishedPost": null
+    },
+    "hackathon preparation guide for developers": {
+      "batch": "keywords-batch-02",
+      "id": "kw-075",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "hackathon-preparation-developers",
+      "publishedPost": null
+    },
+    "tech conference networking strategies": {
+      "batch": "keywords-batch-02",
+      "id": "kw-076",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "tech-conference-networking-strategies",
+      "publishedPost": null
+    },
+    "virtual tech events and online meetups": {
+      "batch": "keywords-batch-02",
+      "id": "kw-077",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "virtual-tech-events-online-meetups",
+      "publishedPost": null
+    },
+    "terraform vs pulumi for infrastructure": {
+      "batch": "keywords-batch-02",
+      "id": "kw-078",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "infrastructure-as-code-terraform-pulumi",
+      "publishedPost": null
+    },
+    "kubernetes observability with prometheus grafana": {
+      "batch": "keywords-batch-02",
+      "id": "kw-079",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "kubernetes-observability-prometheus-grafana",
+      "publishedPost": null
+    },
+    "devcontainer setup for consistent environments": {
+      "batch": "keywords-batch-02",
+      "id": "kw-080",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "devcontainer-setup-consistent-environments",
+      "publishedPost": null
+    },
+    "time blocking for software engineers": {
+      "batch": "keywords-batch-02",
+      "id": "kw-081",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "time-blocking-software-engineers",
+      "publishedPost": null
+    },
+    "managing context switching in engineering": {
+      "batch": "keywords-batch-02",
+      "id": "kw-082",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "managing-context-switching-engineering",
+      "publishedPost": null
+    },
+    "standing desk converter comparison review": {
+      "batch": "keywords-batch-02",
+      "id": "kw-083",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "standing-desk-converter-comparison",
+      "publishedPost": null
+    },
+    "micro break routines for coding focus": {
+      "batch": "keywords-batch-02",
+      "id": "kw-084",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "micro-break-routines-coding-focus",
+      "publishedPost": null
+    },
+    "resistance band desk exercises guide": {
+      "batch": "keywords-batch-02",
+      "id": "kw-085",
+      "status": "assigned",
+      "assignedSpec": "content-spec-batch-02.json",
+      "assignedSlug": "resistance-band-desk-exercises",
+      "publishedPost": null
+    },
+    "LoRA fine-tuning techniques for LLMs": {
+      "batch": "keywords-batch-03",
+      "id": "kw-086",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "lora-fine-tuning-llms",
+      "publishedPost": "content/posts/lora-fine-tuning-llms.mdx"
+    },
+    "vector database comparison pinecone weaviate": {
+      "batch": "keywords-batch-03",
+      "id": "kw-087",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "vector-database-comparison",
+      "publishedPost": "content/posts/vector-database-comparison.mdx"
+    },
+    "feature store for machine learning": {
+      "batch": "keywords-batch-03",
+      "id": "kw-088",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "feature-store-machine-learning",
+      "publishedPost": "content/posts/feature-store-machine-learning.mdx"
+    },
+    "data preprocessing pipeline best practices": {
+      "batch": "keywords-batch-03",
+      "id": "kw-089",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "data-preprocessing-pipeline-best-practices",
+      "publishedPost": "content/posts/data-preprocessing-pipeline-best-practices.mdx"
+    },
+    "hyperparameter tuning strategies": {
+      "batch": "keywords-batch-03",
+      "id": "kw-090",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "hyperparameter-tuning-strategies",
+      "publishedPost": "content/posts/hyperparameter-tuning-strategies.mdx"
+    },
+    "diffusion model optimization techniques": {
+      "batch": "keywords-batch-03",
+      "id": "kw-091",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "diffusion-model-optimization-techniques",
+      "publishedPost": "content/posts/diffusion-model-optimization-techniques.mdx"
+    },
+    "transformer architecture explained": {
+      "batch": "keywords-batch-03",
+      "id": "kw-092",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "transformer-architecture-explained",
+      "publishedPost": "content/posts/transformer-architecture-explained.mdx"
+    },
+    "ML data labeling tools comparison": {
+      "batch": "keywords-batch-03",
+      "id": "kw-093",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "kubernetes cluster backup disaster recovery": {
+      "batch": "keywords-batch-03",
+      "id": "kw-094",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "kubernetes-cluster-backup-disaster-recovery",
+      "publishedPost": "content/posts/kubernetes-cluster-backup-disaster-recovery.mdx"
+    },
+    "kubernetes cost optimization finops": {
+      "batch": "keywords-batch-03",
+      "id": "kw-095",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "kubernetes-cost-optimization-finops",
+      "publishedPost": "content/posts/kubernetes-cost-optimization-finops.mdx"
+    },
+    "distroless container images security": {
+      "batch": "keywords-batch-03",
+      "id": "kw-096",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "distroless-container-images-security",
+      "publishedPost": "content/posts/distroless-container-images-security.mdx"
+    },
+    "kubernetes multi-cluster management": {
+      "batch": "keywords-batch-03",
+      "id": "kw-097",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "kubernetes-multi-cluster-management",
+      "publishedPost": "content/posts/kubernetes-multi-cluster-management.mdx"
+    },
+    "kubernetes pod security standards": {
+      "batch": "keywords-batch-03",
+      "id": "kw-098",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "kubernetes-pod-security-standards",
+      "publishedPost": "content/posts/kubernetes-pod-security-standards.mdx"
+    },
+    "container image signing cosign": {
+      "batch": "keywords-batch-03",
+      "id": "kw-099",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "container-image-signing-cosign",
+      "publishedPost": "content/posts/container-image-signing-cosign.mdx"
+    },
+    "kubernetes storage comparison": {
+      "batch": "keywords-batch-03",
+      "id": "kw-100",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "kubernetes upgrade strategy guide": {
+      "batch": "keywords-batch-03",
+      "id": "kw-101",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "posture correction exercises for desk workers": {
+      "batch": "keywords-batch-03",
+      "id": "kw-102",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "posture-correction-exercises-desk-workers",
+      "publishedPost": "content/posts/posture-correction-exercises-desk-workers.mdx"
+    },
+    "hydration habits for developers": {
+      "batch": "keywords-batch-03",
+      "id": "kw-103",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "hydration-habits-developers",
+      "publishedPost": "content/posts/hydration-habits-developers.mdx"
+    },
+    "sleep optimization for shift workers": {
+      "batch": "keywords-batch-03",
+      "id": "kw-104",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "sleep-optimization-shift-workers",
+      "publishedPost": "content/posts/sleep-optimization-shift-workers.mdx"
+    },
+    "desk yoga routines for programmers": {
+      "batch": "keywords-batch-03",
+      "id": "kw-105",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "desk-yoga-routines-programmers",
+      "publishedPost": "content/posts/desk-yoga-routines-programmers.mdx"
+    },
+    "stretching for wrist pain relief": {
+      "batch": "keywords-batch-03",
+      "id": "kw-106",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "stretching-wrist-pain-relief",
+      "publishedPost": "content/posts/stretching-wrist-pain-relief.mdx"
+    },
+    "lunch break workouts for developers": {
+      "batch": "keywords-batch-03",
+      "id": "kw-107",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "lunch-break-workouts-developers",
+      "publishedPost": "content/posts/lunch-break-workouts-developers.mdx"
+    },
+    "SBOM generation tools comparison": {
+      "batch": "keywords-batch-03",
+      "id": "kw-108",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "sbom-generation-tools-comparison",
+      "publishedPost": "content/posts/sbom-generation-tools-comparison.mdx"
+    },
+    "kubernetes admission controllers guide": {
+      "batch": "keywords-batch-03",
+      "id": "kw-109",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "kubernetes-admission-controllers-guide",
+      "publishedPost": "content/posts/kubernetes-admission-controllers-guide.mdx"
+    },
+    "cloud security posture management": {
+      "batch": "keywords-batch-03",
+      "id": "kw-110",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "cloud-security-posture-management",
+      "publishedPost": "content/posts/cloud-security-posture-management.mdx"
+    },
+    "secrets scanning in CI pipelines": {
+      "batch": "keywords-batch-03",
+      "id": "kw-111",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "secrets-scanning-ci-pipelines",
+      "publishedPost": "content/posts/secrets-scanning-ci-pipelines.mdx"
+    },
+    "zero trust architecture for kubernetes": {
+      "batch": "keywords-batch-03",
+      "id": "kw-112",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "container runtime security best practices": {
+      "batch": "keywords-batch-03",
+      "id": "kw-113",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "wrist rest for keyboard guide": {
+      "batch": "keywords-batch-03",
+      "id": "kw-114",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "wrist-rest-keyboard-guide",
+      "publishedPost": "content/posts/wrist-rest-keyboard-guide.mdx"
+    },
+    "mechanical keyboard for programmers": {
+      "batch": "keywords-batch-03",
+      "id": "kw-115",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "mechanical-keyboard-for-programmers",
+      "publishedPost": "content/posts/mechanical-keyboard-for-programmers.mdx"
+    },
+    "posture corrector device review": {
+      "batch": "keywords-batch-03",
+      "id": "kw-116",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "posture-corrector-device-review",
+      "publishedPost": "content/posts/posture-corrector-device-review.mdx"
+    },
+    "desk lamp for eye strain": {
+      "batch": "keywords-batch-03",
+      "id": "kw-117",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "organizing a tech meetup guide": {
+      "batch": "keywords-batch-03",
+      "id": "kw-118",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-03.json",
+      "assignedSlug": "organizing-tech-meetup-guide",
+      "publishedPost": "content/posts/organizing-tech-meetup-guide.mdx"
+    },
+    "hackathon judging criteria guide": {
+      "batch": "keywords-batch-03",
+      "id": "kw-119",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "hackathon-judging-criteria-guide",
+      "publishedPost": "content/posts/hackathon-judging-criteria-guide.mdx"
+    },
+    "tech conference sponsorship guide": {
+      "batch": "keywords-batch-03",
+      "id": "kw-120",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "developer community building": {
+      "batch": "keywords-batch-03",
+      "id": "kw-121",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "progressive delivery with argo rollouts": {
+      "batch": "keywords-batch-03",
+      "id": "kw-122",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "progressive-delivery-argo-rollouts",
+      "publishedPost": "content/posts/progressive-delivery-argo-rollouts.mdx"
+    },
+    "database migration strategies": {
+      "batch": "keywords-batch-03",
+      "id": "kw-123",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "API gateway comparison for microservices": {
+      "batch": "keywords-batch-03",
+      "id": "kw-124",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "feature flags implementation guide": {
+      "batch": "keywords-batch-03",
+      "id": "kw-125",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-06.json",
+      "assignedSlug": "feature-flags-implementation-guide",
+      "publishedPost": "content/posts/feature-flags-implementation-guide.mdx"
+    },
+    "attention mechanism explained simply": {
+      "batch": "keywords-batch-04",
+      "id": "kw-126",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "attention-mechanism-explained",
+      "publishedPost": "content/posts/attention-mechanism-explained.mdx"
+    },
+    "gradient clipping deep learning training": {
+      "batch": "keywords-batch-04",
+      "id": "kw-127",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "gradient-clipping-deep-learning",
+      "publishedPost": "content/posts/gradient-clipping-deep-learning.mdx"
+    },
+    "knowledge distillation model compression": {
+      "batch": "keywords-batch-04",
+      "id": "kw-128",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "knowledge-distillation-model-compression",
+      "publishedPost": "content/posts/knowledge-distillation-model-compression.mdx"
+    },
+    "data augmentation techniques pytorch": {
+      "batch": "keywords-batch-05",
+      "id": "kw-166",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "data-augmentation-techniques-pytorch",
+      "publishedPost": "content/posts/data-augmentation-techniques-pytorch.mdx"
+    },
+    "distributed data parallel vs model parallel": {
+      "batch": "keywords-batch-05",
+      "id": "kw-167",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "distributed-data-parallel-vs-model-parallel",
+      "publishedPost": "content/posts/distributed-data-parallel-vs-model-parallel.mdx"
+    },
+    "kubernetes node affinity and taints": {
+      "batch": "keywords-batch-04",
+      "id": "kw-131",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "kubernetes-node-affinity-taints",
+      "publishedPost": "content/posts/kubernetes-node-affinity-taints.mdx"
+    },
+    "kubernetes custom controller development": {
+      "batch": "keywords-batch-05",
+      "id": "kw-168",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "kubernetes-custom-controller-development",
+      "publishedPost": "content/posts/kubernetes-custom-controller-development.mdx"
+    },
+    "containerd vs cri-o runtime comparison": {
+      "batch": "keywords-batch-05",
+      "id": "kw-169",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "containerd-vs-cri-o-runtime-comparison",
+      "publishedPost": "content/posts/containerd-vs-cri-o-runtime-comparison.mdx"
+    },
+    "kubernetes job and cronjob patterns": {
+      "batch": "keywords-batch-04",
+      "id": "kw-134",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "kubernetes-job-cronjob-patterns",
+      "publishedPost": "content/posts/kubernetes-job-cronjob-patterns.mdx"
+    },
+    "kubernetes resource quotas and limits": {
+      "batch": "keywords-batch-05",
+      "id": "kw-170",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "kubernetes-resource-quotas-limits",
+      "publishedPost": "content/posts/kubernetes-resource-quotas-limits.mdx"
+    },
+    "desk stretching routine for neck pain": {
+      "batch": "keywords-batch-04",
+      "id": "kw-136",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "desk-stretching-neck-pain",
+      "publishedPost": "content/posts/desk-stretching-neck-pain.mdx"
+    },
+    "breathing exercises for stress engineers": {
+      "batch": "keywords-batch-04",
+      "id": "kw-137",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "breathing-exercises-stress-engineers",
+      "publishedPost": "content/posts/breathing-exercises-stress-engineers.mdx"
+    },
+    "standing desk transition schedule": {
+      "batch": "keywords-batch-05",
+      "id": "kw-171",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "standing-desk-transition-schedule",
+      "publishedPost": "content/posts/standing-desk-transition-schedule.mdx"
+    },
+    "eye rest 20 20 20 rule": {
+      "batch": "keywords-batch-05",
+      "id": "kw-172",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "eye-rest-20-20-20-rule",
+      "publishedPost": "content/posts/eye-rest-20-20-20-rule.mdx"
+    },
+    "mobility exercises for hip flexors": {
+      "batch": "keywords-batch-05",
+      "id": "kw-173",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "mobility-exercises-hip-flexors",
+      "publishedPost": "content/posts/mobility-exercises-hip-flexors.mdx"
+    },
+    "kubernetes network security policies": {
+      "batch": "keywords-batch-05",
+      "id": "kw-174",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "kubernetes-network-security-policies",
+      "publishedPost": "content/posts/kubernetes-network-security-policies.mdx"
+    },
+    "mTLS implementation microservices": {
+      "batch": "keywords-batch-04",
+      "id": "kw-142",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "mtls-microservices-implementation",
+      "publishedPost": "content/posts/mtls-microservices-implementation.mdx"
+    },
+    "cloud security best practices aws": {
+      "batch": "keywords-batch-05",
+      "id": "kw-175",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "cloud-security-best-practices-aws",
+      "publishedPost": "content/posts/cloud-security-best-practices-aws.mdx"
+    },
+    "vulnerability scanning automation CI": {
+      "batch": "keywords-batch-04",
+      "id": "kw-144",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "vulnerability-scanning-automation-ci",
+      "publishedPost": "content/posts/vulnerability-scanning-automation-ci.mdx"
+    },
+    "identity and access management kubernetes": {
+      "batch": "keywords-batch-04",
+      "id": "kw-145",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "ergonomic footrest desk setup": {
+      "batch": "keywords-batch-05",
+      "id": "kw-176",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "ergonomic-footrest-desk-setup",
+      "publishedPost": "content/posts/ergonomic-footrest-desk-setup.mdx"
+    },
+    "standing desk mat comparison": {
+      "batch": "keywords-batch-04",
+      "id": "kw-147",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "standing-desk-mat-comparison",
+      "publishedPost": "content/posts/standing-desk-mat-comparison.mdx"
+    },
+    "noise cancelling headphones for focus": {
+      "batch": "keywords-batch-04",
+      "id": "kw-148",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "noise-cancelling-headphones-focus",
+      "publishedPost": "content/posts/noise-cancelling-headphones-focus.mdx"
+    },
+    "vertical mouse ergonomic review": {
+      "batch": "keywords-batch-05",
+      "id": "kw-177",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "vertical-mouse-ergonomic-review",
+      "publishedPost": "content/posts/vertical-mouse-ergonomic-review.mdx"
+    },
+    "desk organizer cable management": {
+      "batch": "keywords-batch-04",
+      "id": "kw-150",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "virtual hackathon platform comparison": {
+      "batch": "keywords-batch-04",
+      "id": "kw-151",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "virtual-hackathon-platform-comparison",
+      "publishedPost": "content/posts/virtual-hackathon-platform-comparison.mdx"
+    },
+    "tech meetup speaker preparation": {
+      "batch": "keywords-batch-05",
+      "id": "kw-178",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "tech-meetup-speaker-preparation",
+      "publishedPost": "content/posts/tech-meetup-speaker-preparation.mdx"
+    },
+    "open source contribution guide beginners": {
+      "batch": "keywords-batch-04",
+      "id": "kw-153",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "devrel community metrics": {
+      "batch": "keywords-batch-04",
+      "id": "kw-154",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "hybrid conference format guide": {
+      "batch": "keywords-batch-04",
+      "id": "kw-155",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "gitops workflow argocd flux": {
+      "batch": "keywords-batch-04",
+      "id": "kw-156",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "gitops-argocd-flux-comparison",
+      "publishedPost": "content/posts/gitops-argocd-flux-comparison.mdx"
+    },
+    "canary deployment strategies kubernetes": {
+      "batch": "keywords-batch-05",
+      "id": "kw-179",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "canary-deployment-strategies-kubernetes",
+      "publishedPost": "content/posts/canary-deployment-strategies-kubernetes.mdx"
+    },
+    "ci cd pipeline security best practices": {
+      "batch": "keywords-batch-04",
+      "id": "kw-158",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "infrastructure testing terraform": {
+      "batch": "keywords-batch-04",
+      "id": "kw-159",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "service level objectives slo definition": {
+      "batch": "keywords-batch-04",
+      "id": "kw-160",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "slo-definition-reliability",
+      "publishedPost": "content/posts/slo-definition-reliability.mdx"
+    },
+    "dopamine detox for developers": {
+      "batch": "keywords-batch-04",
+      "id": "kw-161",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-04.json",
+      "assignedSlug": "dopamine-detox-developers",
+      "publishedPost": "content/posts/dopamine-detox-developers.mdx"
+    },
+    "single tasking vs multitasking": {
+      "batch": "keywords-batch-05",
+      "id": "kw-180",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-05.json",
+      "assignedSlug": "single-tasking-vs-multitasking",
+      "publishedPost": "content/posts/single-tasking-vs-multitasking.mdx"
+    },
+    "energy management for engineers": {
+      "batch": "keywords-batch-04",
+      "id": "kw-163",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "morning routine for deep work": {
+      "batch": "keywords-batch-04",
+      "id": "kw-164",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "managing notification overload": {
+      "batch": "keywords-batch-04",
+      "id": "kw-165",
+      "status": "ready",
+      "assignedSpec": null,
+      "assignedSlug": null,
+      "publishedPost": null
+    },
+    "mixed precision training pytorch": {
+      "batch": "keywords-batch-07",
+      "id": "kw-181",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "mixed-precision-training-pytorch",
+      "publishedPost": "content/posts/mixed-precision-training-pytorch.mdx"
+    },
+    "prompt engineering techniques guide": {
+      "batch": "keywords-batch-07",
+      "id": "kw-182",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "prompt-engineering-techniques-guide",
+      "publishedPost": "content/posts/prompt-engineering-techniques-guide.mdx"
+    },
+    "kubernetes statefulset patterns guide": {
+      "batch": "keywords-batch-07",
+      "id": "kw-183",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "kubernetes-statefulset-patterns-guide",
+      "publishedPost": "content/posts/kubernetes-statefulset-patterns-guide.mdx"
+    },
+    "container image registry comparison": {
+      "batch": "keywords-batch-07",
+      "id": "kw-184",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "container-image-registry-comparison",
+      "publishedPost": "content/posts/container-image-registry-comparison.mdx"
+    },
+    "walking pad under desk review": {
+      "batch": "keywords-batch-07",
+      "id": "kw-185",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "walking-pad-under-desk-review",
+      "publishedPost": "content/posts/walking-pad-under-desk-review.mdx"
+    },
+    "desk cycling machine benefits": {
+      "batch": "keywords-batch-07",
+      "id": "kw-186",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "desk-cycling-machine-benefits",
+      "publishedPost": "content/posts/desk-cycling-machine-benefits.mdx"
+    },
+    "kubernetes certificate management cert-manager": {
+      "batch": "keywords-batch-07",
+      "id": "kw-187",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "kubernetes-certificate-management-cert-manager",
+      "publishedPost": "content/posts/kubernetes-certificate-management-cert-manager.mdx"
+    },
+    "owasp top 10 cloud native": {
+      "batch": "keywords-batch-07",
+      "id": "kw-188",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "owasp-top-10-cloud-native",
+      "publishedPost": "content/posts/owasp-top-10-cloud-native.mdx"
+    },
+    "ergonomic monitor stand guide": {
+      "batch": "keywords-batch-07",
+      "id": "kw-189",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "ergonomic-monitor-stand-guide",
+      "publishedPost": "content/posts/ergonomic-monitor-stand-guide.mdx"
+    },
+    "fitness smartwatch for developers": {
+      "batch": "keywords-batch-07",
+      "id": "kw-190",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "fitness-smartwatch-for-developers",
+      "publishedPost": "content/posts/fitness-smartwatch-for-developers.mdx"
+    },
+    "developer conference talk templates": {
+      "batch": "keywords-batch-07",
+      "id": "kw-191",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "developer-conference-talk-templates",
+      "publishedPost": "content/posts/developer-conference-talk-templates.mdx"
+    },
+    "hackathon team formation strategies": {
+      "batch": "keywords-batch-07",
+      "id": "kw-192",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "hackathon-team-formation-strategies",
+      "publishedPost": "content/posts/hackathon-team-formation-strategies.mdx"
+    },
+    "blue green deployment kubernetes": {
+      "batch": "keywords-batch-07",
+      "id": "kw-193",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "blue-green-deployment-kubernetes",
+      "publishedPost": "content/posts/blue-green-deployment-kubernetes.mdx"
+    },
+    "terraform module design patterns": {
+      "batch": "keywords-batch-07",
+      "id": "kw-194",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "terraform-module-design-patterns",
+      "publishedPost": "content/posts/terraform-module-design-patterns.mdx"
+    },
+    "deep work environment setup": {
+      "batch": "keywords-batch-07",
+      "id": "kw-195",
+      "status": "published",
+      "assignedSpec": "content-spec-batch-07.json",
+      "assignedSlug": "deep-work-environment-setup",
+      "publishedPost": "content/posts/deep-work-environment-setup.mdx"
+    }
+  }
+}

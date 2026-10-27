@@ -1,0 +1,126 @@
+---
+title: "DevSecOps Hardening Checklist"
+description: "Step-by-step security checklist for cloud-native workloads — supply chain, pod security, network, secrets, runtime, and compliance."
+category: devsecops
+slug: devsecops-hardening-checklist
+lastUpdated: "2026-08-28"
+tags: ["devsecops", "kubernetes", "security", "supply-chain"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# DevSecOps Hardening Checklist
+
+**Security is continuous — this is the baseline, not the finish line.**
+
+A consolidated hardening checklist for cloud-native workloads. Use it as a quarterly audit baseline; pair it with the focused checklists (CI/CD supply chain, zero-trust build, cluster go-live) when you need depth in one area.
+
+---
+
+## Table of Contents
+
+1. [Supply Chain Security](#1-supply-chain-security)
+2. [Pod Security](#2-pod-security)
+3. [Network Security](#3-network-security)
+4. [Secrets Management](#4-secrets-management)
+5. [Runtime Security](#5-runtime-security)
+6. [Compliance & Audit](#6-compliance--audit)
+
+---
+
+## 1. Supply Chain Security
+
+<ChecklistBox
+  title="Supply Chain Security"
+  items={[
+    "All container images are signed with Cosign",
+    "SBOM generated for every image build",
+    "Images scanned for vulnerabilities in CI (Grype/Trivy)",
+    "Base images pinned to specific digests, not :latest",
+    "Admission controller verifies image signatures before deployment",
+    "Private registry requires authentication",
+  ]}
+/>
+
+---
+
+## 2. Pod Security
+
+<ChecklistBox
+  title="Pod Security"
+  items={[
+    "Pod Security Standards set to restricted for production namespaces",
+    "No containers run in privileged mode",
+    "readOnlyRootFilesystem enabled where possible",
+    "allowPrivilegeEscalation: false in all security contexts",
+    "runAsNonRoot: true enforced",
+    "Resource limits defined for all containers",
+  ]}
+/>
+
+---
+
+## 3. Network Security
+
+<ChecklistBox
+  title="Network Security"
+  items={[
+    "Default-deny network policy applied to all namespaces",
+    "Ingress restricted to required ports and sources only",
+    "Egress restricted to required destinations only",
+    "DNS-aware policies for external service access (Cilium)",
+    "Service mesh mTLS enabled (Istio/Linkerd) for inter-service traffic",
+    "No hostNetwork, hostPID, or hostIPC usage",
+  ]}
+/>
+
+---
+
+## 4. Secrets Management
+
+<ChecklistBox
+  title="Secrets Management"
+  items={[
+    "No secrets stored in Git or container images",
+    "External Secrets Operator syncing from Vault/cloud KMS",
+    "RBAC restricts secret access to required service accounts only",
+    "Secret rotation policy defined and automated",
+    "No secrets logged in plaintext",
+  ]}
+/>
+
+---
+
+## 5. Runtime Security
+
+<ChecklistBox
+  title="Runtime Security"
+  items={[
+    "Falco or Tetragon deployed for runtime detection",
+    "Alerting configured for suspicious syscalls and network connections",
+    "Container drift detection enabled",
+    "Incident response runbook documented",
+    "Regular security scanning of running images for new CVEs",
+  ]}
+/>
+
+---
+
+## 6. Compliance & Audit
+
+<ChecklistBox
+  title="Compliance & Audit"
+  items={[
+    "Audit logging enabled on API server",
+    "RBAC follows least-privilege principle",
+    "Regular access reviews for service accounts",
+    "Compliance reports generated automatically (if applicable)",
+    "Security policies version-controlled and reviewed via PR",
+  ]}
+/>
+
+<Callout variant="warning" title="Review quarterly">
+  This checklist is a starting point, not a guarantee. Security is continuous — review and update this checklist quarterly as new threats and tools emerge.
+</Callout>

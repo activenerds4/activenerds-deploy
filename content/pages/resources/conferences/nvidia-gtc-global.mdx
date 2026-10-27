@@ -1,0 +1,172 @@
+---
+title: "NVIDIA GTC Guide: Passes, Travel, Tracks & ROI"
+description: "NVIDIA's flagship AI infrastructure summit — GPU architecture, CUDA, inference serving, and the hardware roadmap that shapes every ML pipeline. Who should go, what to see, and how to survive a week of dense AI sessions."
+category: "Conferences"
+slug: nvidia-gtc-global
+parentCalendarUrl: "/resources/tech-conference-calendar"
+lastUpdated: "2026-08-28"
+conferenceDetails:
+  name: "NVIDIA GTC (GPU Technology Conference)"
+  organizer: "NVIDIA"
+  typicalDates: "March (San Jose) + virtual year-round"
+  primaryLocation: "San Jose, CA (in-person) + Virtual"
+  format: "Hybrid (in-person + virtual)"
+  estimatedPassCost: "In-person ~$1,000–$1,500; Virtual free–$500; Academic/Nonprofit discounts"
+tags: ["conferences", "ai-ml", "gpu", "inference"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+
+# NVIDIA GTC Guide
+
+**GTC is where the hardware that runs your training jobs gets announced.** If you size GPU clusters, optimize inference, or care about the next generation of CUDA and networking, GTC is the source. It's a vendor conference — NVIDIA runs it — but the technical depth in the developer and research tracks is real, and the keynotes set the roadmap every ML infrastructure team will plan against for the next 18 months.
+
+---
+
+## Table of Contents
+
+1. [Who Should Attend](#1-who-should-attend)
+2. [Pass Tiers & Tracks](#2-pass-tiers--tracks)
+3. [Session Selection Strategy](#3-session-selection-strategy)
+4. [Budget & Discount Hacks](#4-budget--discount-hacks)
+5. [Travel & Accommodation](#5-travel--accommodation)
+6. [Physical Survival & Wellness](#6-physical-survival--wellness)
+7. [Pre-Conference Checklist](#7-pre-conference-checklist)
+
+---
+
+## 1. Who Should Attend
+
+GTC is broad — it spans research, enterprise, robotics, and automotive — but the highest-signal audience is ML infrastructure.
+
+<Callout variant="tip" title="Best fit: ML infrastructure & inference engineers">
+If you provision GPUs, tune CUDA kernels, serve LLMs at scale, or plan cluster capacity around the next architecture launch, GTC is your highest-ROI event. The inference-serving and systems tracks are where NVIDIA's own engineers share the optimization details that never make it into docs.
+</Callout>
+
+- **ML infrastructure & platform engineers** — GPU scheduling, multi-instance GPU, cluster topology, networking (NVLink, InfiniBand).
+- **Inference & serving engineers** — TensorRT, Triton, vLLM, quantization, KV-cache optimization. The serving track is gold.
+- **CUDA/kernel developers** — the developer track goes deep on programming models, libraries, and profiling.
+- **Research scientists** — the research track and poster sessions cover frontier model and systems work.
+
+<Callout variant="info" title="Maybe skip if">
+You're an applied ML practitioner who never touches hardware — GTC is infrastructure-heavy. A domain conference (Databricks, an AI Engineer Summit) will serve you better for applied/pipeline content.
+</Callout>
+
+---
+
+## 2. Pass Tiers & Tracks
+
+GTC is more affordable than the hyperscaler events, and the virtual option is genuinely useful.
+
+<ComparisonTable
+  title="GTC Pass Tiers (typical)"
+  columns={["In-Person", "Virtual", "Academic/Nonprofit"]}
+  rows={[
+    { label: "Keynotes (live)", values: [true, "Livestream", "Livestream"] },
+    { label: "Session tracks (live)", values: [true, "Some livestream", "Some livestream"] },
+    { label: "Hands-on labs & DLI workshops", values: [true, "Some", "Some"] },
+    { label: "Expo hall & demos", values: [true, false, true] },
+    { label: "Networking events", values: [true, false, "Limited"] },
+    { label: "On-demand recordings", values: [true, true, true] },
+    { label: "Typical price (USD)", values: ["$1,000–$1,500", "Free–$500", "Discounted/free"] },
+  ]}
+/>
+
+<Callout variant="warning" title="The DLI workshops are the hidden gem">
+NVIDIA's Deep Learning Institute hands-on labs (CUDA, Triton, TensorRT, multi-GPU training) are included with many passes and taught by NVIDIA engineers. They're the closest thing to a free training certification at any conference. Book them early — they fill.
+</Callout>
+
+---
+
+## 3. Session Selection Strategy
+
+GTC runs many parallel tracks. The key is filtering for the systems/infrastructure signal over the marketing.
+
+- **Filter by track, not by title.** The "Systems & Infrastructure" and "Inference & Serving" tracks are where the technical depth lives; the "Enterprise" track is often customer-story marketing.
+- **Prioritize NVIDIA-engineer sessions.** Talks by the people who built CUDA, Triton, and the networking stack include details that never reach docs.
+- **Watch the keynotes for the roadmap, then skip the rest of the keynote day for labs.** The architecture announcements matter; the partner parade doesn't.
+- **The poster session is underrated.** Research posters are where you find the non-marketed systems work — quantization tricks, scheduling heuristics, memory optimizations.
+
+<Callout variant="tip" title="Bring your real problems">
+NVIDIA engineers staff the expo and the "meet the expert" desks. Bring a concrete bottleneck — a kernel that won't hit roofline, a serving latency budget you're missing — and you'll often get a direct answer or a contact. This is the highest-leverage 15 minutes of the conference.
+</Callout>
+
+---
+
+## 4. Budget & Discount Hacks
+
+GTC is one of the more accessible major events, especially virtually.
+
+<ChecklistBox
+  title="Discount & cost-reduction checklist"
+  items={[
+    "Check the virtual pass — it's often free or cheap and includes most recordings",
+    "Apply for the academic / nonprofit / student discount",
+    "Register early-bird for the in-person pass (saves a few hundred dollars)",
+    "Ask your NVIDIA account team for a comped pass — if you're a real GPU customer, they often have them",
+    "Book DLI workshops in advance — they're included but seats are limited",
+    "San Jose hotels spike during GTC week; book the conference block early",
+  ]}
+/>
+
+---
+
+## 5. Travel & Accommodation
+
+San Jose in March is mild but the logistics are convention-standard.
+
+- **Hotel:** stay near the San Jose McEnery Convention Center; the walk beats the rideshare queue when thousands exit at once.
+- **Flights:** SJC is closest; SFO is a longer transit but often cheaper. Arrive Sunday for Monday keynotes.
+- **Ground transport:** Caltrain and VTA light rail connect SJC/SFO to downtown; skip the rental car.
+- **Food:** downtown San Jose has good options within walking distance; scout them Sunday.
+
+---
+
+## 6. Physical Survival & Wellness
+
+GTC is a week of dense, high-cognitive-load content — treat it like a long training run for your brain.
+
+<Callout variant="warning" title="Cognitive overload is the real risk">
+GTC sessions are information-dense and the keynotes run long. By Wednesday afternoon, retention collapses if you haven't paced yourself. Schedule breaks the way you'd schedule rest between training epochs.
+</Callout>
+
+<ChecklistBox
+  title="Conference-week wellness protocol"
+  items={[
+    "Wear supportive shoes — the San Jose convention center floors are concrete",
+    "Alternate sit/stand across sessions; stand at the back for 2 per day",
+    "20-20-20 eye reset between sessions — screen-heavy demos strain focus",
+    "Hydrate 1:1 with the espresso bar; dry convention air compounds cognitive fatigue",
+    "Take a 10-minute outdoor walk at lunch — March in San Jose is pleasant, use it",
+    "Cap evening events at 2 nights; the DLI workshops are morning-fresh",
+    "Pack a resistance band for thoracic mobility in your room",
+    "Treat keynotes like a long training run — hydrate, eat, don't skip sleep the night before",
+  ]}
+/>
+
+<Callout variant="tip" title="Use the Training Run Cost Estimator">
+Before you go, run your real model through our [Training Run Cost Estimator](/tools/training-run-cost-estimator) and [LLM VRAM & Hardware Sizer](/tools/llm-vram-hardware-sizer). You'll arrive at GTC knowing exactly what you need from the next architecture — and the NVIDIA engineers will give you better answers when your questions are specific.
+</Callout>
+
+---
+
+## 7. Pre-Conference Checklist
+
+<ChecklistBox
+  title="Two weeks out"
+  items={[
+    "Register and book DLI workshops (they fill)",
+    "Install the GTC app; star sessions in the Systems/Inference tracks",
+    "List 2–3 concrete bottlenecks to bring to the 'meet the expert' desks",
+    "Book hotel in the conference block; confirm cancellation policy",
+    "Pack a power bank — expo-hall demos drain your phone",
+    "Pack supportive shoes, a resistance band, and blue-light glasses",
+  ]}
+/>
+
+---
+
+See the full [Tech Conference Calendar](/resources/tech-conference-calendar) for dates, or read our [LLM inference optimization](/blog/llm-inference-optimization) and [GPU vs TPU model training](/blog/gpu-vs-tpu-model-training) articles to prep your questions.

@@ -1,0 +1,1394 @@
+# ActiveNerds — Full Content Index
+
+> ActiveNerds is the go-to destination for AI/ML, Kubernetes, and DevSecOps professionals — sharp technical coverage woven with genuinely useful, non-preachy fitness and wellness content for desk-bound tech pros.
+> Generated: 2026-10-27T19:41:01.027Z
+> Articles: 169
+
+## Categories
+
+- Focus & Productivity: https://www.activenerds.com/category/focus-productivity
+- Platform Engineering & DevOps: https://www.activenerds.com/category/platform-engineering-devops
+- Events & Community: https://www.activenerds.com/category/events-community
+- AI & Machine Learning: https://www.activenerds.com/category/ai-machine-learning
+- Gear & Gadgets: https://www.activenerds.com/category/gear-gadgets
+- DevSecOps & Security: https://www.activenerds.com/category/devsecops-security
+- Fitness & Wellness for Tech: https://www.activenerds.com/category/fitness-wellness-tech
+- Containers & Kubernetes: https://www.activenerds.com/category/containers-kubernetes
+
+## Tags
+
+- Kubernetes: https://www.activenerds.com/tag/kubernetes
+- Habit Building: https://www.activenerds.com/tag/habit-building
+- Devsecops: https://www.activenerds.com/tag/devsecops
+- Ergonomics: https://www.activenerds.com/tag/ergonomics
+- Mlops: https://www.activenerds.com/tag/mlops
+- Affiliate: https://www.activenerds.com/tag/affiliate
+- Deep Work: https://www.activenerds.com/tag/deep-work
+- Pytorch: https://www.activenerds.com/tag/pytorch
+- Desk Stretches: https://www.activenerds.com/tag/desk-stretches
+- Docker: https://www.activenerds.com/tag/docker
+- Conferences: https://www.activenerds.com/tag/conferences
+- Llms: https://www.activenerds.com/tag/llms
+- Standing Desk: https://www.activenerds.com/tag/standing-desk
+- Fitness Trackers: https://www.activenerds.com/tag/fitness-trackers
+
+## Authors
+
+- ActiveNerds Team: https://www.activenerds.com/author/activenerds-team
+- Marcus Webb: https://www.activenerds.com/author/marcus-webb
+- Maya Chen: https://www.activenerds.com/author/maya-chen
+- Priya Sharma: https://www.activenerds.com/author/priya-sharma
+
+## Articles
+
+### Deep Work Environment Setup
+- URL: https://www.activenerds.com/blog/deep-work-environment-setup
+- Date: 2026-08-13
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: Set up an environment for deep work — noise, lighting, notification isolation, and the physical cues that signal focus time.
+
+### Terraform Module Design Patterns
+- URL: https://www.activenerds.com/blog/terraform-module-design-patterns
+- Date: 2026-08-10
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes
+- Description: Design reusable Terraform modules — composition, versioning, variables vs locals, and avoiding the module that wraps one resource.
+
+### Blue-Green Deployment on Kubernetes
+- URL: https://www.activenerds.com/blog/blue-green-deployment-kubernetes
+- Date: 2026-08-07
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes
+- Description: Implement blue-green deployments on Kubernetes — instant cutover, two environments, traffic switching, and when it beats canary.
+
+### Hackathon Team Formation Strategies
+- URL: https://www.activenerds.com/blog/hackathon-team-formation-strategies
+- Date: 2026-08-04
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: Form a winning hackathon team — skill balance, team size, idea alignment, and avoiding the team that implodes by hour six.
+
+### Production RAG Patterns at Scale: Keynotes from Ai4 2026
+- URL: https://www.activenerds.com/blog/production-rag-patterns-at-scale
+- Date: 2026-08-04
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Mlops
+- Description: Three production Retrieval-Augmented Generation (RAG) architectures from the Ai4 keynote — hybrid sparse/dense retrieval, cross-encoder reranking, and automated LLM-as-a-judge eval loops.
+
+### Developer Conference Talk Templates
+- URL: https://www.activenerds.com/blog/developer-conference-talk-templates
+- Date: 2026-08-01
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: Practical talk templates for developer conferences — the deep-dive, the war story, the intro, and how to structure a talk that lands.
+
+### Fitness Smartwatch for Developers
+- URL: https://www.activenerds.com/blog/fitness-smartwatch-for-developers
+- Date: 2026-07-29
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Fitness Trackers, Affiliate
+- Description: A developer's guide to fitness smartwatches — stand reminders, move tracking, and which features actually change sedentary behavior.
+
+### Ergonomic Monitor Stand Guide
+- URL: https://www.activenerds.com/blog/ergonomic-monitor-stand-guide
+- Date: 2026-07-26
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: Choose an ergonomic monitor stand or arm — height, depth, dual-monitor setups, and avoiding the neck strain of a too-low screen.
+
+### OWASP Top 10 for Cloud-Native
+- URL: https://www.activenerds.com/blog/owasp-top-10-cloud-native
+- Date: 2026-07-23
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: Map the OWASP Top 10 to cloud-native and Kubernetes risks — broken access control, misconfiguration, and injection in containerized workloads.
+
+### Kubernetes Certificate Management with cert-manager
+- URL: https://www.activenerds.com/blog/kubernetes-certificate-management-cert-manager
+- Date: 2026-07-20
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Kubernetes, Devsecops
+- Description: Manage TLS certificates in Kubernetes with cert-manager — Let's Encrypt, self-signed CAs, automated renewal, and Ingress integration.
+
+### Desk Cycling Machine Benefits
+- URL: https://www.activenerds.com/blog/desk-cycling-machine-benefits
+- Date: 2026-07-17
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building, Ergonomics
+- Description: Under-desk cycling machines for developers — real benefits, the focus tradeoff, and whether a pedaler actually helps you move more.
+
+### Walking Pad Under Desk Review
+- URL: https://www.activenerds.com/blog/walking-pad-under-desk-review
+- Date: 2026-07-14
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Standing Desk, Affiliate
+- Description: An honest review of under-desk walking pads for developers — what they're good for, the noise and speed tradeoffs, and who should skip them.
+
+### Container Image Registry Comparison
+- URL: https://www.activenerds.com/blog/container-image-registry-comparison
+- Date: 2026-07-11
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Docker, Devsecops
+- Description: Compare container image registries — Docker Hub, ECR, GCR, Harbor, and GHCR — on pricing, security, self-hosting, and CI integration.
+
+### The Best Ergonomic Keyboards for Carpal Tunnel: A Programmer's Guide
+- URL: https://www.activenerds.com/blog/ergonomic-keyboard-for-carpal-tunnel
+- Date: 2026-07-08
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: A clinical and engineering evaluation of split, tented, and concave keyboards for carpal tunnel syndrome — actuation forces, tenting angles, and firmware remapping.
+
+### Kubernetes StatefulSet Patterns Guide
+- URL: https://www.activenerds.com/blog/kubernetes-statefulset-patterns-guide
+- Date: 2026-07-08
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Master Kubernetes StatefulSets — stable identities, ordered rollout, persistent volume claims, and when StatefulSet beats Deployment.
+
+### Prompt Engineering Techniques Guide
+- URL: https://www.activenerds.com/blog/prompt-engineering-techniques-guide
+- Date: 2026-07-05
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Pytorch
+- Description: A practical guide to prompt engineering — few-shot, chain-of-thought, role prompting, and structured outputs for reliable LLM results.
+
+### How to Choose a Wireless Ergonomic Mouse: The Developer's Field Guide
+- URL: https://www.activenerds.com/blog/wireless-ergonomic-mouse-guide
+- Date: 2026-07-05
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: Cutting through the marketing fluff: vertical mice, contoured palm grips, and trackballs evaluated for multi-monitor developer workflows, forearm pronation, and DPI precision.
+
+### Mixed Precision Training in PyTorch
+- URL: https://www.activenerds.com/blog/mixed-precision-training-pytorch
+- Date: 2026-07-02
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: Speed up PyTorch training and cut GPU memory with mixed precision — AMP, autocast, GradScaler, and the pitfalls that break convergence.
+
+### Feature Flags Implementation Guide
+- URL: https://www.activenerds.com/blog/feature-flags-implementation-guide
+- Date: 2026-06-29
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes
+- Description: A practical guide to feature flags — rollout strategies, targeting, kill switches, and avoiding flag debt over time.
+
+### Progressive Delivery with Argo Rollouts
+- URL: https://www.activenerds.com/blog/progressive-delivery-argo-rollouts
+- Date: 2026-06-26
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes
+- Description: Move beyond basic canary deploys with Argo Rollouts — blue-green, canary analysis, and automated promotion and rollback.
+
+### The Ultimate Guide to Ergonomic Mechanical Keyboards for Coders
+- URL: https://www.activenerds.com/blog/ergonomic-mechanical-keyboard-guide
+- Date: 2026-06-25
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: Bridging the gap between tactile mechanical typing and orthopedic ergonomics — hot-swap switches, columnar layouts, QMK/ZMK firmware, and thumb clusters.
+
+### Hackathon Judging Criteria Explained
+- URL: https://www.activenerds.com/blog/hackathon-judging-criteria-guide
+- Date: 2026-06-23
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: Understand hackathon judging criteria — what judges actually score, how to optimize your pitch, and what wins beyond the code.
+
+### Posture Corrector Devices: Reviewed
+- URL: https://www.activenerds.com/blog/posture-corrector-device-review
+- Date: 2026-06-20
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: An honest review of posture corrector devices — do they work, who they help, and why they're a crutch, not a fix.
+
+### Wrist Rests: A Buying Guide
+- URL: https://www.activenerds.com/blog/wrist-rest-keyboard-guide
+- Date: 2026-06-17
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: Do wrist rests actually help? A practical guide to choosing (or skipping) a wrist rest, materials, height, and the ergonomics that matter.
+
+### Secrets Scanning in CI Pipelines
+- URL: https://www.activenerds.com/blog/secrets-scanning-ci-pipelines
+- Date: 2026-06-14
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops
+- Description: Catch leaked secrets before they ship — tools like Gitleaks and TruffleHog, pre-commit hooks, and fail-closed CI policy.
+
+### The 5-Minute Desk Reset: Postural Re-alignment Between Meetings
+- URL: https://www.activenerds.com/blog/5-minute-desk-reset
+- Date: 2026-06-12
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Habit Building
+- Description: A zero-equipment, 5-minute physical protocol engineered to reverse gluteal amnesia, hip flexor shortening, and blood pooling during back-to-back meeting blocks.
+
+### Cloud Security Posture Management
+- URL: https://www.activenerds.com/blog/cloud-security-posture-management
+- Date: 2026-06-11
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops
+- Description: Cloud Security Posture Management (CSPM) explained — continuous misconfiguration detection, tools, and turning alerts into fixes.
+
+### Lunch Break Workouts for Developers
+- URL: https://www.activenerds.com/blog/lunch-break-workouts-developers
+- Date: 2026-06-08
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building, Deep Work
+- Description: Short, effective lunch break workouts for developers — 15- and 30-minute options that leave you sharper, not wrecked, for the afternoon.
+
+### Stretching for Wrist Pain Relief
+- URL: https://www.activenerds.com/blog/stretching-wrist-pain-relief
+- Date: 2026-06-05
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Ergonomics
+- Description: Targeted wrist and forearm stretches for keyboard-heavy work — relieve strain, prevent RSI, and know when it's more than tightness.
+
+### Desk Yoga Routines for Programmers
+- URL: https://www.activenerds.com/blog/desk-yoga-routines-programmers
+- Date: 2026-06-02
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Habit Building
+- Description: A practical desk yoga routine for programmers — seated twists, spinal mobility, and breath work you can do without leaving your chair.
+
+### Container Image Signing with cosign
+- URL: https://www.activenerds.com/blog/container-image-signing-cosign
+- Date: 2026-05-30
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Docker, Devsecops
+- Description: Sign and verify container images with cosign and Sigstore — keyless signing, transparency logs, and CI integration for supply chain security.
+
+### Single-Tasking vs Multitasking for Engineers
+- URL: https://www.activenerds.com/blog/single-tasking-vs-multitasking
+- Date: 2026-05-30
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: The evidence on single-tasking vs multitasking for deep technical work — why context switching costs are real and how to structure your day.
+
+### Standing Desk vs. Treadmill Desk: Which Workstation Actually Fits a Software Career?
+- URL: https://www.activenerds.com/blog/standing-desk-vs-treadmill-desk
+- Date: 2026-05-28
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Standing Desk, Ergonomics
+- Description: Neither is a silver bullet. A head-to-head biomechanical and cognitive comparison between height-adjustable desks and under-desk walking pads for developers.
+
+### Canary Deployment Strategies on Kubernetes
+- URL: https://www.activenerds.com/blog/canary-deployment-strategies-kubernetes
+- Date: 2026-05-27
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes
+- Description: Roll out safely with canary deployments — traffic splitting, metrics gating, and tooling choices (Argo Rollouts, Flagger, service mesh) for K8s.
+
+### Kubernetes Pod Security Standards
+- URL: https://www.activenerds.com/blog/kubernetes-pod-security-standards
+- Date: 2026-05-27
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes, Devsecops
+- Description: Replace PodSecurityPolicy with Pod Security Standards — privileged, baseline, and restricted profiles, plus enforcement modes.
+
+### Kubernetes Multi-Cluster Management
+- URL: https://www.activenerds.com/blog/kubernetes-multi-cluster-management
+- Date: 2026-05-24
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Patterns for managing multiple Kubernetes clusters — fleet management, GitOps at scale, and tools like Cluster API and ArgoCD ApplicationSets.
+
+### Preparing to Speak at a Tech Meetup
+- URL: https://www.activenerds.com/blog/tech-meetup-speaker-preparation
+- Date: 2026-05-24
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences, Deep Work
+- Description: A practical prep guide for your first tech meetup talk — topic selection, structure, rehearsal, and surviving the Q&A without imploding.
+
+### Transformer Architecture Explained
+- URL: https://www.activenerds.com/blog/transformer-architecture-explained
+- Date: 2026-05-21
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Pytorch
+- Description: A practical, no-math-heavy walkthrough of the transformer architecture — attention, positional encoding, and why it scales.
+
+### Vertical Mouse: Ergonomic Review
+- URL: https://www.activenerds.com/blog/vertical-mouse-ergonomic-review
+- Date: 2026-05-21
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: An honest review of vertical mice for wrist pain — what they help, what they don't, and whether switching is worth it for developers.
+
+### How to Run a Walking 1:1: The Manager and Engineer's Field Guide
+- URL: https://www.activenerds.com/blog/walking-1-1
+- Date: 2026-05-20
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building, Deep Work
+- Description: Why walking side-by-side unlocks high-trust engineering 1:1 conversations — plus logistics, route planning, and how to capture action items without typing on your phone.
+
+### Diffusion Model Optimization Techniques
+- URL: https://www.activenerds.com/blog/diffusion-model-optimization-techniques
+- Date: 2026-05-18
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: Practical techniques to optimize diffusion models — step reduction, latent diffusion, classifier-free guidance, and memory-efficient training.
+
+### Do You Need an Ergonomic Footrest?
+- URL: https://www.activenerds.com/blog/ergonomic-footrest-desk-setup
+- Date: 2026-05-18
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: When a footrest helps your desk setup, when it's unnecessary, and how to choose one — a practical take for programmers and desk workers.
+
+### Cloud Security Best Practices for AWS
+- URL: https://www.activenerds.com/blog/cloud-security-best-practices-aws
+- Date: 2026-05-15
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops
+- Description: A practical AWS security checklist for engineers — IAM, network, data, and monitoring controls that actually reduce risk without theater.
+
+### Kubernetes Network Security Policies
+- URL: https://www.activenerds.com/blog/kubernetes-network-security-policies
+- Date: 2026-05-12
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: Lock down pod-to-pod traffic with NetworkPolicies — default deny, allow-list patterns, and a zero-trust baseline for cluster networking.
+
+### Mobility Exercises for Tight Hip Flexors
+- URL: https://www.activenerds.com/blog/mobility-exercises-hip-flexors
+- Date: 2026-05-09
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Ergonomics
+- Description: Sitting shortens and weakens your hip flexors — targeted mobility work to restore range and counter the desk-bound posture.
+
+### The 20-20-20 Rule for Eye Strain
+- URL: https://www.activenerds.com/blog/eye-rest-20-20-20-rule
+- Date: 2026-05-06
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building, Ergonomics
+- Description: The 20-20-20 rule explained for screen workers — why it works, how to actually remember it, and what else reduces digital eye strain.
+
+### 15-Minute Workouts You Can Do Between Pull Requests
+- URL: https://www.activenerds.com/blog/15-minute-workouts-between-prs
+- Date: 2026-05-05
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Habit Building
+- Description: Three high-intensity strength templates — push, pull, legs — engineered for developers to train in the gap between submitting a PR and peer code review.
+
+### A Standing Desk Transition Schedule
+- URL: https://www.activenerds.com/blog/standing-desk-transition-schedule
+- Date: 2026-05-03
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Standing Desk, Habit Building
+- Description: How to ease into a standing desk without wrecking your back or knees — a realistic ramp-up schedule for desk-bound engineers.
+
+### Kubernetes Resource Quotas & Limits
+- URL: https://www.activenerds.com/blog/kubernetes-resource-quotas-limits
+- Date: 2026-04-30
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Govern cluster resources with quotas and limits — namespace isolation, request/limit tuning, and avoiding noisy-neighbor and OOM headaches.
+
+### Staying Physically and Mentally Sharp at Tech Conferences and Hackathons
+- URL: https://www.activenerds.com/blog/conferences-and-hackathons
+- Date: 2026-04-28
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences, Habit Building
+- Description: Damage-control protocols for developers attending multi-day conferences and hackathons — surviving concrete expo floors, erratic sleep, and sensory overload.
+
+### containerd vs CRI-O: Runtime Comparison
+- URL: https://www.activenerds.com/blog/containerd-vs-cri-o-runtime-comparison
+- Date: 2026-04-27
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Docker, Kubernetes
+- Description: A practical comparison of containerd and CRI-O container runtimes — architecture, performance, security, and which to pick for your K8s cluster.
+
+### Building a Kubernetes Custom Controller
+- URL: https://www.activenerds.com/blog/kubernetes-custom-controller-development
+- Date: 2026-04-24
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: A practical guide to developing a Kubernetes custom controller with controller-runtime — CRDs, reconcile loops, and production patterns.
+
+### Distributed Data Parallel vs Model Parallel
+- URL: https://www.activenerds.com/blog/distributed-data-parallel-vs-model-parallel
+- Date: 2026-04-21
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: When to split data versus split the model — DDP, model parallelism, tensor parallelism, and choosing the right strategy for large model training.
+
+### The Remote Developer's No-Gym Strength Routine
+- URL: https://www.activenerds.com/blog/no-gym-strength-routine
+- Date: 2026-04-20
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building, Desk Stretches
+- Description: A compact, progressive home strength protocol built with just adjustable dumbbells and a doorway pull-up bar — zero commute, minimal footprint, and real progressive overload.
+
+### Data Augmentation Techniques in PyTorch
+- URL: https://www.activenerds.com/blog/data-augmentation-techniques-pytorch
+- Date: 2026-04-18
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: Practical data augmentation in PyTorch — transforms, Albumentations, and strategies that improve generalization without hurting training stability.
+
+### Dopamine Detox for Developers
+- URL: https://www.activenerds.com/blog/dopamine-detox-developers
+- Date: 2026-04-15
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: A practical, non-preachy take on dopamine detox for developers — reducing cheap stimulation to rebuild focus, without the usual wellness-influencer hype.
+
+### Defining Service Level Objectives
+- URL: https://www.activenerds.com/blog/slo-definition-reliability
+- Date: 2026-04-12
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes, Deep Work
+- Description: Set meaningful SLOs for your services — error budgets, user-centric SLIs, and a practical process to avoid alerting fatigue and reduce engineer burnout.
+
+### GitOps with ArgoCD vs Flux
+- URL: https://www.activenerds.com/blog/gitops-argocd-flux-comparison
+- Date: 2026-04-09
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes, Devsecops
+- Description: Compare ArgoCD and Flux for GitOps on Kubernetes — architecture, multi-cluster, drift detection, and which fits your team delivery workflow best overall.
+
+### Virtual Hackathon Platform Comparison
+- URL: https://www.activenerds.com/blog/virtual-hackathon-platform-comparison
+- Date: 2026-04-06
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: Compare the leading virtual hackathon platforms — judging, team formation, mentor channels, and which fits your event size, budget, and community goals.
+
+### Noise-Cancelling Headphones for Focus
+- URL: https://www.activenerds.com/blog/noise-cancelling-headphones-focus
+- Date: 2026-04-03
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Affiliate, Deep Work
+- Description: A practical guide to noise-cancelling headphones for deep work — ANC performance, comfort for long sessions, and what really matters most for engineers.
+
+### RSI Prevention for Programmers: What the Clinical Research Actually Says
+- URL: https://www.activenerds.com/blog/rsi-prevention
+- Date: 2026-04-03
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Ergonomics, Desk Stretches
+- Description: Why your new wrist brace isn't fixing your keyboard pain — evidence-based ergonomics, micro-break pacing protocols, and neutral joint mechanics for software engineers.
+
+### Standing Desk Mat Comparison Guide
+- URL: https://www.activenerds.com/blog/standing-desk-mat-comparison
+- Date: 2026-03-31
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Standing Desk, Affiliate
+- Description: The best standing desk mats compared — anti-fatigue, massage, and balance mats that keep you comfortable and subtly active while standing at your desk.
+
+### Automating Vulnerability Scanning in CI
+- URL: https://www.activenerds.com/blog/vulnerability-scanning-automation-ci
+- Date: 2026-03-28
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Docker
+- Description: Catch CVEs before they ship by automating vulnerability scanning in CI — image scanning, gating policies, and triage workflows that scale with your team.
+
+### Implementing mTLS Between Microservices
+- URL: https://www.activenerds.com/blog/mtls-microservices-implementation
+- Date: 2026-03-25
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: Secure service-to-service traffic with mutual TLS — certificate management, service mesh options, and a practical rollout plan for Kubernetes clusters.
+
+### Fixing Your Sleep Architecture When You Code Past Midnight
+- URL: https://www.activenerds.com/blog/sleep-schedule-past-midnight
+- Date: 2026-03-25
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: You do not need to wake up at 5am to have restorative sleep. A circadian blueprint for night-owl engineers — blue light mechanics, cognitive wind-down, and social jetlag.
+
+### Breathing Exercises for Stressed Engineers
+- URL: https://www.activenerds.com/blog/breathing-exercises-stress-engineers
+- Date: 2026-03-22
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building, Deep Work
+- Description: Simple breathing exercises to calm an overstimulated nervous system during incidents and on-call — box breathing, physiological sighs, and more techniques.
+
+### Desk Stretches for Neck Pain Relief
+- URL: https://www.activenerds.com/blog/desk-stretching-neck-pain
+- Date: 2026-03-19
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Ergonomics
+- Description: Targeted desk stretches for neck pain — gentle movements you can do at your workstation to ease tension from hours of forward head posture at the screen.
+
+### Why Movement Makes You a Better Debugger: The Neuroscience of Problem-Solving
+- URL: https://www.activenerds.com/blog/movement-and-debugging
+- Date: 2026-03-18
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Deep Work, Habit Building
+- Description: Why the solution to an intractable software bug appears when you step away for a walk — the cognitive mechanics between the Executive Control Network and the Default Mode Network.
+
+### Kubernetes Job & CronJob Patterns
+- URL: https://www.activenerds.com/blog/kubernetes-job-cronjob-patterns
+- Date: 2026-03-16
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Run batch workloads reliably in Kubernetes — Job patterns for parallelism, retries, and CronJob scheduling pitfalls every platform engineer should know.
+
+### Kubernetes Node Affinity & Taints Guide
+- URL: https://www.activenerds.com/blog/kubernetes-node-affinity-taints
+- Date: 2026-03-13
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Control pod placement in Kubernetes with node affinity and taints — scheduling rules for GPU nodes, dedicated workloads, and strict node isolation patterns.
+
+### Burnout, Prolonged Sitting, and the Neurobiological Feedback Loop
+- URL: https://www.activenerds.com/blog/burnout-and-sitting
+- Date: 2026-03-10
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: The hidden biological connection between prolonged physical immobility, vagal nerve suppression, elevated cortisol, and developer burnout — plus how to break the cycle.
+
+### Knowledge Distillation for Model Compression
+- URL: https://www.activenerds.com/blog/knowledge-distillation-model-compression
+- Date: 2026-03-10
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Mlops
+- Description: Shrink large models with knowledge distillation — teacher-student training, temperature scaling, and real deployment gains for faster, cheaper inference.
+
+### Gradient Clipping for Stable Training
+- URL: https://www.activenerds.com/blog/gradient-clipping-deep-learning
+- Date: 2026-03-07
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: Prevent exploding gradients with clipping — norm vs value clipping, when each helps, and PyTorch implementation patterns for stable training runs at scale.
+
+### The Attention Mechanism Explained Simply
+- URL: https://www.activenerds.com/blog/attention-mechanism-explained
+- Date: 2026-03-04
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Pytorch
+- Description: Understand the attention mechanism in transformers — queries, keys, values, and self-attention, explained without heavy math for ML practitioners to grasp.
+
+### Managing Context Switching in Engineering
+- URL: https://www.activenerds.com/blog/managing-context-switching-engineering
+- Date: 2026-03-01
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: Strategies to reduce context-switching tax in engineering work — batching, async communication, and team norms.
+
+### Time Blocking for Software Engineers
+- URL: https://www.activenerds.com/blog/time-blocking-software-engineers
+- Date: 2026-02-26
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: A practical time-blocking system for engineers — calendar architecture, meeting protection, and deep work scheduling.
+
+### Pomodoro for Deep Work Engineering
+- URL: https://www.activenerds.com/blog/pomodoro-deep-work-engineering
+- Date: 2026-02-23
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: How to adapt the Pomodoro technique for software engineering — custom intervals, context switching, and flow protection.
+
+### Sustainable Pacing for On-Call Rotations
+- URL: https://www.activenerds.com/blog/sustainable-pacing-oncall-rotations
+- Date: 2026-02-20
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Habit Building, Deep Work
+- Description: Evidence-based pacing strategies for on-call engineers — energy management, sleep protection, and recovery protocols.
+
+### Focus Management During Long Training Runs
+- URL: https://www.activenerds.com/blog/focus-management-long-training-runs
+- Date: 2026-02-17
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: How to maintain focus and energy during multi-hour ML training runs — monitoring strategies, movement, and cognitive load.
+
+### Virtual Tech Events and Online Meetups
+- URL: https://www.activenerds.com/blog/virtual-tech-events-online-meetups
+- Date: 2026-02-14
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: How to find, attend, and get value from virtual tech events — platforms, engagement tips, and building remote connections.
+
+### Tech Conference Networking Strategies
+- URL: https://www.activenerds.com/blog/tech-conference-networking-strategies
+- Date: 2026-02-11
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: Practical networking strategies for introverted tech professionals at conferences — before, during, and after the event.
+
+### Hackathon Preparation Guide for Developers
+- URL: https://www.activenerds.com/blog/hackathon-preparation-developers
+- Date: 2026-02-08
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: A complete hackathon prep guide for developers — team formation, idea selection, scope management, and survival tips.
+
+### Local Tech Meetups: Finding Guide
+- URL: https://www.activenerds.com/blog/local-tech-meetups-finding-guide
+- Date: 2026-02-05
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: How to find, join, and get value from local tech meetups — platforms, first-visit tips, and building your network.
+
+### How to Speak at Tech Conferences
+- URL: https://www.activenerds.com/blog/speak-at-tech-conferences
+- Date: 2026-02-02
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: A step-by-step guide to landing your first tech conference talk — from CFP to slides to delivery and follow-up.
+
+### Tech Hackathons 2026 Calendar
+- URL: https://www.activenerds.com/blog/tech-hackathons-2026-calendar
+- Date: 2026-01-30
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: A curated calendar of the best tech hackathons in 2026 — AI/ML, Kubernetes, and DevSecOps events worldwide.
+
+### Standing Desk Converter Comparison Review
+- URL: https://www.activenerds.com/blog/standing-desk-converter-comparison
+- Date: 2026-01-27
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Standing Desk, Affiliate
+- Description: Can't afford a full standing desk? Compare the best standing desk converters — stability, height range, and value.
+
+### Blue Light Glasses: Effectiveness Review
+- URL: https://www.activenerds.com/blog/blue-light-glasses-effectiveness
+- Date: 2026-01-24
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: Do blue light glasses actually work? An evidence-based review of blue light blocking glasses for screen workers.
+
+### Monitor Arm Mount Review for Standing Desk
+- URL: https://www.activenerds.com/blog/monitor-arm-mount-standing-desk
+- Date: 2026-01-21
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Standing Desk, Affiliate
+- Description: Reviews of the best monitor arm mounts for standing desks — stability, cable management, and dual-monitor setups.
+
+### Ergonomic Mouse for Wrist Pain Relief
+- URL: https://www.activenerds.com/blog/ergonomic-mouse-wrist-pain-relief
+- Date: 2026-01-18
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: The best ergonomic mice for programmers dealing with wrist pain — vertical, trackball, and roller bar options reviewed.
+
+### Fitness Tracker for Standing Desk Users
+- URL: https://www.activenerds.com/blog/fitness-tracker-standing-desk-users
+- Date: 2026-01-15
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Fitness Trackers, Standing Desk, Affiliate
+- Description: Which fitness trackers work best with a standing desk setup — standing time tracking, posture reminders, and accuracy.
+
+### Ergonomic Chair Buying Guide for Programmers
+- URL: https://www.activenerds.com/blog/ergonomic-chair-buying-guide-programmers
+- Date: 2026-01-12
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: Everything you need to know before buying an ergonomic office chair — adjustability, lumbar support, and long-session comfort.
+
+### Best Ergonomic Gear for Programmers
+- URL: https://www.activenerds.com/blog/best-ergonomic-gear-programmers
+- Date: 2026-01-09
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: A curated guide to the best ergonomic gear for developers — chairs, keyboards, mice, and monitor arms that prevent pain.
+
+### Ergonomic Keyboard and Mouse Reviews
+- URL: https://www.activenerds.com/blog/ergonomic-keyboard-mouse-reviews
+- Date: 2026-01-06
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: Reviews of the best ergonomic keyboards and mice for programmers — split keyboards, trackballs, and vertical mice.
+
+### Fitness Tracker Comparison for Desk Workers
+- URL: https://www.activenerds.com/blog/fitness-tracker-comparison-desk-workers
+- Date: 2026-01-03
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Fitness Trackers, Affiliate
+- Description: Compare the best fitness trackers and smartwatches for desk-bound professionals — step tracking, reminders, and value.
+
+### Kubernetes Security News Monthly
+- URL: https://www.activenerds.com/blog/kubernetes-security-news-monthly
+- Date: 2025-12-31
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: Your monthly digest of Kubernetes security news — CVEs, tool releases, policy updates, and community highlights.
+
+### Kubernetes Penetration Testing Guide
+- URL: https://www.activenerds.com/blog/kubernetes-penetration-testing
+- Date: 2025-12-28
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: A practical guide to pentesting Kubernetes clusters — from reconnaissance to exploitation and remediation.
+
+### Runtime Security: Falco vs Tetragon
+- URL: https://www.activenerds.com/blog/runtime-security-falco-tetragon
+- Date: 2025-12-25
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: Compare Falco and Tetragon for Kubernetes runtime security — detection capabilities, performance, and eBPF architecture.
+
+### Compliance Automation for Kubernetes
+- URL: https://www.activenerds.com/blog/compliance-automation-kubernetes
+- Date: 2025-12-22
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: Automate compliance checks in K8s with Kyverno, kube-bench, and OPA — continuous compliance without manual audits.
+
+### DevSecOps Hardening Checklist Template
+- URL: https://www.activenerds.com/blog/devsecops-hardening-checklist
+- Date: 2025-12-19
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: A comprehensive hardening checklist for cloud-native workloads — from cluster config to runtime security and compliance.
+
+### Threat Modeling for Cloud Workloads
+- URL: https://www.activenerds.com/blog/threat-modeling-cloud-workloads
+- Date: 2025-12-16
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: A practical approach to threat modeling cloud-native applications — STRIDE, attack trees, and K8s-specific risks.
+
+### Secrets Management in Kubernetes with Vault
+- URL: https://www.activenerds.com/blog/secrets-management-kubernetes-vault
+- Date: 2025-12-13
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: Implement production-grade secrets management in K8s using HashiCorp Vault and External Secrets Operator.
+
+### Kubernetes RBAC Configuration Guide
+- URL: https://www.activenerds.com/blog/kubernetes-rbac-configuration
+- Date: 2025-12-10
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: Master Kubernetes RBAC — roles, cluster roles, bindings, and best practices for least-privilege access control.
+
+### Resistance Band Desk Exercises Guide
+- URL: https://www.activenerds.com/blog/resistance-band-desk-exercises
+- Date: 2025-12-07
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Ergonomics
+- Description: A complete guide to using resistance bands at your desk — 15 exercises for upper body, core, and posture correction.
+
+### Micro-Break Routines for Coding Focus
+- URL: https://www.activenerds.com/blog/micro-break-routines-coding-focus
+- Date: 2025-12-04
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Deep Work
+- Description: Structured micro-break routines that protect your focus while reducing physical strain — designed for deep coding sessions.
+
+### Desk Workout Equipment Essentials
+- URL: https://www.activenerds.com/blog/desk-workout-equipment-essentials
+- Date: 2025-12-01
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Ergonomics
+- Description: The minimal desk workout gear that actually makes a difference — resistance bands, balance boards, and under-desk tools.
+
+### Walking Meetings for Remote Teams
+- URL: https://www.activenerds.com/blog/walking-meetings-remote-teams
+- Date: 2025-11-28
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building, Desk Stretches
+- Description: How to introduce walking meetings in a remote-first team — logistics, tools, and making them actually productive.
+
+### Eye Strain Reduction for Screen Workers
+- URL: https://www.activenerds.com/blog/eye-strain-reduction-screen-workers
+- Date: 2025-11-25
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Ergonomics, Desk Stretches
+- Description: Practical strategies to reduce digital eye strain — the 20-20-20 rule, display settings, and workspace lighting.
+
+### Movement Snack Checklist for Desk Workers
+- URL: https://www.activenerds.com/blog/movement-snack-checklist-desk-workers
+- Date: 2025-11-22
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Habit Building
+- Description: A printable checklist of movement snacks you can do at your desk — categorized by time, intensity, and equipment.
+
+### Desk Stretch Timer App Comparison
+- URL: https://www.activenerds.com/blog/desk-stretch-timer-app-comparison
+- Date: 2025-11-19
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Habit Building
+- Description: Compare the best desk stretch and movement reminder apps — features, integrations, and which actually builds the habit.
+
+### Standing Desk Benefits and Drawbacks
+- URL: https://www.activenerds.com/blog/standing-desk-benefits-drawbacks
+- Date: 2025-11-16
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Standing Desk, Ergonomics
+- Description: An honest look at standing desks — real health benefits, common mistakes, and how to transition without hurting yourself.
+
+### Micro-Exercise Routines for Developers
+- URL: https://www.activenerds.com/blog/micro-exercise-routines-developers
+- Date: 2025-11-13
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Habit Building
+- Description: Practical micro-exercise routines designed for developers — 2-minute movement snacks that fit between coding sessions.
+
+### Organizing a Tech Meetup: A Guide
+- URL: https://www.activenerds.com/blog/organizing-tech-meetup-guide
+- Date: 2025-11-13
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: A practical guide to organizing a tech meetup — venue, speakers, sponsorship, and keeping a community consistent without burning out.
+
+### DevOps Tools Benchmark Comparison
+- URL: https://www.activenerds.com/blog/devops-tools-benchmark-comparison
+- Date: 2025-11-10
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes, Docker
+- Description: Benchmark popular DevOps tools — CI/CD runners, container registries, and IaC execution speed compared head-to-head.
+
+### Mechanical Keyboard for Programmers
+- URL: https://www.activenerds.com/blog/mechanical-keyboard-for-programmers
+- Date: 2025-11-10
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Ergonomics, Affiliate
+- Description: Choose a mechanical keyboard for programming — switches, ergonomics, and layouts that reduce strain during long coding sessions.
+
+### Developer Environment Setup Checklist
+- URL: https://www.activenerds.com/blog/developer-environment-setup-checklist
+- Date: 2025-11-07
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Docker, Deep Work
+- Description: A comprehensive checklist for setting up a productive developer environment — tools, shell config, and ergonomics.
+
+### Kubernetes Admission Controllers Guide
+- URL: https://www.activenerds.com/blog/kubernetes-admission-controllers-guide
+- Date: 2025-11-07
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Kubernetes, Devsecops
+- Description: A practical guide to Kubernetes admission controllers — mutating vs validating, OPA Gatekeeper, and enforcing policy at cluster entry.
+
+### DevContainer Setup for Consistent Environments
+- URL: https://www.activenerds.com/blog/devcontainer-setup-consistent-environments
+- Date: 2025-11-04
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Docker, Kubernetes
+- Description: Eliminate 'works on my machine' with DevContainers — reproducible dev environments in Docker for VS Code and Codespaces.
+
+### SBOM Generation Tools Comparison
+- URL: https://www.activenerds.com/blog/sbom-generation-tools-comparison
+- Date: 2025-11-04
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Docker
+- Description: Compare SBOM generation tools — Syft, Trivy, CycloneDX, and SPDX — formats, ecosystems, and CI integration for supply chain security.
+
+### Terraform vs Pulumi for Infrastructure
+- URL: https://www.activenerds.com/blog/infrastructure-as-code-terraform-pulumi
+- Date: 2025-11-01
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes, Docker
+- Description: Compare Terraform and Pulumi for infrastructure as code — language, state management, and K8s integration.
+
+### Sleep Optimization for Shift Workers
+- URL: https://www.activenerds.com/blog/sleep-optimization-shift-workers
+- Date: 2025-11-01
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building, Deep Work
+- Description: Sleep optimization for on-call and shift workers — anchor sleep, light management, and recovery routines that fit irregular tech schedules.
+
+### Hydration Habits for Developers
+- URL: https://www.activenerds.com/blog/hydration-habits-developers
+- Date: 2025-10-29
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building
+- Description: Practical hydration habits for developers — why focus dips when you're dehydrated, and simple cues to drink more without leaving your flow.
+
+### Kubernetes Observability with Prometheus & Grafana
+- URL: https://www.activenerds.com/blog/kubernetes-observability-prometheus-grafana
+- Date: 2025-10-29
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Set up production-grade observability for K8s with Prometheus, Grafana, and AlertManager — metrics, dashboards, and alerts.
+
+### Container Image Security Scanning Tools
+- URL: https://www.activenerds.com/blog/container-image-security-scanning
+- Date: 2025-10-26
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Docker, Devsecops
+- Description: Compare Trivy, Grype, Snyk, and Aqua for container image scanning — features, accuracy, and CI integration.
+
+### Posture Correction Exercises for Desk Workers
+- URL: https://www.activenerds.com/blog/posture-correction-exercises-desk-workers
+- Date: 2025-10-26
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Ergonomics
+- Description: Simple posture correction exercises for desk workers — chin tucks, wall angels, and thoracic mobility to undo hours of sitting.
+
+### Distroless Container Images for Security
+- URL: https://www.activenerds.com/blog/distroless-container-images-security
+- Date: 2025-10-23
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Docker, Devsecops
+- Description: Reduce your attack surface with distroless container images — smaller footprint, fewer CVEs, and practical migration from fat images.
+
+### Docker Multi-Stage Builds Best Practices
+- URL: https://www.activenerds.com/blog/docker-multistage-builds-best-practices
+- Date: 2025-10-23
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Docker, Kubernetes
+- Description: Shrink Docker images and secure your supply chain with multi-stage builds — caching, distroless, and BuildKit.
+
+### Kubernetes Cost Optimization & FinOps
+- URL: https://www.activenerds.com/blog/kubernetes-cost-optimization-finops
+- Date: 2025-10-20
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Cut Kubernetes spend with a practical FinOps checklist — right-sizing, autoscaling, spot instances, and request/limit tuning.
+
+### Service Mesh Comparison: Istio vs Linkerd
+- URL: https://www.activenerds.com/blog/service-mesh-istio-linkerd
+- Date: 2025-10-20
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes, Devsecops
+- Description: Istio or Linkerd? Compare features, performance, complexity, and operational overhead for your service mesh.
+
+### Kubernetes Cluster Backup & Disaster Recovery
+- URL: https://www.activenerds.com/blog/kubernetes-cluster-backup-disaster-recovery
+- Date: 2025-10-17
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Build a Kubernetes backup and disaster recovery strategy — etcd backups, Velero, and tested restore procedures for production clusters.
+
+### Kubernetes Debugging with k9s and kubectl
+- URL: https://www.activenerds.com/blog/kubernetes-debugging-k9s-kubectl
+- Date: 2025-10-17
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Level up your K8s debugging workflow with k9s and advanced kubectl commands — fast triage for production incidents.
+
+### Helm Charts Best Practices Guide
+- URL: https://www.activenerds.com/blog/helm-charts-best-practices
+- Date: 2025-10-14
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes, Docker
+- Description: Write maintainable, secure Helm charts — templating, values structure, library charts, and CI validation.
+
+### Hyperparameter Tuning Strategies
+- URL: https://www.activenerds.com/blog/hyperparameter-tuning-strategies
+- Date: 2025-10-14
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: Practical hyperparameter tuning strategies for ML — grid, random, Bayesian search, and scaling sweeps across GPUs without wasting budget.
+
+### Data Preprocessing Pipeline Best Practices
+- URL: https://www.activenerds.com/blog/data-preprocessing-pipeline-best-practices
+- Date: 2025-10-11
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: Build robust ML data preprocessing pipelines — tokenization, normalization, caching, and avoiding leakage in PyTorch workflows.
+
+### Kubernetes Network Policies Tutorial
+- URL: https://www.activenerds.com/blog/kubernetes-network-policies-tutorial
+- Date: 2025-10-11
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes, Devsecops
+- Description: A hands-on tutorial for implementing Kubernetes network policies — from default deny to L7 rules and debugging.
+
+### Feature Store for Machine Learning
+- URL: https://www.activenerds.com/blog/feature-store-machine-learning
+- Date: 2025-10-08
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Mlops, Pytorch
+- Description: Understand feature stores for ML — online vs offline serving, consistency, and tools like Feast and Tecton for production pipelines.
+
+### Kubernetes Autoscaling: HPA and KEDA
+- URL: https://www.activenerds.com/blog/kubernetes-autcaling-hpa-keda
+- Date: 2025-10-08
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: Master Kubernetes autoscaling with Horizontal Pod Autoscaler and KEDA — event-driven scaling for real workloads.
+
+### Weekly AI & ML News Roundup
+- URL: https://www.activenerds.com/blog/ai-ml-news-roundup-weekly
+- Date: 2025-10-05
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Mlops
+- Description: Your weekly digest of the most important AI/ML developments — model releases, research breakthroughs, and industry moves.
+
+### Vector Database Comparison: Pinecone vs Weaviate
+- URL: https://www.activenerds.com/blog/vector-database-comparison
+- Date: 2025-10-05
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Mlops, Llms
+- Description: Compare Pinecone and Weaviate vector databases — performance, pricing, hybrid search, self-hosting, and which fits your RAG pipeline.
+
+### LoRA Fine-Tuning Techniques for LLMs
+- URL: https://www.activenerds.com/blog/lora-fine-tuning-llms
+- Date: 2025-10-02
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Pytorch
+- Description: Learn LoRA fine-tuning for large language models — rank selection, target modules, training configs, and when to choose LoRA over full fine-tuning.
+
+### ML Model Deployment Workflow Template
+- URL: https://www.activenerds.com/blog/ml-model-deployment-workflow
+- Date: 2025-10-02
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Mlops, Kubernetes
+- Description: A step-by-step deployment workflow template for ML models — from packaging to serving, monitoring, and rollback.
+
+### Experiment Tracking: MLflow vs W&B
+- URL: https://www.activenerds.com/blog/experiment-tracking-mlflow-vs-wandb
+- Date: 2025-09-29
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Mlops, Pytorch
+- Description: MLflow or Weights & Biases? Compare features, pricing, UX, and integration for your ML experiment tracking needs.
+
+### PyTorch Lightning vs Vanilla PyTorch
+- URL: https://www.activenerds.com/blog/pytorch-lightning-vs-vanilla-pytorch
+- Date: 2025-09-26
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: Should you use PyTorch Lightning or stick with vanilla PyTorch? A practical comparison for real ML projects.
+
+### Model Quantization Techniques Comparison
+- URL: https://www.activenerds.com/blog/model-quantization-techniques
+- Date: 2025-09-23
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Pytorch
+- Description: Compare INT8, INT4, GPTQ, AWQ, and bitsandbytes quantization — accuracy, speed, and memory trade-offs.
+
+### RAG Pipeline Architecture Best Practices
+- URL: https://www.activenerds.com/blog/rag-pipeline-architecture
+- Date: 2025-09-20
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Mlops
+- Description: Build production-grade retrieval-augmented generation pipelines — chunking, embedding, vector stores, and evaluation.
+
+### TensorRT Inference Acceleration Guide
+- URL: https://www.activenerds.com/blog/tensorrt-inference-acceleration
+- Date: 2025-09-17
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Pytorch
+- Description: Speed up model inference with NVIDIA TensorRT — from model conversion to optimization profiles and deployment.
+
+### Distributed Training with Torchrun and DDP
+- URL: https://www.activenerds.com/blog/distributed-training-torchrun-ddp
+- Date: 2025-09-14
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: A hands-on guide to multi-GPU distributed training in PyTorch using torchrun and DistributedDataParallel.
+
+### ML Training Cost Calculator & Template
+- URL: https://www.activenerds.com/blog/ml-training-cost-calculator
+- Date: 2025-09-11
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Mlops, Pytorch
+- Description: Estimate GPU training costs before you run — a practical calculator template with real cloud pricing examples.
+
+### GPU vs TPU for Model Training
+- URL: https://www.activenerds.com/blog/gpu-vs-tpu-model-training
+- Date: 2025-09-08
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: A practical comparison of GPU and TPU for ML training — performance, cost, ecosystem, and when to choose each.
+
+### Model Versioning & Registry Comparison
+- URL: https://www.activenerds.com/blog/model-versioning-registry-comparison
+- Date: 2025-09-05
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Mlops, Llms
+- Description: Compare MLflow, W&B, and DVC model registries — features, versioning, staging, and which fits your MLOps workflow.
+
+### Burnout Prevention for On-Call Engineers
+- URL: https://www.activenerds.com/blog/burnout-prevention-on-call
+- Date: 2025-09-01
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: Evidence-based strategies to prevent burnout during on-call rotations — from schedule design to recovery rituals and team culture.
+
+### Deep Work Techniques for Engineers
+- URL: https://www.activenerds.com/blog/deep-work-techniques-engineers
+- Date: 2025-08-30
+- Author: ActiveNerds Team
+- Category: Focus & Productivity
+- Tags: Deep Work, Habit Building
+- Description: Practical deep work strategies adapted for software engineers — context switching costs, focus blocks, and protecting your flow state.
+
+### CI/CD Pipeline Optimization for Speed
+- URL: https://www.activenerds.com/blog/cicd-pipeline-optimization
+- Date: 2025-08-25
+- Author: ActiveNerds Team
+- Category: Platform Engineering & DevOps
+- Tags: Kubernetes, Docker
+- Description: Practical techniques to make your CI/CD pipelines faster — from caching strategies to parallel execution and conditional builds.
+
+### KubeCon Attendance Guide: Maximize Your Conference
+- URL: https://www.activenerds.com/blog/kubecon-attendance-guide
+- Date: 2025-08-20
+- Author: ActiveNerds Team
+- Category: Events & Community
+- Tags: Conferences
+- Description: A practical guide to attending KubeCon — from session selection and networking to budget tips and staying active during the event.
+
+### Under-Desk Treadmill Review: Walking While You Code
+- URL: https://www.activenerds.com/blog/under-desk-treadmill-review
+- Date: 2025-08-15
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Standing Desk, Affiliate
+- Description: Can you actually code while walking? A long-term review of under-desk treadmills for developers, with pros, cons, and a verdict.
+
+### Best Standing Desks for Developers in 2026
+- URL: https://www.activenerds.com/blog/best-standing-desks-developers
+- Date: 2025-08-10
+- Author: ActiveNerds Team
+- Category: Gear & Gadgets
+- Tags: Standing Desk, Affiliate
+- Description: Hands-on reviews of the top standing desks for tech professionals — covering stability, height range, programmable presets, and value.
+
+### Policy as Code: OPA vs Kyverno Comparison
+- URL: https://www.activenerds.com/blog/policy-as-code-opa-kyverno
+- Date: 2025-08-05
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: A detailed comparison of Open Policy Agent and Kyverno for Kubernetes policy-as-code — features, performance, and when to choose each.
+
+### Supply Chain Security for Kubernetes
+- URL: https://www.activenerds.com/blog/supply-chain-security-k8s
+- Date: 2025-08-01
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Docker
+- Description: How to secure your K8s supply chain — from image signing with Cosign to SBOMs, admission controllers, and policy enforcement.
+
+### Cloud-Native Security Best Practices Guide
+- URL: https://www.activenerds.com/blog/cloud-native-security-best-practices
+- Date: 2025-07-25
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Devsecops, Kubernetes
+- Description: A comprehensive guide to securing cloud-native workloads — from pod security to network policies, secrets management, and runtime protection.
+
+### Habit Building for Irregular Work Schedules
+- URL: https://www.activenerds.com/blog/habit-building-irregular-schedules
+- Date: 2025-07-20
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Habit Building, Deep Work
+- Description: Evidence-based habit-building strategies for engineers with unpredictable on-call rotations and irregular deep-work blocks.
+
+### Ergonomic Desk Setup for Programmers
+- URL: https://www.activenerds.com/blog/ergonomic-desk-setup-programmers
+- Date: 2025-07-15
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Ergonomics, Standing Desk
+- Description: An illustrated guide to optimal desk height, monitor placement, and peripheral choices for developers who spend 8+ hours at a screen.
+
+### 5 Desk Stretches During Long Coding Sessions
+- URL: https://www.activenerds.com/blog/desk-stretches-coding-sessions
+- Date: 2025-07-10
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Desk Stretches, Ergonomics
+- Description: Quick, effective desk stretches you can do without leaving your chair — designed for developers deep in a coding flow state.
+
+### Kubernetes Operators Explained Simply
+- URL: https://www.activenerds.com/blog/k8s-operators-explained
+- Date: 2025-07-05
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: A beginner-friendly explanation of Kubernetes operators — what they are, how they work, and when you actually need one.
+
+### Deploying a Secure K8s Cluster with Cilium
+- URL: https://www.activenerds.com/blog/deploy-secure-k8s-cilium
+- Date: 2025-07-01
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes, Devsecops
+- Description: Step-by-step tutorial for deploying a production-grade Kubernetes cluster with Cilium CNI for network security and observability.
+
+### Kubernetes Pod CrashLoopBackOff Troubleshooting
+- URL: https://www.activenerds.com/blog/k8s-crashloopbackoff-troubleshooting
+- Date: 2025-06-25
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes
+- Description: A problem-first guide to diagnosing and fixing CrashLoopBackOff errors — from logs and events to common root causes.
+
+### MLOps Pipeline Best Practices
+- URL: https://www.activenerds.com/blog/mlops-pipeline-best-practices
+- Date: 2025-06-20
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Mlops, Pytorch
+- Description: Build reproducible, observable ML pipelines — from data versioning to model registry, CI/CD for ML, and experiment tracking.
+
+### Fine-Tuning Large Language Models: A Practical Guide
+- URL: https://www.activenerds.com/blog/fine-tuning-llms-guide
+- Date: 2025-06-15
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Pytorch
+- Description: Step-by-step guide to fine-tuning LLMs — covering LoRA, QLoRA, dataset preparation, and avoiding common pitfalls.
+
+### LLM Inference Optimization Techniques
+- URL: https://www.activenerds.com/blog/llm-inference-optimization
+- Date: 2025-06-10
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Llms, Mlops
+- Description: From KV caching to quantization and speculative decoding — practical techniques to make LLM inference faster and cheaper.
+
+### Debugging OOM Errors in PyTorch
+- URL: https://www.activenerds.com/blog/debugging-oom-pytorch
+- Date: 2025-06-05
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: A systematic approach to diagnosing and fixing out-of-memory errors during PyTorch training — from gradient checkpointing to memory profiling.
+
+### How to Optimize PyTorch Training Speed
+- URL: https://www.activenerds.com/blog/optimize-pytorch-training-speed
+- Date: 2025-06-01
+- Author: ActiveNerds Team
+- Category: AI & Machine Learning
+- Tags: Pytorch, Mlops
+- Description: Practical techniques to speed up PyTorch training runs — from mixed precision to data loading, gradient accumulation, and distributed strategies.

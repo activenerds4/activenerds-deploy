@@ -1,0 +1,310 @@
+---
+title: "The Agentic IDE & Context Protocol Architecture Guide"
+description: "Architect an agentic IDE that scales beyond toy demos — MCP server design, repository context engineering, multi-turn agent refactoring, and context compaction strategies for long-horizon coding agents."
+category: ai-ml
+slug: agentic-ide-context-protocol-guide
+lastUpdated: "2026-08-28"
+tags: ["ai-agents", "mcp", "devex", "context-engineering"]
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# The Agentic IDE & Context Protocol Architecture Guide
+
+**The agentic IDE isn't a smarter autocomplete — it's an autonomous engineer with a context window.** What separates a coding agent that refactors a real codebase from one that hallucinates a function that doesn't exist is context architecture. This guide covers the Model Context Protocol (MCP) server design, repository context engineering, multi-turn refactoring patterns, and context compaction — the systems that let an agent operate over a large codebase without losing the thread.
+
+---
+
+## Table of Contents
+
+1. [The Context Window Problem](#1-the-context-window-problem)
+2. [MCP Server Architecture](#2-mcp-server-architecture)
+3. [Repository Context Engineering](#3-repository-context-engineering)
+4. [Multi-Turn Agent Refactoring](#4-multi-turn-agent-refactoring)
+5. [Context Compaction Strategies](#5-context-compaction-strategies)
+6. [Production Guardrails](#6-production-guardrails)
+
+---
+
+## 1. The Context Window Problem
+
+A coding agent operates within a fixed context window. A large codebase doesn't fit. The entire art of agentic IDE engineering is deciding what goes into that window — and what gets evicted when it fills.
+
+### The Context Budget
+
+Modern models have context windows from 128K to 2M tokens, but effective context is far smaller. Research on long-context models shows that retrieval accuracy degrades as the window fills — the "lost in the middle" phenomenon, where information in the middle of a long context is recalled worse than information at the start or end.
+
+| Context window | Effective retrieval | Practical implication |
+|---|---|---|
+| 128K tokens | ~32K reliably | One large file or a few medium files |
+| 200K tokens | ~64K reliably | A feature's worth of files |
+| 1M+ tokens | ~200K reliably | A small module, not a monorepo |
+
+<Callout variant="warning" title="Bigger windows don't solve the problem">
+  Doubling the context window doesn't double the agent's effective working memory. The degradation is non-linear — a 1M-token window doesn't reliably use 1M tokens; it reliably uses a fraction of it. The answer isn't "wait for bigger windows." It's context engineering: deliberately curating what enters the window and evicting what's no longer relevant.
+</Callout>
+
+### The Context Lifecycle
+
+Every piece of context in an agentic session has a lifecycle:
+
+```text
+INGESTION  →  RELEVANCE  →  EVICTION
+   ↑              |              |
+   |              ↓              |
+   └─── RE-INGESTION (if needed) ─┘
+```
+
+The agent's job is to keep the window populated with currently-relevant context and evict the rest. The IDE's job is to provide the tools (MCP servers) that make ingestion and re-ingestion cheap.
+
+---
+
+## 2. MCP Server Architecture
+
+The Model Context Protocol (MCP) is the standardized interface between an AI agent and the tools/data sources it can access. Instead of hard-coding integrations, you expose MCP servers that the agent calls dynamically.
+
+### The MCP Server Contract
+
+An MCP server exposes three primitives:
+
+| Primitive | Purpose | Example |
+|---|---|---|
+| **Resources** | Read-only data the agent can inspect | A file's contents, a git log, a type definition |
+| **Tools** | Actions the agent can invoke | Run a test, search the codebase, apply a diff |
+| **Prompts** | Pre-built instruction templates | "Review this PR for security issues" |
+
+### Designing a Repository MCP Server
+
+The most valuable MCP server for a coding agent is one that exposes the repository as queryable structure, not as raw files. A naive server that returns file contents forces the agent to read entire files; a well-designed server lets the agent ask for what it needs.
+
+```text
+Well-designed MCP tools for a repository:
+
+  read_symbol(path, symbol_name)
+    → returns just the function/class/interface definition, not the whole file
+
+  find_references(path, symbol_name)
+    → returns all call sites, with surrounding context
+
+  get_type_signature(path, symbol_name)
+    → returns the type without the implementation
+
+  get_imports(path)
+    → returns the dependency graph for a file
+
+  search_semantic(query)
+    → returns ranked relevant code locations, not just text matches
+```
+
+<Callout variant="tip" title="Structure-aware beats file-aware">
+  An MCP server that understands AST structure (functions, types, imports) is dramatically more token-efficient than one that returns raw file text. The agent asks "what's the signature of `handleRequest`?" and gets 3 lines instead of reading a 400-line file. This is the single highest-leverage MCP design decision.
+  </Callout>
+
+### MCP Server Anti-Patterns
+
+- **Returning entire files** when the agent asked for a symbol — wastes context
+- **No pagination** on large query results — dumps 50K tokens into the window
+- **Stateful servers** that break under concurrent agent sessions — keep servers stateless
+- **Tools without descriptions** — the agent can't decide when to call a tool it doesn't understand
+
+---
+
+## 3. Repository Context Engineering
+
+Context engineering is the deliberate curation of what enters the agent's window for a given task. A refactor of one function needs different context than a feature spanning five files.
+
+### The Context Stack
+
+For any task, the agent needs layers of context, from most to least specific:
+
+1. **Task definition** — what the agent is being asked to do
+2. **Target code** — the specific files/symbols being modified
+3. **Immediate dependencies** — the types and functions the target code calls
+4. **Conventions** — the patterns the codebase uses (error handling, naming, testing)
+5. **Constraints** — what must not break (tests, types, public APIs)
+
+### The Retrieval Strategy
+
+Don't dump all five layers into the window at once. Retrieve on demand:
+
+```text
+1. Agent reads the task.
+2. Agent calls get_type_signature on the target function.
+3. Agent calls find_references to see call sites.
+4. Agent calls read_symbol on the dependencies it identifies.
+5. Agent calls get_imports to understand the dependency graph.
+6. Agent has enough context to propose a change.
+7. Agent applies the change via a tool.
+8. Agent runs tests via a tool to verify.
+```
+
+Each step retrieves only what's needed for the current sub-task. The window stays populated with relevant context, not pre-loaded speculation.
+
+<Callout variant="note" title="The 'just load everything' failure mode">
+  The temptation with large context windows is to load the whole codebase and let the model figure it out. This fails for two reasons: (1) lost-in-the-middle degradation means the model ignores most of what's loaded, and (2) the model can't distinguish signal from noise in a 500K-token dump. Curated retrieval beats brute-force loading every time.
+</Callout>
+
+### Convention Capture
+
+One of the hardest things for an agent to infer is the codebase's conventions — how errors are handled, how things are named, how tests are structured. Explicit convention context helps:
+
+```text
+CONVENTIONS.md (auto-extracted or hand-maintained):
+
+- Errors: return Result<T, AppError>, never throw in library code
+- Naming: snake_case for functions, PascalCase for types
+- Tests: colocated in __tests__/, named test_<unit>_<scenario>
+- Async: all I/O is async, no blocking calls
+- Logging: structured via the `tracing` crate, never println
+```
+
+Loading this file (small, high-signal) at the start of a session gives the agent the conventions without having to infer them from scattered examples.
+
+---
+
+## 4. Multi-Turn Agent Refactoring
+
+A real refactor isn't one prompt — it's a sequence of turns where the agent proposes, verifies, adjusts, and iterates. The architecture of these multi-turn sessions determines whether the agent converges on a correct result or drifts into hallucination.
+
+### The Refactor Loop
+
+```text
+PROPOSE  →  VERIFY  →  ADJUST  →  (loop)  →  COMMIT
+   |          |          |
+   |          ↓          |
+   |     run tests       |
+   |     type check      |
+   |          |          |
+   ↓          ↓          ↓
+diff      results     new diff
+```
+
+Each turn, the agent:
+1. **Proposes** a change (a diff or a set of edits)
+2. **Verifies** by running tests, type checks, or linters via tools
+3. **Adjusts** based on verification failures
+4. **Loops** until verification passes, then commits
+
+### Turn Boundaries
+
+The critical design decision is where to place turn boundaries. Too few turns and the agent tries to do too much in one shot (hallucination risk); too many and it loses the thread (context fragmentation).
+
+| Task size | Recommended turns | Why |
+|---|---|---|
+| Single function edit | 1–2 | Small enough to do in one pass |
+| Multi-file refactor | 4–8 | Each file is a turn, verify between |
+| Cross-module feature | 10–20 | Decompose into sub-tasks, verify each |
+| Architectural change | 30+ | Treat as a project, not a prompt |
+
+<Callout variant="warning" title="The 'one big prompt' failure">
+  Asking an agent to "refactor the authentication module to use the new session interface" in a single prompt almost always fails on real codebases. The task spans too many files and decisions for one turn. Decompose: "update the Session type," then "update the middleware," then "update the handlers," then "update the tests," verifying between each. Multi-turn decomposition is what makes agents work on real code.
+</Callout>
+
+### Verification as a First-Class Turn
+
+The verify step is what separates a reliable agent from a confident-but-wrong one. Every propose turn should be followed by a verify turn before the agent proceeds:
+
+- **Run the affected tests** — does the change break anything?
+- **Type check** — does the change compile?
+- **Lint** — does the change follow conventions?
+- **Diff review** — did the agent change only what was asked?
+
+If verification fails, the agent adjusts and re-proposes. If it passes, the agent commits and moves to the next sub-task.
+
+---
+
+## 5. Context Compaction Strategies
+
+Over a long multi-turn session, the context window fills with intermediate results, tool outputs, and exploration that's no longer relevant. Without compaction, the agent degrades as the session grows.
+
+### What to Evict
+
+Not all context ages equally. Eviction should preserve the high-signal, durable context and discard the transient:
+
+| Keep | Evict |
+|---|---|
+| The task definition | Explored-but-unused file contents |
+| The current state of the target code | Intermediate tool outputs (test runs that passed) |
+| Decisions made and their rationale | Failed exploration paths |
+| The dependency graph relevant to the task | Full file dumps no longer referenced |
+| Conventions and constraints | Verbose tool outputs (summarize instead) |
+
+### Compaction Techniques
+
+**1. Summarization compaction**
+
+Replace a long tool output with a one-line summary. Instead of keeping a 200-line test output, evict it and keep: "All 47 tests passed, 0 failures." The agent retains the signal (success) without the tokens.
+
+**2. Decision log compaction**
+
+Maintain a running "decisions made" log as the session progresses. When the window fills, evict the detailed reasoning but keep the decision entries:
+
+```text
+DECISIONS:
+- [Turn 3] Chose Option B for session storage (Redis) over Option A (JWT)
+- [Turn 7] Kept the old error type for backward compat, added new one alongside
+- [Turn 12] Decided to update tests in a separate pass, not inline
+```
+
+This preserves the agent's reasoning chain without the verbose exploration that produced each decision.
+
+**3. Checkpoint compaction**
+
+At major milestones (e.g., after a sub-task completes), snapshot the current state of the target code and evict the history of how it got there. The agent doesn't need to remember every intermediate diff once the final state is committed.
+
+<Callout variant="tip" title="Compaction is a tool, not a setting">
+  The best agentic IDEs make compaction an explicit, observable action — not a silent background process. When the agent compacts, it should surface what it's evicting so the human can catch a bad eviction before it causes a hallucination. Silent compaction is how agents lose the thread without anyone noticing.
+</Callout>
+
+---
+
+## 6. Production Guardrails
+
+An agentic IDE in production needs guardrails that a demo doesn't. The agent will, eventually, propose a change that looks reasonable but is wrong. The guardrails catch it.
+
+<ChecklistBox
+  title="Agentic IDE Production Guardrails"
+  items={[
+    "Every proposed change verified by tests + type check before commit — no exceptions",
+    "Diff review tool surfaces what changed vs. what was requested — catches scope creep",
+    "Agent cannot modify files outside an explicit allow-list for the task",
+    "Tool calls rate-limited to prevent runaway loops (infinite test runs)",
+    "Max turns per task enforced — agent must converge or escalate to human",
+    "Full session log retained for post-hoc review of agent decisions",
+    "Agent cannot run destructive tools (delete, force-push) without human approval",
+    "Hallucinated symbol detection — agent's referenced symbols validated against AST",
+  ]}
+/>
+
+### The Human-in-the-Loop Boundary
+
+The agent should handle the 80% of work that's mechanical (boilerplate, test updates, mechanical refactors) and escalate the 20% that requires judgment. The boundary:
+
+| Agent handles | Human handles |
+|---|---|
+| Mechanical refactors (rename, extract function) | API design decisions |
+| Test generation for existing behavior | Architecture decisions |
+| Boilerplate implementation | Security-sensitive code |
+| Dependency updates with passing tests | Public API changes |
+| Documentation generation | Anything with ambiguity |
+
+<Callout variant="note" title="The agentic IDE is a force multiplier, not a replacement">
+  The goal isn't to remove the engineer from the loop — it's to remove the mechanical work from the engineer's loop. An agent that handles the boilerplate and test updates lets the engineer spend their time on the judgment calls that actually require a human. The best agentic IDEs make the engineer more effective, not redundant.
+</Callout>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Agentic IDE Architecture Sign-off"
+  items={[
+    "MCP servers expose structure-aware queries (read_symbol, find_references), not raw file dumps",
+    "Context engineering retrieves on demand, not brute-force loading",
+    "Conventions captured in a small, high-signal CONVENTIONS.md loaded per session",
+    "Multi-turn refactors decomposed into sub-tasks with verify-between turns",
+    "Context compaction strategy implemented (summarization, decision log, checkpointing)",
+    "Production guardrails deployed: verification, allow-lists, turn limits, HITL boundary",
+  ]}
+/>

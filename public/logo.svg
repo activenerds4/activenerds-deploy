@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1E2532" />
+      <stop offset="100%" stop-color="#0F1419" />
+    </radialGradient>
+    <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2DD4A7" />
+      <stop offset="100%" stop-color="#00A878" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Circle -->
+  <circle cx="50" cy="50" r="48" fill="url(#bgGrad)" stroke="#2DD4A7" stroke-width="2" stroke-opacity="0.6"/>
+  <circle cx="50" cy="50" r="44" stroke="#2DD4A7" stroke-width="0.75" stroke-opacity="0.3" stroke-dasharray="3 3"/>
+
+  <!-- Geometric Fennec Fox Mark (centered on 100x100) -->
+  <g transform="translate(14, 12) scale(1.5)">
+    <!-- Outer ears -->
+    <path d="M9 19 L15 4 L21 19 Z" fill="#1E2532" stroke="#2DD4A7" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M27 19 L33 4 L39 19 Z" fill="#1E2532" stroke="#2DD4A7" stroke-width="1.4" stroke-linejoin="round"/>
+
+    <!-- Inner ears -->
+    <path d="M12.5 17.5 L15 8.5 L17.5 17.5 Z" fill="url(#tealGrad)" />
+    <path d="M30.5 17.5 L33 8.5 L35.5 17.5 Z" fill="url(#tealGrad)" />
+
+    <!-- Face shield -->
+    <path d="M9 18 Q24 15.5 39 18 L33 37 Q24 43 15 37 Z" fill="#1E2532" stroke="#2DD4A7" stroke-width="1.4" stroke-linejoin="round"/>
+
+    <!-- Snout / cheek patch -->
+    <path d="M16.5 30 L31.5 30 L27.5 40 Q24 42 20.5 40 Z" fill="#242E3E"/>
+
+    <!-- Eyes -->
+    <path d="M18 22.5 L20.6 25 L18 27.5 L15.4 25 Z" fill="#2DD4A7"/>
+    <path d="M30 22.5 L32.6 25 L30 27.5 L27.4 25 Z" fill="#2DD4A7"/>
+    <circle cx="18" cy="25" r="0.9" fill="#0F1419"/>
+    <circle cx="30" cy="25" r="0.9" fill="#0F1419"/>
+
+    <!-- Nose -->
+    <path d="M24 37.4 L25.7 39 L24 40.6 L22.3 39 Z" fill="#2DD4A7"/>
+  </g>
+</svg>

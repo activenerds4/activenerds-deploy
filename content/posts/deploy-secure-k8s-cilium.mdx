@@ -1,0 +1,193 @@
+---
+title: "Deploying a Secure K8s Cluster with Cilium"
+slug: deploy-secure-k8s-cilium
+description: "Step-by-step tutorial for deploying a production-grade Kubernetes cluster with Cilium CNI for network security and observability."
+date: "2025-07-01"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes", "devsecops"]
+featured: false
+relatedArticles: ["cloud-native-security-best-practices", "kubernetes-network-policies-tutorial", "devsecops-hardening-checklist", "kubernetes-network-security-policies", "kubernetes-penetration-testing"]
+image: https://cdn.activenerds.com/images/posts/deploy-secure-k8s-cilium.png
+imageAlt: "Deploying secure Kubernetes clusters with Cilium — zero-trust networking mesh with eBPF-based encryption and policy enforcement"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Purpose**: Step-by-step tutorial for deploying a production-grade Kubernetes cluster with Cilium CNI for network security and observability.
+- **Why Cilium for Security**: Apply structured configurations and validated production patterns.
+- **Cluster Setup**: Apply structured configurations and validated production patterns.
+- **Network Policies**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Cilium has become the go-to CNI for security-conscious Kubernetes deployments. It uses eBPF (Extended Berkeley Packet Filter) to provide [network security](/articles/cloud-native-security-best-practices), observability, and performance without the overhead of traditional iptables-based solutions. This tutorial walks through deploying a production-grade cluster with Cilium.
+
+## Why Cilium for Security
+
+Traditional Kubernetes networking relies on iptables, which doesn't scale well and provides limited observability. Cilium replaces this with eBPF programs that run in the Linux kernel, offering:
+
+- **Better performance**: eBPF programs process packets without context switching
+- **Rich [network policies](/articles/kubernetes-network-policies-tutorial)**: Layer 3/4 and Layer 7 (HTTP, DNS, Kafka) policies
+- **Built-in observability**: Hubble provides real-time flow visibility
+- **Identity-based security**: Policies based on Kubernetes labels, not IP addresses
+
+## Cluster Setup
+
+This tutorial assumes you have a Kubernetes cluster ready (kubeadm, EKS, GKE, or similar) and just need to install Cilium as the CNI.
+
+### Prerequisites
+- Kubernetes 1.24+
+- Linux kernel 5.4+ (for eBPF features)
+- Helm 3
+
+### Installing Cilium
+
+```bash
+# Add the Cilium Helm repository
+helm repo add cilium https://helm.cilium.io/
+helm repo update
+
+# Install Cilium
+helm install cilium cilium/cilium \
+  --namespace kube-system \
+  --set kubeProxyReplacement=partial \
+  --set hubble.enabled=true \
+  --set hubble.metrics.enabled="{dns,http,flows,tcp, port-distribution,icmp}" \
+  --set hubble.relay.enabled=true \
+  --set hubble.ui.enabled=true
+```
+
+### Verifying the Installation
+
+```bash
+# Check Cilium pods are running
+kubectl get pods -n kube-system -l k8s-app=cilium
+
+# Check Cilium status
+cilium status
+```
+
+## Network Policies
+
+Cilium's network policies are more expressive than standard Kubernetes NetworkPolicy. Start with a default-deny posture:
+
+```yaml
+# default-deny.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: default-deny
+  namespace: production
+spec:
+  statefulSet:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+```
+
+Then explicitly allow required traffic:
+
+```yaml
+# allow-frontend-to-backend.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-frontend-to-backend
+  namespace: production
+spec:
+  endpointSelector:
+    matchLabels:
+      app: backend
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: frontend
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+```
+
+### Layer 7 HTTP Policies
+
+Cilium can filter at the HTTP layer — allowing specific paths and methods:
+
+```yaml
+spec:
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: frontend
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+          rules:
+            http:
+              - method: GET
+                path: /api/v1/.*
+```
+
+### DNS-Aware Policies
+
+Cilium can resolve DNS names in policies, allowing traffic to external services by FQDN:
+
+```yaml
+spec:
+  endpointSelector:
+    matchLabels:
+      app: backend
+  egress:
+    - toFQDNs:
+        - matchName: "api.stripe.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+```
+
+## Observability with Hubble
+
+Hubble is Cilium's observability layer, built on top of eBPF. It provides:
+
+- **Flow visualization**: Real-time view of all network flows
+- **Service map**: Visual topology of service dependencies
+- **Metrics**: Prometheus-compatible metrics for DNS, HTTP, TCP, and more
+
+```bash
+# Port-forward Hubble UI
+kubectl port-forward -n kube-system svc/hubble-ui 8080:80
+
+# Get live flows via CLI
+hubble observe --follow
+```
+
+## Production Hardening
+
+For production deployments:
+
+1. **Apply CiliumNetworkPolicy to all namespaces**: Don't leave any namespace without a default-deny.
+2. **Enable encryption**: Use IPsec or WireGuard for node-to-node encryption:
+   ```bash
+   helm upgrade cilium cilium/cilium \
+     --namespace kube-system \
+     --set encryption.enabled=true \
+     --set encryption.type=wireguard
+   ```
+3. **Performance tuning**: Adjust eBPF map sizes for large clusters:
+   ```yaml
+   bpf:
+     mapDynamicSizeRatio: 0.0025
+     ctMaxEntries: 524288
+   ```
+
+<Note>
+Cilium's learning curve is steeper than Calico or Flannel, but the security and observability benefits are worth it. Start with a default-deny policy and incrementally allow traffic as you identify what's needed.
+</Note>
+
+

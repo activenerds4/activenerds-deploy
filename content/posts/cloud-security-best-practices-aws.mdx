@@ -1,0 +1,67 @@
+---
+title: "Cloud Security Best Practices for AWS"
+slug: cloud-security-best-practices-aws
+description: "A practical AWS security checklist for engineers — IAM, network, data, and monitoring controls that actually reduce risk without theater."
+date: "2026-05-15"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops"]
+featured: true
+relatedArticles: ["cloud-native-security-best-practices", "devsecops-hardening-checklist", "deploy-secure-k8s-cilium", "threat-modeling-cloud-workloads", "cloud-security-posture-management"]
+image: https://cdn.activenerds.com/images/posts/cloud-security-best-practices-aws.png
+imageAlt: "Cloud security best practices for AWS — layered defense architecture showing IAM, VPC segmentation, and security monitoring"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: A practical AWS security checklist for engineers.
+- **Key Capabilities**: IAM, network, data, and monitoring controls that actually reduce risk without theater.
+- **IAM Foundations**: Apply structured configurations and validated production patterns.
+- **Network and Data**: Apply structured configurations and validated production patterns.
+</Callout>
+
+AWS security has a particular failure mode: the platform offers so many security services that it's easy to buy the feeling of security without reducing actual risk. You turn on GuardDuty, you enable Config, you have a SCP, and you feel secure — but if your IAM roles are over-privileged, your S3 buckets are public, and your access keys are checked into git, you're not secure, you're compliant with a checklist. The controls that actually reduce risk are fewer and less glamorous than the ones that look good in a security review.
+
+This is the practical baseline — the controls that move the needle, organized by layer, and the ones that are theater dressed as security.
+
+## IAM Foundations
+
+Identity is the root of AWS security, and it's where most breaches happen. The three principles: least privilege, no long-lived keys, and permission boundaries.
+
+**Least privilege roles.** Every IAM role should have the minimum permissions needed to do its job, not the maximum that doesn't break. The failure mode is the "AdministratorAccess because it was faster" pattern, which gives a compromised role the keys to the whole account. The fix is tedious but real: start with read-only, add permissions as the application breaks, and log every addition. AWS Access Analyzer helps by showing what a role can actually reach, which is usually more than you think. The goal is roles where a compromise does limited damage, not roles where a compromise is a full account takeover.
+
+**No long-lived keys.** Static access keys (the `AKIA...` kind) are the most common source of AWS breaches, because they get checked into code, leaked in logs, and exfiltrated from compromised instances. The replacement is short-lived credentials via IAM Roles for Service Accounts (IRSA in EKS), instance profiles for EC2, and role assumption for cross-account access. A workload should never have a static key; it should assume a role and get credentials that expire in hours. For humans, SSO with short-lived role sessions, not long-lived access keys. The presence of any long-lived access key in your account is a finding, not a feature.
+
+**Permission boundaries.** A permission boundary is a cap on what a role can ever do, even if its policy grants more. This matters for delegated administration: if a developer can create roles in their account, a permission boundary ensures those roles can never, say, disable CloudTrail or delete logs, even if the developer's IAM policy would otherwise allow it. Boundaries turn "trust but verify" into "trust but enforce," and they're how you let teams self-serve without giving them the keys to disable the security controls.
+
+## Network and Data
+
+**VPC segmentation.** A VPC with everything in one public subnet is the default and the problem. The baseline is: public subnets for load balancers and nothing else, private subnets for application workloads, isolated subnets for databases, and security groups that allow only the specific traffic needed. A database in a private subnet with a security group allowing only the app's security group on the app's port is not reachable from the internet, from other VPCs, or from other apps — which is the point. The segmentation is what turns a compromised app into a contained compromise rather than a database breach.
+
+**Encryption defaults.** Enable encryption at rest and in transit by default, at the [service level](/articles/slo-definition-reliability). S3 buckets default-encrypted, EBS volumes default-encrypted, RDS with encryption on, TLS for everything in transit. The cost is negligible and the protection is real — encrypted-at-rest data on a stolen volume is useless without the key. The mistake is leaving encryption off because "it's just a dev database" — dev databases have production-looking data, and the habit of default-on is what prevents the production database from being accidentally unencrypted. Turn it on everywhere; the exceptions are rare and should be explicit.
+
+**Public exposure audits.** The most common AWS incident is still the accidentally-public S3 bucket, the accidentally-public RDS snapshot, the security group that was opened "just for testing" and never closed. Run regular audits: S3 bucket public access blocks on by default (the account-level block is the strongest control), security groups with 0.0.0.0/0 on sensitive ports flagged, public RDS snapshots listed. These are cheap to check and prevent the embarrassing incidents. AWS Config rules automate this — write a rule that flags any public S3 bucket and alerts on it.
+
+## Detection and Response
+
+You can't prevent every breach; you can detect them fast. The detection baseline:
+
+**CloudTrail and Config.** CloudTrail logs every API call in the account — who did what, when. Config records the configuration state of resources and changes over time. Both should be on in every account, in every region, with logs sent to a central, protected account (and ideally with object-level immutability so they can't be deleted by a compromised account). Without CloudTrail, you can't investigate a breach because you don't know what happened; with it, you have the audit trail. This is the one control that should never be off.
+
+**GuardDuty basics.** GuardDuty is AWS's threat detection — it analyzes CloudTrail, VPC flow logs, and DNS logs for suspicious patterns (unusual API calls, communication with known bad IPs, credential abuse). Turn it on in every region; the cost is low and the detections are real. The key is tuning: the default findings include noise, and you need to triage what's actionable (an instance querying a known cryptominer C2) versus what's expected (a penetration test). Alert on high-severity findings to a real channel (Slack, PagerDuty), not just to an email no one reads.
+
+**Alerting without noise.** The failure mode of detection is alert fatigue — so many low-value alerts that the real ones get ignored. The fix is severity-based routing: high-severity findings page someone, medium findings go to a queue, low findings get aggregated. And suppress the known-expected patterns (your CI account making lots of API calls, your scanner triggering GuardDuty). A detection system that alerts on everything alerts on nothing; a detection system that alerts on the few things that matter gets responded to.
+
+## Continuous Hardening
+
+Security isn't a one-time setup; it's a practice. The controls above drift: a new public bucket, an over-privileged role, a forgotten key. The continuous hardening that prevents drift:
+
+**SCPs and guardrails.** Service Control Policies are organization-level caps that prevent accounts from doing things, even with full admin. A SCP that denies disabling CloudTrail, that denies leaving the organization, that denies creating keys for root — these are guardrails that survive a compromised admin account. They're the "even if everything else fails" layer, and they're how you let account owners self-serve without the ability to break the security baseline.
+
+**Drift detection.** AWS Config conformance packs and third-party tools (Prowler, CloudSploit) continuously check your accounts against a baseline and flag drift. Run them on a schedule, alert on regressions, and treat each regression as a finding to fix, not a notification to acknowledge. The drift is how secure accounts become insecure — someone opens a security group "temporarily," a new service is added without the baseline applied, a key is created for a quick test. Continuous detection catches these before they become incidents.
+
+**Security review cadence.** Periodic reviews (quarterly is reasonable) of IAM (who has what, is it still needed), public exposure (any new public resources), and detection (are alerts being responded to). The review is the feedback loop that turns the automated checks into actual fixes — without it, the checks generate findings that pile up. The [DevSecOps hardening checklist](/blog/devsecops-hardening-checklist) is the structure for this, and the cadence is what makes it real rather than a one-time exercise.
+
+The honest framing: AWS security is not about buying services, it's about getting the boring fundamentals right consistently — least-privilege IAM, no static keys, network segmentation, encryption by default, and detection that actually alerts. The flashy services are layered on top of these, and they're useless without them. Pair this with the broader [cloud-native security](/blog/cloud-native-security-best-practices) practices and [secrets management](/blog/secrets-management-kubernetes-vault), and the account becomes hard to breach and fast to detect when it is — which is the realistic goal, because perfect prevention isn't achievable and fast detection plus containment is.
+
+

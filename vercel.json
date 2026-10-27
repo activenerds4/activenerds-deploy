@@ -1,0 +1,108 @@
+{
+  "redirects": [
+    { "source": "/disclosure", "destination": "/cookie-policy", "permanent": true },
+    { "source": "/authors/prashant-k", "destination": "/author/activenerds-team", "permanent": true },
+    { "source": "/author/prashant-k", "destination": "/author/activenerds-team", "permanent": true },
+    { "source": "/community/spotlight/apply", "destination": "/contact", "permanent": true },
+    { "source": "/community/spotlight/:slug*", "destination": "/about", "permanent": true },
+    { "source": "/community/leaderboard", "destination": "/articles", "permanent": true },
+    { "source": "/community/:slug*", "destination": "/about", "permanent": true },
+    { "source": "/community", "destination": "/about", "permanent": true },
+    { "source": "/learning/cheat-sheets/kubernetes", "destination": "/resources/cheatsheets/k8s-cheat-sheet", "permanent": true },
+    { "source": "/learning/cheat-sheets/docker", "destination": "/resources/cheatsheets/docker-container-cheat-sheet", "permanent": true },
+    { "source": "/learning/cheat-sheets/gen-ai", "destination": "/resources/cheatsheets/genai-llm-cheat-sheet", "permanent": true },
+    { "source": "/learning/:path*", "destination": "/articles", "permanent": true },
+    { "source": "/learning", "destination": "/articles", "permanent": true },
+    { "source": "/gear/ergonomic-keyboard-for-carpal-tunnel", "destination": "/blog/ergonomic-keyboard-for-carpal-tunnel", "permanent": true },
+    { "source": "/gear/ergonomic-mechanical-keyboard-guide", "destination": "/blog/ergonomic-mechanical-keyboard-guide", "permanent": true },
+    { "source": "/gear/ergonomic-mechanical-keyboard", "destination": "/blog/ergonomic-mechanical-keyboard-guide", "permanent": true },
+    { "source": "/gear/foldable-walking-pad-guide", "destination": "/blog/walking-pad-under-desk-review", "permanent": true },
+    { "source": "/gear/vertical-mouse-for-wrist-pain", "destination": "/blog/ergonomic-mouse-wrist-pain-relief", "permanent": true },
+    { "source": "/gear/wireless-ergonomic-mouse-guide", "destination": "/blog/wireless-ergonomic-mouse-guide", "permanent": true },
+    { "source": "/gear/:slug*", "destination": "/articles", "permanent": true },
+    { "source": "/gear", "destination": "/articles", "permanent": true },
+    { "source": "/conferences/ai4-2026-las-vegas/coverage/example-article", "destination": "/blog/production-rag-patterns-at-scale", "permanent": true },
+    { "source": "/conferences/ai4-2026-las-vegas/coverage/:slug*", "destination": "/tag/ai4-2026", "permanent": true },
+    { "source": "/conferences/ai4-2026-las-vegas", "destination": "/resources/conferences/ai4-enterprise-summit", "permanent": true },
+    { "source": "/conferences/aws-reinvent-2026", "destination": "/resources/conferences/aws-reinvent-las-vegas", "permanent": true },
+    { "source": "/conferences/github-universe-2025", "destination": "/resources/conferences/github-universe-conference-guide", "permanent": true },
+    { "source": "/conferences/google-io-2026", "destination": "/resources/conferences/google-io-conference-guide", "permanent": true },
+    { "source": "/conferences/kubecon-na-2026", "destination": "/resources/conferences/kubecon-cloudnativecon-na", "permanent": true },
+    { "source": "/conferences/:slug*", "destination": "/resources/conferences", "permanent": true },
+    { "source": "/conferences", "destination": "/resources/conferences", "permanent": true },
+    { "source": "/blog/(.*)/20-20-20-rule", "destination": "/blog/eye-rest-20-20-20-rule", "permanent": true },
+    { "source": "/blog/20-20-20-rule", "destination": "/blog/eye-rest-20-20-20-rule", "permanent": true },
+    { "source": "/blog/(.*)/ergonomic-desk-setup-checklist", "destination": "/blog/ergonomic-desk-setup-programmers", "permanent": true },
+    { "source": "/blog/ergonomic-desk-setup-checklist", "destination": "/blog/ergonomic-desk-setup-programmers", "permanent": true },
+    { "source": "/blog/(.*)/5-minute-desk-reset-rewritten", "destination": "/blog/5-minute-desk-reset", "permanent": true },
+    { "source": "/blog/5-minute-desk-reset-rewritten", "destination": "/blog/5-minute-desk-reset", "permanent": true },
+    { "source": "/blog/(.*)/15-minute-workouts-between-prs", "destination": "/blog/15-minute-workouts-between-prs", "permanent": true },
+    { "source": "/blog/(.*)/burnout-and-sitting", "destination": "/blog/burnout-and-sitting", "permanent": true },
+    { "source": "/blog/(.*)/conferences-and-hackathons", "destination": "/blog/conferences-and-hackathons", "permanent": true },
+    { "source": "/blog/(.*)/movement-and-debugging", "destination": "/blog/movement-and-debugging", "permanent": true },
+    { "source": "/blog/(.*)/no-gym-strength-routine", "destination": "/blog/no-gym-strength-routine", "permanent": true },
+    { "source": "/blog/(.*)/rsi-prevention", "destination": "/blog/rsi-prevention", "permanent": true },
+    { "source": "/blog/(.*)/sleep-schedule-past-midnight", "destination": "/blog/sleep-schedule-past-midnight", "permanent": true },
+    { "source": "/blog/(.*)/standing-desk-vs-treadmill-desk", "destination": "/blog/standing-desk-vs-treadmill-desk", "permanent": true },
+    { "source": "/blog/(.*)/walking-1-1", "destination": "/blog/walking-1-1", "permanent": true }
+  ],
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/fonts/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/(.*)\\.xml",
+      "headers": [
+        { "key": "Content-Type", "value": "application/xml; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400" }
+      ]
+    },
+    {
+      "source": "/feed.json",
+      "headers": [
+        { "key": "Content-Type", "value": "application/feed+json; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400" }
+      ]
+    },
+    {
+      "source": "/(robots|llms|llms-full)\\.txt",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400" }
+      ]
+    },
+    {
+      "source": "/(index.html)?",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=60, stale-while-revalidate=600" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://*.googletagmanager.com https://*.google-analytics.com https://google-analytics.com https://analytics.activenerds.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://analytics.activenerds.com https://*.google-analytics.com https://google-analytics.com https://*.analytics.google.com https://analytics.google.com https://*.googletagmanager.com https://googletagmanager.com https://stats.g.doubleclick.net https://*.doubleclick.net https://www.google.com; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+        },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "X-XSS-Protection", "value": "1; mode=block" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains; preload" }
+      ]
+    }
+  ]
+}

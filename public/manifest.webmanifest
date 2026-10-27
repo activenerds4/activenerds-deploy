@@ -1,0 +1,17 @@
+{
+  "name": "Blog Starter",
+  "short_name": "Blog",
+  "description": "A modern, content-heavy blog starter kit.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1a1a2e",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

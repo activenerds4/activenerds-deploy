@@ -1,0 +1,55 @@
+---
+title: "Container Image Signing with cosign"
+slug: container-image-signing-cosign
+description: "Sign and verify container images with cosign and Sigstore — keyless signing, transparency logs, and CI integration for supply chain security."
+date: "2026-05-30"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["docker", "devsecops"]
+featured: false
+relatedArticles: ["supply-chain-security-k8s", "distroless-container-images-security", "container-image-registry-comparison", "container-image-security-scanning", "docker-multistage-builds-best-practices"]
+image: https://cdn.activenerds.com/images/posts/container-image-signing-cosign.png
+imageAlt: "Container image signing with cosign — cryptographic signature chain establishing trust from build to production deployment"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Sign and verify container images with cosign and Sigstore.
+- **Key Capabilities**: keyless signing, transparency logs, and CI integration for supply chain security.
+- **Why Sign Images**: Apply structured configurations and validated production patterns.
+- **Keyless Signing**: Apply structured configurations and validated production patterns.
+</Callout>
+
+If you can't verify where a container image came from, your supply chain is trust-by-convention: you assume the image in your registry is the one your CI built, and you assume nobody swapped it. Image signing makes that assumption testable. A signature cryptographically ties an image to the identity that produced it, and verification at deploy time rejects anything that doesn't match. Sigstore's cosign is the tool that made this practical — particularly through [keyless signing](/articles/supply-chain-security-k8s), which removes the key-management burden that historically killed signing adoption. Here's how to use it.
+
+## Why Sign Images
+
+The threat is image tampering and substitution. An attacker who can write to your registry (via leaked credentials, a registry compromise, or a supply-chain attack on a base image) can replace a trusted image with a malicious one that looks identical by tag. Tags are mutable, so `myapp:v1.2.3` can point at a different digest today than it did yesterday — and if you deploy by tag, you'll happily run the swapped image. Pinning to digests mitigates the tag-mutation problem but doesn't prove who produced the digest.
+
+Signing closes that gap. A signature over the image digest, made by a key or identity you trust, lets you verify at deploy time that the image was produced by an authorized source and hasn't been altered. Verification can happen in CI (before promotion), at admission (before the pod runs), or both. The point is to turn "we assume this image is ours" into "we can prove it."
+
+Sigstore is the open-source project behind cosign, and it's become the de facto standard because it solves the two problems that blocked adoption: it makes signing easy (keyless, no key management) and it makes signatures auditable (a transparency log). cosign is the CLI and library you actually use day to day.
+
+## Keyless Signing
+
+The traditional signing model requires you to generate, store, and rotate a private key — and the moment signing keys are involved, you've added a secrets-management problem that most teams handle badly. cosign's keyless signing eliminates the key entirely. Instead of a static key, it uses short-lived certificates issued by Fulcio based on an OIDC identity (your GitHub Actions workflow, your GitLab pipeline, your Google service account). The signer authenticates with their OIDC token, Fulcio issues a certificate tying that identity to the signature, and the signature is recorded in Rekor, a transparency log.
+
+The flow: your CI job runs `cosign sign --keyless` with an OIDC token; cosign gets a certificate from Fulcio, signs the image digest, and writes the signature and certificate to the registry and an entry to Rekor. No key to leak, no key to rotate, no key to distribute to verifiers. The identity is the key. This is why keyless actually gets adopted where key-based signing didn't — the operational cost is near zero.
+
+Why keyless beats key management: keys are a liability. They get checked into repos, leaked in CI logs, and shared across teams. An OIDC identity is scoped to a workflow, expires in minutes, and is auditable in the transparency log. For verification, the verifier checks that the signature was made by a certificate issued for an allowed identity (e.g., `github.com/myorg/myrepo/.github/workflows/release.yml@refs/heads/main`) — so you're verifying provenance, not just a key. That's a stronger guarantee than a static key ever gave you.
+
+## Verifying in CI and at Deploy
+
+Signing is only useful if something verifies. cosign verify checks that an image has a valid signature from an expected identity: `cosign verify --certificate-identity <expected> --certificate-oidc-issuer <issuer> myapp:v1.2.3`. In CI, you verify before promoting an image from a staging registry to production, so a tampered image never reaches prod. At admission, you verify before a pod starts — Kyverno and the cosign admission webhook both support this, letting you enforce "only signed images run in this namespace" as policy.
+
+The policy pattern that works: require a valid signature from your CI identity on every image in production namespaces, enforced by an admission controller that fails closed. Pair it with digest pinning so the signature you verified is the one that runs. The verification identity is the policy — "only images signed by the release workflow on the main branch" is a concrete, enforceable rule rather than a hope.
+
+Fail-closed pipelines are the discipline that makes this real. A verification failure should block the deploy, not warn. The tradeoff is operational fragility: if your transparency log is down or your OIDC issuer is unreachable, verification fails and deploys stop. Mitigate with cached verification and a clear break-glass process, but keep the default fail-closed — the whole point is that a tampered image can't quietly run.
+
+## Operational Realities
+
+A few practical notes. Offline verification matters for air-gapped or high-security environments where you can't reach Rekor or Fulcio at verify time; cosign supports this with cached bundles and air-gapped workflows, but it requires setup. Air-gapped signing is the harder problem — keyless signing needs OIDC, which needs network — so fully air-gapped environments often fall back to key-based signing with carefully managed keys, accepting the key-management cost cosign otherwise eliminates.
+
+Adoption is the real challenge, not the tooling. Start by signing in CI (low risk, no enforcement), then add verification as a non-blocking check, then flip to enforced in one namespace, then expand. The transparency log gives you auditability — you can see every signature ever made, by whom, and when, which is itself a security and compliance win. The end state is a supply chain where "is this image ours and untampered" is a question with a verifiable answer, not a shrug — and that's a meaningful improvement over the default.
+
+

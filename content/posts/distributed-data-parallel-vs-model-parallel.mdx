@@ -1,0 +1,75 @@
+---
+title: "Distributed Data Parallel vs Model Parallel"
+slug: distributed-data-parallel-vs-model-parallel
+description: "When to split data versus split the model — DDP, model parallelism, tensor parallelism, and choosing the right strategy for large model training."
+date: "2026-04-21"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["pytorch", "mlops"]
+featured: true
+relatedArticles: ["distributed-training-torchrun-ddp", "data-augmentation-techniques-pytorch", "mlops-pipeline-best-practices", "data-preprocessing-pipeline-best-practices", "diffusion-model-optimization-techniques"]
+image: https://cdn.activenerds.com/images/posts/distributed-data-parallel-vs-model-parallel.png
+imageAlt: "Dataset split across GPUs on one side and a model split into spring-green shards on the other, on a deep slate background"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: When to split data versus split the model.
+- **Key Capabilities**: DDP, model parallelism, tensor parallelism, and choosing the right strategy for large model training.
+- **The Scaling Problem**: Apply structured configurations and validated production patterns.
+- **Data Parallelism (DDP)**: Apply structured configurations and validated production patterns.
+</Callout>
+
+The first wall you hit in large-model training is the GPU. Not the cost, not the availability — the memory. A model that doesn't fit on a single GPU can't be trained on a single GPU, no matter how patient you are. The second wall is throughput: even if the model fits, training at a useful batch size and a useful speed may require more compute than one GPU provides. Both walls push you toward [distributed training](/articles/distributed-training-torchrun-ddp), and the moment you have more than one GPU, you face a choice that determines everything downstream: do you split the data, or split the model?
+
+These are not interchangeable. Data parallelism and model parallelism solve different problems, have different scaling properties, and fail in different ways. Picking the wrong one wastes GPUs and produces a slower training run than using a single GPU well.
+
+## The Scaling Problem
+
+The two walls map to two different bottlenecks. If your model fits on one GPU but training is too slow — you want a larger effective batch, or you want more iterations per hour — you're compute-bound, and the answer is more parallel compute, which means data parallelism. If your model doesn't fit on one GPU — the parameters, gradients, and optimizer state exceed memory — you're memory-bound, and the answer is splitting the model across GPUs, which means model parallelism.
+
+The confusion arises because the two often coexist. A 70B parameter model in fp16 needs ~140GB just for weights, plus gradients and Adam optimizer state pushing the total toward 1TB. That's memory-bound: no single GPU holds it, so you need model parallelism. But you also want to train it fast, so you want data parallelism on top. Real large-model training uses both, in a hierarchy, and the question is which one you reach for first and how you combine them.
+
+The reason one strategy doesn't fit all is that the bottlenecks shift with model size. A 1B model on a single 80GB GPU is compute-bound — it fits with room to spare, so the limit is FLOPS, and you scale with data parallelism. A 70B model is memory-bound on the same GPU — it doesn't fit at all, so you must split the model before data parallelism is even an option. Diagnosing which wall you're hitting is the first step; the rest follows.
+
+## Data Parallelism (DDP)
+
+Distributed Data Parallel (DDP) is the default and the one to reach for first. Each GPU gets a full copy of the model and a different slice of the batch. Each computes a forward and backward pass on its slice, producing gradients. At the backward pass, the gradients are all-reduced across all GPUs so every GPU has the averaged gradient, then each GPU applies the same optimizer step. Because every GPU ends each step with identical parameters, the replicas stay in sync, and the effective batch size is the per-GPU batch times the number of GPUs.
+
+```python
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+dist.init_process_group("nccl")
+model = MyModel().to(local_rank)
+model = DDP(model, device_ids=[local_rank])
+# Standard training loop; the sampler distributes data across ranks
+```
+
+The all-reduce is the synchronization point and the cost. It communicates one gradient tensor per parameter, every step, across all GPUs. On a fast interconnect (NVLink, InfiniBand) this is cheap; on a slow one (Ethernet across nodes) it becomes the bottleneck and DDP stops scaling. The rule of thumb: DDP scales well within a node (8 GPUs on NVLink) and across a few nodes on InfiniBand, and degrades as the interconnect gets slower and the model gets larger (more parameters = more bytes to all-reduce).
+
+DDP breaks down when the model doesn't fit on one GPU — you can't replicate a model that doesn't fit. It also strains when the batch size can't scale: if your per-GPU batch is already small (sequence-length-limited LLM training), multiplying by GPU count doesn't give you a useful batch, and the gradient noise dominates. This is when you start looking past pure DDP.
+
+## Model & Tensor Parallelism
+
+Model parallelism splits the model itself across GPUs. The simplest version is pipeline parallelism: layer 1-10 on GPU 0, layer 11-20 on GPU 1, and activations flow from one to the next. This solves the memory wall — a model too big for one GPU fits across several — but it introduces a sequential dependency that leaves GPUs idle waiting for the previous stage, which is why pipeline parallelism is usually paired with micro-batching to keep all stages busy.
+
+Tensor parallelism is the finer-grained version: a single layer's computation is split across GPUs. A linear layer's matrix multiply becomes a split multiply — each GPU computes part of the output, with a small communication to combine the parts. This keeps all GPUs busy within each layer (no pipeline bubbles) at the cost of communication inside every layer, which is why it's only worth it on fast intra-node interconnects. Megatron-LM and DeepSpeed popularized this for transformer training, where the attention and feed-forward layers split cleanly across GPUs.
+
+```python
+# Conceptual: tensor-parallel splits a single matmul across GPUs
+# Each GPU holds a shard of the weight matrix
+# Output requires an all-reduce (for column-parallel) or all-gather (for row-parallel)
+```
+
+The communication overhead is the catch. Every layer in tensor parallelism communicates; every stage boundary in pipeline parallelism communicates. On NVLink within a node, this is tolerable; across nodes, it's often slower than just using fewer GPUs. This is why the practical pattern for large models is: tensor parallelism within a node (fast interconnect), pipeline parallelism across a small number of nodes, and data parallelism replicated across groups of nodes. The hierarchy exists because each level of parallelism uses the interconnect it's suited for.
+
+## Choosing a Strategy
+
+The decision tree is roughly: if the model fits on one GPU with a useful batch size, use DDP and scale out. If it doesn't fit, you need model parallelism — start with tensor parallelism within a node (typically 8 GPUs), add pipeline parallelism if it still doesn't fit, and only then replicate the whole thing with data parallelism for throughput. FSDP (Fully Sharded Data Parallel) is the modern PyTorch middle ground: it shards parameters, gradients, and optimizer state across GPUs (like model parallelism for memory) but orchestrates them with an all-gather/all-reduce pattern that looks like data parallelism from the training loop's perspective. For many teams, FSDP has replaced hand-rolled model parallelism because it handles the sharding automatically and scales across nodes.
+
+Hardware topology matters as much as model size. Eight GPUs on one node with NVLink can do tensor parallelism efficiently; eight GPUs across two nodes on Ethernet cannot. A strategy that's correct on paper but wrong for your interconnect will be slower than a simpler strategy that respects the topology. Measure the communication fraction of your training step before committing — if you're spending 40% of step time in all-reduce or all-gather, your parallelism strategy is fighting your interconnect, and you should reduce the parallelism degree or change the strategy.
+
+The hybrid reality is that almost no large-model training uses one strategy. A 70B model trained on 64 GPUs is typically tensor-parallel within each 8-GPU node, pipeline-parallel across a few nodes, and data-parallel across the rest. The art is in the composition, and the composition is driven by the interconnect hierarchy, not just the model size. Start with DDP, hit the memory wall, reach for FSDP, and only hand-roll tensor and pipeline parallelism when FSDP isn't enough — which, for most teams not training frontier models, it is. Pair the choice with the [distributed training fundamentals](/blog/distributed-training-torchrun-ddp) and an honest read of your [GPU versus TPU](/blog/gpu-vs-tpu-model-training) options, and the strategy follows from the constraints.
+
+

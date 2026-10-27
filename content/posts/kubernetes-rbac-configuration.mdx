@@ -1,0 +1,344 @@
+---
+title: "Kubernetes RBAC Configuration Guide"
+slug: kubernetes-rbac-configuration
+description: "Master Kubernetes RBAC — roles, cluster roles, bindings, and best practices for least-privilege access control."
+date: "2025-12-10"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: true
+relatedArticles: ["kubernetes-network-policies-tutorial", "kubernetes-penetration-testing", "secrets-management-kubernetes-vault", "runtime-security-falco-tetragon", "compliance-automation-kubernetes"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-rbac-configuration.png
+imageAlt: "Kubernetes RBAC configuration — role-based access control with users roles ClusterRoleBindings"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Never grant cluster-admin to service accounts**: use namespace-scoped roles
+- **Every workload gets a dedicated service account**: never the default
+- **Audit regularly** with `kubectl auth can-i` and rbac-lookup
+- **Enforce with admission controllers**: don't rely on manual compliance
+- **Integrate with your identity provider** for centralized access management
+</Callout>
+
+RBAC is the backbone of [Kubernetes](/articles/kubernetes-debugging-k9s-kubectl) [access control](/articles/owasp-top-10-cloud-native). Get it wrong and you've either locked out your team or handed every service account cluster-admin. Neither outcome is good. This guide walks through the RBAC model, common patterns, and the least-privilege practices that keep your cluster secure without making your team miserable.
+
+## RBAC Fundamentals
+
+### Subjects, Resources, Verbs
+
+[Kubernetes](/articles/kubernetes-penetration-testing) RBAC answers one question: *Can this subject perform this verb on this resource?*
+
+- **Subject**: Who is asking? (User, Group, or ServiceAccount)
+- **Verb**: What are they trying to do? (get, list, create, update, delete, exec, etc.)
+- **Resource**: What are they acting on? (pods, services, deployments, secrets, etc.)
+
+The combination of these three — scoped to a namespace or cluster-wide — defines every permission in your cluster.
+
+### Role vs ClusterRole
+
+A **Role** is namespace-scoped. It grants permissions within a single namespace.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: production
+  name: pod-reader
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+```
+
+A **ClusterRole** is cluster-scoped. It can grant permissions across all namespaces, or access cluster-level resources (nodes, namespaces, persistent volumes).
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-reader
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+```
+
+<Callout type="info">
+ClusterRoles can also be bound at the namespace level using a RoleBinding (not ClusterRoleBinding). This lets you define a role once and use it in specific namespaces without granting cluster-wide access.
+</Callout>
+
+### Binding Types
+
+A **RoleBinding** connects a Role (or ClusterRole) to a subject within a namespace. A **ClusterRoleBinding** connects a ClusterRole to a subject across the entire cluster.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: production
+  name: pod-reader-binding
+subjects:
+- kind: ServiceAccount
+  name: monitoring-agent
+  namespace: production
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+## Designing Least Privilege
+
+### Namespace Isolation
+
+Use namespaces as security boundaries. Each team or application gets its own namespace, and RBAC roles are scoped to that namespace. This limits blast radius — a compromised service account in one namespace can't reach resources in another (assuming network policies are also in place).
+
+### Service Account Patterns
+
+Every workload should run with a dedicated service account. Never use the default service account for anything that needs permissions — it's shared across all pods in a namespace that don't specify one.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: payment-service
+  name: payment-api
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: payment-api
+spec:
+  serviceAccountName: payment-api
+  containers:
+  - name: api
+    image: payment-api:v1.2.0
+```
+
+<Warning>
+Set `automountServiceAccountToken: false` on service accounts that don't need API access. This prevents a compromised pod from automatically receiving a token it doesn't need.
+</Warning>
+
+### Avoiding Cluster-Admin
+
+The `cluster-admin` ClusterRole grants full access to everything. It should be granted to exactly zero service accounts and very few humans. If you're using it "temporarily" for a CI/CD pipeline, you're building a supply chain attack vector.
+
+## Common RBAC Patterns
+
+### CI/CD Service Account
+
+A deployment pipeline needs to create and update resources in specific namespaces, but shouldn't have read access to secrets or the ability to exec into pods.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: staging
+  name: deployer
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["services", "configmaps"]
+  verbs: ["get", "list", "create", "update", "patch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "create", "update", "patch"]
+```
+
+### Developer Read Access
+
+Developers debugging production need read access to resources but should not be able to modify them.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: production
+  name: developer-read
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "events"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]
+```
+
+### Monitoring Agent Permissions
+
+A monitoring agent (like Prometheus) needs to scrape metrics across the cluster. This is a legitimate use case for a ClusterRole:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/metrics", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+```
+
+## Auditing and Compliance
+
+### kubectl auth can-i
+
+The fastest way to check what a subject can do:
+
+```bash
+# Can the default service account in production list pods?
+kubectl auth can-i list pods --as=system:serviceaccount:production:default -n production
+
+# What can the deployer service account do?
+kubectl auth can-i --list --as=system:serviceaccount:staging:deployer -n staging
+
+# Can I create secrets?
+kubectl auth can-i create secrets
+```
+
+### RBAC Audit Tools
+
+**rbac-lookup** finds what permissions a user or service account has across all namespaces:
+
+```bash
+# Install
+brew install reactiveops/rbac/rbac-lookup
+
+# Find all permissions for a service account
+rbac-lookup --kind serviceaccount payment-api
+
+# Find all permissions for a user
+rbac-lookup jane.doe@example.com
+```
+
+**rakkess** shows a permissions matrix for the current user or any subject:
+
+```bash
+# Show what the current user can do in the current namespace
+rakkess
+
+# Show what a specific service account can do
+rakkess --as system:serviceaccount:production:default -n production
+```
+
+### Policy Enforcement
+
+Use an admission controller (Kyverno or OPA Gatekeeper) to enforce RBAC policies automatically:
+
+```yaml
+# Kyverno policy: Block cluster-admin binding to service accounts
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: block-clusteradmin-sa
+spec:
+  validationRules:
+  - name: no-clusteradmin-sa
+    match:
+      resources:
+        kinds:
+        - ClusterRoleBinding
+    validate:
+      message: "Service accounts cannot be bound to cluster-admin"
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.roleRef.name }}"
+            operator: Equals
+            value: "cluster-admin"
+```
+
+## Advanced Patterns
+
+### Impersonation for Debugging
+
+Administrators can impersonate other users to test their permissions without switching credentials:
+
+```bash
+# What can the deployer SA see?
+kubectl get pods --as=system:serviceaccount:staging:deployer -n staging
+
+# What can a developer see?
+kubectl get deployments --as=jane.doe@example.com -n production
+```
+
+This requires the `impersonate` verb, which should itself be tightly controlled.
+
+### Aggregated Cluster Roles
+
+You can compose ClusterRoles from other ClusterRoles using aggregation rules. This is useful for building roles from modular pieces:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-stack
+aggregationRule:
+  clusterRoleSelectors:
+  - matchLabels:
+      rbac.example.com/aggregate-to-monitoring: "true"
+rules: [] # Computed automatically from aggregated roles
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-pods
+  labels:
+    rbac.example.com/aggregate-to-monitoring: "true"
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+```
+
+### External OIDC Integration
+
+For production clusters, integrate RBAC with your identity provider (Okta, Auth0, Azure AD) using OIDC:
+
+```bash
+# API server flags for OIDC integration
+--oidc-issuer-url=https://your-idp.example.com
+--oidc-client-id=kubernetes
+--oidc-username-claim=email
+--oidc-username-prefix=oidc:
+--oidc-groups-claim=groups
+--oidc-groups-prefix=oidc:
+```
+
+Then create ClusterRoleBindings that reference OIDC groups:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-engineers
+subjects:
+- kind: Group
+  name: oidc:platform-engineers
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: edit
+  apiGroup: rbac.authorization.k8s.io
+```
+
+<Callout type="tip">
+**Movement break:** You just absorbed a dense RBAC guide. Stand up, do 10 shoulder rolls backward, and look out a window for 20 seconds. Your shoulders and eyes will thank you — and you'll come back to the audit step with fresh eyes.
+</Callout>
+
+## Summary & Next Steps
+
+RBAC is one of those things you set up once and then forget about — until something breaks or something is breached. Regular audits and policy enforcement are the difference between a secure cluster and a ticking time bomb. For a comprehensive security checklist that includes RBAC, see our [DevSecOps hardening checklist](/blog/devsecops-hardening-checklist).
+

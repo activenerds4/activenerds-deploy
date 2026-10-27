@@ -1,0 +1,153 @@
+---
+title: "LLM Production Readiness Checklist"
+description: "Ship an LLM to production with confidence — VRAM sizing, quantization verification, schema validation, fallback routing, and TTFT/latency SLA budgets."
+category: ai-ml
+slug: llm-production-readiness-checklist
+lastUpdated: "2026-08-28"
+tags: ["llms", "inference", "mlops", "production"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# LLM Production Readiness Checklist
+
+**From "it works on my GPU" to "it survives Black Friday."**
+
+A model that demos well is not a model that serves well. This checklist covers the gap between a notebook prototype and a production inference endpoint — sizing, quantization, validation, fallback, and the latency budgets that keep users from bouncing.
+
+---
+
+## Table of Contents
+
+1. [Model & Quantization](#1-model--quantization)
+2. [VRAM & Memory Sizing](#2-vram--memory-sizing)
+3. [Input/Output Validation](#3-inputoutput-validation)
+4. [Fallback & Degradation](#4-fallback--degradation)
+5. [Latency & SLA Budgets](#5-latency--sla-budgets)
+6. [Observability & Safety](#6-observability--safety)
+
+---
+
+## 1. Model & Quantization
+
+<ChecklistBox
+  title="Model & Quantization"
+  items={[
+    "Model version pinned by digest, not floating tag (e.g. sha256:abc123, not :latest)",
+    "Quantization format chosen and documented (GGUF for local, AWQ/GPTQ for GPU serve)",
+    "Quantized model re-evaluated against the FP16 baseline on your eval set (quality drop < 5%)",
+    "Tokenizer matched to model revision (mismatched tokenizers silently corrupt output)",
+    "Context window sized for the 99th-percentile real input length, not the marketing max",
+    "EOS / stop tokens configured to prevent runaway generation",
+    "System prompt versioned and stored alongside the model (not hardcoded in the app)",
+  ]}
+/>
+
+<Callout variant="warning" title="Quantization verification">
+  Don't trust the filename. Load the quantized model and run a known-good prompt set. Compare perplexity or task accuracy against the FP16 checkpoint. A 4-bit model that "looks fine" can silently degrade on edge cases — measure before you ship.
+</Callout>
+
+---
+
+## 2. VRAM & Memory Sizing
+
+<ChecklistBox
+  title="VRAM & Memory Sizing"
+  items={[
+    "Model weights VRAM calculated: params × bytes-per-param (e.g. 7B × 0.5 (4-bit) ≈ 3.5 GB)",
+    "KV cache VRAM calculated: 2 × layers × hidden × seq_len × batch × bytes-per-element",
+    "Activation overhead budgeted (typically 10–20% on top of weights + KV cache)",
+    "Peak VRAM validated under max concurrent requests, not just single-request baseline",
+    "GPU memory headroom of at least 15% reserved for fragmentation and spikes",
+    "OOM behavior tested — graceful degradation, not a hard crash that kills the pod",
+    "Multi-GPU tensor/pipeline parallelism plan documented if model exceeds single-GPU VRAM",
+  ]}
+/>
+
+---
+
+## 3. Input/Output Validation
+
+<ChecklistBox
+  title="Input/Output Validation"
+  items={[
+    "JSON schema enforced on all structured outputs (response_format / guided decoding)",
+    "Pydantic or Zod models validate every tool-call argument before execution",
+    "Max input tokens enforced server-side (reject inputs exceeding context budget)",
+    "Max output tokens capped to prevent cost runaway from degenerate generations",
+    "PII / secret scrubbing on both input and output paths",
+    "Output parsed and re-validated; malformed JSON retried or rejected, not passed through",
+    "Tool/function call signatures versioned and breaking changes gated behind a flag",
+  ]}
+/>
+
+---
+
+## 4. Fallback & Degradation
+
+<ChecklistBox
+  title="Fallback & Degradation"
+  items={[
+    "Primary model failure triggers automatic fallback to a smaller/cheaper model",
+    "Fallback chain documented (e.g. GPT-4o → Llama-3 70B → Llama-3 8B → cached response)",
+    "Rate-limit / 429 responses retried with exponential backoff and jitter",
+    "Semantic cache serves repeated or near-identical queries before hitting the model",
+    "Graceful degradation returns a partial or templated response, never a raw 500",
+    "Circuit breaker opens after N consecutive failures to avoid cascading retries",
+    "Fallback events logged and alerted so silent quality drops are visible",
+  ]}
+/>
+
+---
+
+## 5. Latency & SLA Budgets
+
+<ChecklistBox
+  title="Latency & SLA Budgets"
+  items={[
+    "TTFT (time-to-first-token) budget defined and monitored (target e.g. < 800ms p95)",
+    "Inter-token latency budget defined for streaming responses",
+    "Total response time budget defined for non-streaming (target e.g. < 4s p95)",
+    "p95 and p99 latency tracked separately — averages hide tail latency",
+    "Concurrency / max-connections tuned so queueing doesn't blow the TTFT budget",
+    "Batching strategy chosen (continuous batching in vLLM/TGI) and tuned for throughput/latency tradeoff",
+    "SLA breach triggers an alert, not just a dashboard color change",
+  ]}
+/>
+
+<Callout variant="tip" title="Budget the whole path, not just the model">
+  Your TTFT budget has to cover network ingress, auth, input validation, queue wait, prefill, and first token decode. If the model alone eats 90% of the budget, every other stage has to be perfect. Measure end-to-end from the client's perspective.
+</Callout>
+
+---
+
+## 6. Observability & Safety
+
+<ChecklistBox
+  title="Observability & Safety"
+  items={[
+    "Every request logged with model version, prompt hash (not raw PII), tokens, latency",
+    "Cost per request tracked (input + output tokens × price) and budgeted",
+    "Toxicity / safety classifier on outputs if serving untrusted inputs",
+    "Prompt-injection defenses in place (system prompt isolation, tool-call allow-lists)",
+    "Daily eval regression run against a golden set; drift triggers a rollback gate",
+    "Model can be rolled back to the previous version in under 5 minutes",
+    "Abuse / rate limiting per user/API key enforced before the model is invoked",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Production Sign-off"
+  items={[
+    "Load test passed at 2× expected peak QPS for 30 minutes with no SLA breach",
+    "Chaos test: kill a GPU node / primary model — fallback engages within budget",
+    "On-call runbook published with model rollback and fallback-toggle procedures",
+    "Cost forecast reviewed and approved for the next 90 days",
+  ]}
+/>

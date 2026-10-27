@@ -1,0 +1,24 @@
+# ActiveNerds
+
+> ActiveNerds is the go-to destination for AI/ML, Kubernetes, and DevSecOps professionals — sharp technical coverage woven with genuinely useful, non-preachy fitness and wellness content for desk-bound tech pros.
+
+## Key Pages
+
+- [Home](https://www.activenerds.com): Main site with latest articles
+- [Articles](https://www.activenerds.com/articles): Complete article archive
+- [Blog](https://www.activenerds.com/blog): Blog index
+- [Search](https://www.activenerds.com/search): Search all content
+- [About](https://www.activenerds.com/about): About ActiveNerds
+- [Contact](https://www.activenerds.com/contact): Contact information
+- [FAQ](https://www.activenerds.com/faq): Frequently asked questions
+
+## Feeds
+
+- [RSS Feed](https://www.activenerds.com/feed.xml): RSS 2.0 feed
+- [Atom Feed](https://www.activenerds.com/atom.xml): Atom 1.0 feed
+- [JSON Feed](https://www.activenerds.com/feed.json): JSON Feed 1.1
+- [Sitemap](https://www.activenerds.com/sitemap.xml): XML sitemap
+
+## Optional
+
+- [Full Content Index](https://www.activenerds.com/llms-full.txt): Complete article index with descriptions

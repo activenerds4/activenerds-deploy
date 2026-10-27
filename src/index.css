@@ -1,0 +1,378 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Self-hosted IBM Plex Sans font weights.
+   Download woff2 files from Google Fonts and place in public/fonts/.
+   See docs/performance/self-hosted-fonts.md for setup instructions. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/ibm-plex-sans-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: optional;
+  src: url("/fonts/ibm-plex-sans-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: optional;
+  src: url("/fonts/ibm-plex-sans-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: optional;
+  src: url("/fonts/ibm-plex-sans-700.woff2") format("woff2");
+}
+
+/* IBM Plex Sans fallback font with matching metrics to prevent CLS on font swap.
+   Uses local Arial as a proxy with size-adjust to match IBM Plex Sans metrics. */
+@font-face {
+  font-family: "IBM Plex Sans Fallback";
+  font-style: normal;
+  font-weight: 400;
+  src: local("Arial");
+  ascent-override: 95%;
+  descent-override: 24%;
+  line-gap-override: 0%;
+  size-adjust: 100%;
+}
+@font-face {
+  font-family: "IBM Plex Sans Fallback";
+  font-style: normal;
+  font-weight: 500;
+  src: local("Arial");
+  ascent-override: 95%;
+  descent-override: 24%;
+  line-gap-override: 0%;
+  size-adjust: 100%;
+}
+@font-face {
+  font-family: "IBM Plex Sans Fallback";
+  font-style: normal;
+  font-weight: 600;
+  src: local("Arial");
+  ascent-override: 95%;
+  descent-override: 24%;
+  line-gap-override: 0%;
+  size-adjust: 100%;
+}
+@font-face {
+  font-family: "IBM Plex Sans Fallback";
+  font-style: normal;
+  font-weight: 700;
+  src: local("Arial");
+  ascent-override: 95%;
+  descent-override: 24%;
+  line-gap-override: 0%;
+  size-adjust: 100%;
+}
+
+/* Self-hosted JetBrains Mono font weights for code blocks. */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/jetbrains-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: optional;
+  src: url("/fonts/jetbrains-mono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: optional;
+  src: url("/fonts/jetbrains-mono-700.woff2") format("woff2");
+}
+
+/**
+ * ActiveNerds Design System — Deep slate primary with spring green accent.
+ *
+ * Colors are defined as HSL values to match the Tailwind config's
+ * `hsl(var(--token))` convention. The palette pairs a deep slate
+ * primary (#1E2532) with a vivid spring green accent (#2DD4A7) on
+ * clean light backgrounds (#F5F7FA), with a dark mode using #0F1419.
+ *
+ * Typography: IBM Plex Sans for both display and body — engineering feel
+ * with excellent legibility. JetBrains Mono for code blocks.
+ */
+
+@layer base {
+  :root {
+    /* --- Slate & Spring Green palette (light) --- */
+
+    --background: 210 20% 98%;
+    --foreground: 215 28% 17%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 17%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 17%;
+
+    --primary: 215 30% 16%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 95%;
+    --secondary-foreground: 215 28% 17%;
+
+    --muted: 210 20% 95%;
+    --muted-foreground: 215 14% 47%;
+
+    --accent: 160 60% 50%;
+    --accent-foreground: 215 30% 10%;
+
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 16% 90%;
+    --input: 210 16% 90%;
+    --ring: 160 60% 50%;
+
+    --radius: 0.375rem;
+
+    /* Sidebar */
+    --sidebar-background: 215 30% 16%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 160 60% 50%;
+    --sidebar-primary-foreground: 215 30% 10%;
+    --sidebar-accent: 215 20% 22%;
+    --sidebar-accent-foreground: 210 20% 90%;
+    --sidebar-border: 215 20% 25%;
+    --sidebar-ring: 160 60% 50%;
+
+    /* --- Typography --- */
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", monospace;
+
+    /* --- Layout --- */
+    --content-max: 72rem;
+    --article-max: 42rem;
+  }
+
+  .dark {
+    /* --- Slate & Spring Green palette (dark mode) --- */
+
+    --background: 215 35% 8%;
+    --foreground: 210 20% 90%;
+
+    --card: 215 30% 13%;
+    --card-foreground: 210 20% 90%;
+
+    --popover: 215 30% 13%;
+    --popover-foreground: 210 20% 90%;
+
+    --primary: 210 20% 90%;
+    --primary-foreground: 215 35% 8%;
+
+    --secondary: 215 20% 20%;
+    --secondary-foreground: 210 20% 90%;
+
+    --muted: 215 20% 18%;
+    --muted-foreground: 215 14% 60%;
+
+    --accent: 160 60% 50%;
+    --accent-foreground: 215 35% 8%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 20% 22%;
+    --input: 215 20% 22%;
+    --ring: 160 60% 50%;
+
+    --sidebar-background: 215 35% 6%;
+    --sidebar-foreground: 215 14% 65%;
+    --sidebar-primary: 210 20% 90%;
+    --sidebar-primary-foreground: 215 35% 8%;
+    --sidebar-accent: 215 20% 18%;
+    --sidebar-accent-foreground: 210 20% 90%;
+    --sidebar-border: 215 20% 22%;
+    --sidebar-ring: 160 60% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+    font-feature-settings: "kern", "liga", "calt";
+    text-rendering: optimizeLegibility;
+    transition:
+      background-color 0.3s ease,
+      color 0.3s ease;
+  }
+
+  /* Cards and surfaces also transition smoothly on theme switch */
+  .card,
+  [class*="bg-card"],
+  [class*="bg-muted"],
+  [class*="bg-secondary"] {
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease;
+  }
+
+  /* Headings use the same sans font at bolder weight */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  /* Visible focus for keyboard navigation */
+  :focus-visible {
+    @apply outline-2 outline-offset-2;
+    outline-style: solid;
+    outline-color: hsl(var(--ring, currentColor));
+  }
+}
+
+@layer components {
+  /* Display heading utility */
+  .display-heading {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+
+  /* Eyebrow / kicker label */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* Article body for long-form reading */
+  .prose-body {
+    font-family: var(--font-sans);
+    font-size: 1.0625rem;
+    line-height: 1.75;
+  }
+
+  /* Subtle grid texture overlay */
+  .paper-texture {
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      hsl(var(--muted-foreground) / 0.06) 1px,
+      transparent 0
+    );
+    background-size: 24px 24px;
+  }
+}
+
+@layer utilities {
+  /* Reading-width container for article prose */
+  .reading-width {
+    max-width: var(--article-max);
+  }
+
+  /* Content-width container */
+  .content-width {
+    max-width: var(--content-max);
+  }
+
+  /* Line clamp helpers */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+/* Smooth, GPU-accelerated motion helpers */
+@keyframes soundwave-radiate {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.animate-soundwave {
+  animation: soundwave-radiate 2.4s ease-out infinite;
+  transform-origin: center;
+}
+
+@keyframes idle-float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(1.5deg);
+  }
+}
+
+.animate-idle-float {
+  animation: idle-float 4.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+@layer components {
+  .prose-body p {
+    text-align: justify;
+    text-justify: inter-word;
+    -webkit-hyphens: auto;
+    hyphens: auto;
+  }
+}

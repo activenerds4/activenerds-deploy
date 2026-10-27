@@ -1,0 +1,397 @@
+---
+title: "Compliance Automation for Kubernetes"
+slug: compliance-automation-kubernetes
+description: "Automate compliance checks in K8s with Kyverno, kube-bench, and OPA — continuous compliance without manual audits."
+date: "2025-12-22"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: false
+relatedArticles: ["devsecops-hardening-checklist", "kubernetes-rbac-configuration", "kubernetes-penetration-testing", "runtime-security-falco-tetragon", "supply-chain-security-k8s"]
+image: https://cdn.activenerds.com/images/posts/compliance-automation-kubernetes.png
+imageAlt: "Compliance automation for Kubernetes — policy enforcement through OPA Gatekeeper and Kyverno with automated audit trails"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Automate everything**: manual compliance doesn't scale and is always outdated
+- **Start with audit mode**: switch to enforce once your baseline is clean
+- **Run in CI**: catch violations before they reach the cluster
+- **Generate evidence automatically**: don't collect it manually for audits
+- **Map to frameworks**: CIS, NIST, and SOC2 all map to K8s controls
+</Callout>
+
+Manual compliance audits are painful: spreadsheets, screenshots, interviews, and weeks of disruption. The result is a point-in-time snapshot that's outdated the moment it's published. Compliance automation flips this model — continuous, automated checks that run on every commit, every deployment, and on a schedule. You always know your compliance status, and audits become a report-generation exercise rather than a fire drill.
+
+## The Compliance Challenge
+
+### Manual Audit Pain
+
+Traditional compliance involves:
+
+- **Quarterly or annual audits** that disrupt normal operations
+- **Manual evidence collection** — screenshots, configuration exports, interview notes
+- **Point-in-time snapshots** that are outdated within days
+- **Auditor back-and-forth** — clarifications, remediation, re-verification
+- **High cost** — external auditors, internal time, opportunity cost
+
+### Continuous Compliance Concept
+
+Continuous compliance means:
+
+- **Automated checks** run continuously, not just at audit time
+- **Real-time status** — always know your current compliance posture
+- **Automatic remediation** — policy violations blocked or fixed automatically
+- **Evidence as code** — compliance evidence generated from infrastructure state
+- **Audit-ready** — generate reports on demand from continuous data
+
+### K8s-Specific Controls
+
+Kubernetes introduces compliance challenges that traditional tools don't address:
+
+- **Dynamic infrastructure** — pods and services appear and disappear
+- **Declarative configuration** — compliance must check the desired state, not just running state
+- **Multi-layer architecture** — cluster, namespace, workload, network, runtime
+- **Rapid change** — [GitOps](/articles/gitops-argocd-flux-comparison) means infrastructure changes constantly
+
+## kube-bench for CIS Benchmarks
+
+### Running kube-bench
+
+kube-bench checks your cluster against the CIS Kubernetes Benchmark:
+
+```bash
+# Run as a job in the cluster
+kubectl apply -f https://raw.githubusercontent.com/aquasecurity/kube-bench/main/job.yaml
+
+# Get results
+kubectl logs job/kube-bench
+
+# Run specific benchmark version
+kube-bench --benchmark cis-1.8
+
+# Run specific sections
+kube-bench --benchmark cis-1.8 --sections="4.1,4.2"  # Control plane only
+```
+
+### Interpreting Results
+
+kube-bench output categorizes each check:
+
+```text
+[FAIL] 4.1.1 Ensure that the kubelet configuration file permission is set to 644 or more restrictive (Automated)
+[FAIL] 4.1.2 Ensure that the kubelet configuration file ownership is set to root:root (Automated)
+[PASS] 4.1.3 Ensure that the kubelet --anonymous-auth is set to false (Automated)
+[WARN] 4.1.4 Ensure that the kubelet --authorization-mode is not set to AlwaysAllow (Manual)
+```
+
+- **PASS**: Control is satisfied
+- **FAIL**: Control is not met — needs remediation
+- **WARN**: Control needs manual review
+- **INFO**: Informational, not a pass/fail check
+
+### Remediation Tracking
+
+Automate remediation tracking in CI:
+
+```yaml
+# .github/workflows/compliance.yml
+name: CIS Benchmark Check
+on: [push, pull_request, schedule]
+jobs:
+  kube-bench:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Run kube-bench
+      run: |
+        # Run kube-bench against the cluster
+        kube-bench --benchmark cis-1.8 --json > results.json
+        
+        # Check for failures
+        FAIL_COUNT=$(jq '[.Results[].Tests[] | select(.Status == "FAIL")] | length' results.json)
+        if [ "$FAIL_COUNT" -gt "0" ]; then
+          echo "CIS Benchmark failures: $FAIL_COUNT"
+          jq '.Results[].Tests[] | select(.Status == "FAIL")' results.json
+          exit 1
+        fi
+        
+    - name: Upload results
+      uses: actions/upload-artifact@v3
+      with:
+        name: cis-benchmark-results
+        path: results.json
+```
+
+## Policy-Based Compliance with Kyverno
+
+### Compliance Policies
+
+Kyverno enforces compliance policies at admission time. Here are key compliance policies mapped to common frameworks:
+
+**CIS 5.1.1 — Ensure cluster-admin role is not used for general operations:**
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-cluster-admin
+spec:
+  validationRules:
+  - name: no-clusteradmin-sa
+    match:
+      resources:
+        kinds:
+        - ClusterRoleBinding
+    validate:
+      message: "Service accounts must not be bound to cluster-admin"
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.roleRef.name }}"
+            operator: Equals
+            value: "cluster-admin"
+            message: "Use namespace-scoped roles instead"
+```
+
+**CIS 5.4.1 — Prefer using service accounts over root user:**
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-non-root
+spec:
+  validationRules:
+  - name: run-as-non-root
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "Containers must not run as root"
+      pattern:
+        spec:
+          containers:
+          - securityContext:
+              runAsNonRoot: true
+```
+
+### Audit vs Enforce Mode
+
+Kyverno supports two modes:
+
+```yaml
+# Audit mode — logs violations but doesn't block
+spec:
+  validationRules:
+  - name: example
+    match: ...
+    validate: ...
+    enforce: false  # Default — audit only
+
+# Enforce mode — blocks non-compliant resources
+spec:
+  validationRules:
+  - name: example
+    match: ...
+    validate: ...
+    enforce: true  # Blocks admission
+```
+
+<Callout type="info">
+Start in audit mode for new policies. Monitor the Kyverno policy reports for a week, fix legitimate violations, then switch to enforce mode. This prevents breaking deployments while you build your compliance baseline.
+</Callout>
+
+### Reports and Alerts
+
+Kyverno generates policy reports for audit-mode policies:
+
+```bash
+# View policy reports
+kubectl get policyreports -A
+
+# View violations in a namespace
+kubectl get policyreports -n production
+
+# Get specific policy results
+kubectl describe policyreport polr-kyverno -n production
+```
+
+Set up alerting on policy violations:
+
+```yaml
+# Prometheus alert rule
+- alert: KyvernoPolicyViolation
+  expr: kyverno_policy_violations > 0
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Kyverno policy violation detected"
+    description: "{{ $labels.policy }} violated in namespace {{ $labels.namespace }}"
+```
+
+## OPA Gatekeeper for Compliance
+
+### Constraint Frameworks
+
+Gatekeeper uses constraints (policies) and constraint templates (policy logic):
+
+```yaml
+# Constraint Template: Require labels
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            labels:
+              type: array
+              items:
+                type: string
+  targets:
+  - target: admission.k8s.gatekeeper.sh
+    rego: |
+      package k8srequiredlabels
+
+      violation[{"msg": msg}] {
+        provided := {label | input.review.object.metadata.labels[label]}
+        required := {label | label := input.parameters.labels[_]}
+        missing := required - provided
+        count(missing) > 0
+        msg := sprintf("missing required labels: %v", [missing])
+      }
+---
+# Constraint: Require compliance labels
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: require-compliance-labels
+spec:
+  match:
+    kinds:
+    - apiGroups: [""]
+      kinds: ["Namespace"]
+  parameters:
+    labels: ["compliance-level", "data-classification", "owner"]
+```
+
+### Compliance Bundles
+
+Gatekeeper supports pre-built compliance bundles:
+
+```bash
+# Install CIS benchmark bundle
+kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper-library/master/library/general/requiredlabels/samples/namespace-labels/constraint.yaml
+
+# Install NIST 800-53 bundle
+kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper-library/master/library/general/disallowedtags/samples/container-deny-privileged/constraint.yaml
+```
+
+### Audit Reports
+
+Gatekeeper generates audit reports for all resources, not just those at admission time:
+
+```bash
+# View constraint violations
+kubectl get constraints -o json | jq '.items[].status.violations'
+
+# Export full audit report
+kubectl get k8srequiredlabels -o json > compliance-report.json
+```
+
+## Building a Compliance Pipeline
+
+### CI Integration
+
+```yaml
+# .github/workflows/compliance-pipeline.yml
+name: Compliance Pipeline
+on: [push, pull_request]
+jobs:
+  compliance:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Scan IaC with checkov
+      run: |
+        pip install checkov
+        checkov -d infrastructure/ --framework terraform --output json > checkov-results.json
+    
+    - name: Validate K8s manifests with kubeconform
+      run: |
+        kubeconform -strict -kubernetes-version 1.28 manifests/
+    
+    - name: Run Kyverno policies
+      run: |
+        kyverno apply policies/ --resource manifests/ --output json > kyverno-results.json
+    
+    - name: Check CIS benchmarks
+      run: |
+        kube-bench --benchmark cis-1.8 --json > kube-bench-results.json
+    
+    - name: Generate compliance report
+      run: |
+        python3 scripts/generate-compliance-report.py \
+          --checkov checkov-results.json \
+          --kyverno kyverno-results.json \
+          --kube-bench kube-bench-results.json \
+          --output compliance-report.html
+    
+    - name: Upload compliance report
+      uses: actions/upload-artifact@v3
+      with:
+        name: compliance-report
+        path: compliance-report.html
+```
+
+### Drift Detection
+
+Continuous compliance requires detecting when your running state drifts from your declared state:
+
+```bash
+# Compare live cluster state with GitOps repo
+kubectl get deployments -A -o json | jq '.items[].metadata.labels' > live-labels.json
+git show HEAD:manifests/labels.json > declared-labels.json
+diff live-labels.json declared-labels.json
+```
+
+Use tools like ArgoCD or Flux for GitOps — they detect drift and can alert or auto-remediate.
+
+### Evidence Collection
+
+Automate evidence collection for audits:
+
+```python
+# scripts/collect-evidence.py
+import json, subprocess, datetime
+
+evidence = {
+    "timestamp": datetime.datetime.now().isoformat(),
+    "cluster_version": subprocess.check_output(["kubectl", "version", "--short"]),
+    "rbac_audit": subprocess.check_output(["kubectl", "auth", "can-i", "--list"]),
+    "network_policies": subprocess.check_output(["kubectl", "get", "networkpolicies", "-A", "-o", "json"]),
+    "pod_security_standards": subprocess.check_output(["kubectl", "get", "namespaces", "-o", "json"]),
+    "cis_benchmarks": subprocess.check_output(["kube-bench", "--json"]),
+}
+
+with open(f"evidence-{evidence['timestamp'].split('T')[0]}.json", "w") as f:
+    json.dump(evidence, f, indent=2)
+```
+
+<Callout type="tip">
+**Movement break:** Compliance work involves a lot of reading and detail-checking. After 45 minutes, stand up and walk for 3 minutes. Compliance errors often come from fatigue — a short walk resets your attention for the next batch of controls.
+</Callout>
+
+## Summary & Next Steps
+
+Compliance automation is an investment that pays for itself the first time you generate an audit report in minutes instead of weeks. Pair this with our [hardening checklist](/blog/devsecops-hardening-checklist) and [policy-as-code guide](/blog/policy-as-code-opa-kyverno) for a complete compliance program.
+

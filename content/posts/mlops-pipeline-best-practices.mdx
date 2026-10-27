@@ -1,0 +1,93 @@
+---
+title: "MLOps Pipeline Best Practices"
+slug: mlops-pipeline-best-practices
+description: "Build reproducible, observable ML pipelines — from data versioning to model registry, CI/CD for ML, and experiment tracking."
+date: "2025-06-20"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["mlops", "pytorch"]
+featured: false
+relatedArticles: ["experiment-tracking-mlflow-vs-wandb", "model-versioning-registry-comparison", "data-preprocessing-pipeline-best-practices", "distributed-data-parallel-vs-model-parallel", "data-augmentation-techniques-pytorch"]
+image: https://cdn.activenerds.com/images/posts/mlops-pipeline-best-practices.png
+imageAlt: "An end-to-end MLOps pipeline of data versioning, model registry, CI/CD and experiment tracking as a flowing spring-green loop on a deep slate background"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **DVC (Data Version Control)**: Git for data.
+- **LakeFS**: Like DVC but for object storage.
+- **Schema validation**: Before training, validate that your data matches the expected schema.
+- **MLflow**: Open-source, self-hosted.
+</Callout>
+
+ML pipelines are deceptively complex. Unlike traditional software pipelines, they involve data that changes, models that drift, and experiments that need to be reproducible months later. This guide covers the practices that separate production ML pipelines from notebook experiments.
+
+## What Makes ML Pipelines Different
+
+Three key differences from traditional software pipelines:
+
+1. **Data dependencies**: Your code might be perfect, but if the training data changes, the model changes. You need to version data, not just code.
+2. **Reproducibility challenges**: A model trained on a different GPU, with a different random seed, or slightly different data may produce different results. Reproducibility requires explicit effort.
+3. **Model vs code versioning**: You need to track which code produced which model, which data it was trained on, and what hyperparameters were used.
+
+## Data Versioning and Validation
+
+**DVC (Data Version Control)**: Git for data. Stores data in a separate backend (S3, GCS, local) and tracks versions in Git. This lets you `dvc checkout` a specific data version alongside a specific code commit.
+
+**LakeFS**: Like DVC but for object storage. Provides Git-like branching and versioning directly on S3/GCS.
+
+**Schema validation**: Before training, validate that your data matches the expected schema. Tools like Great Expectations or Pandera catch data drift and schema changes before they corrupt your model.
+
+```python
+# Example: Simple data validation
+import pandera as pa
+
+schema = pa.DataFrameSchema({
+    "text": pa.Column(str, nullable=False),
+    "label": pa.Column(int, pa.Check.isin([0, 1])),
+})
+validated_df = schema.validate(df)  # Raises if invalid
+```
+
+## Experiment Tracking
+
+Every experiment should be tracked — even the ones that fail. You'll thank yourself in three months when you're trying to remember which hyperparameters gave the best results.
+
+**MLflow**: Open-source, self-hosted. Good for teams that want full control.
+**Weights & Biases (W&B)**: Hosted, excellent UI. Great for collaboration and visualization.
+
+Track at minimum:
+- Code commit hash
+- Data version hash
+- All hyperparameters (even defaults)
+- Training and validation metrics
+- Model artifacts
+- Environment details (GPU type, library versions)
+
+<Callout type="tip">
+Set up [experiment tracking](/articles/experiment-tracking-mlflow-vs-wandb) before you start training, not after. Retrofitting tracking onto existing experiments is painful and incomplete.
+</Callout>
+
+## CI/CD for ML
+
+ML CI/CD extends traditional CI/CD with model-specific stages:
+
+1. **Data validation**: Run schema checks on new data before training.
+2. **Model testing**: Test model performance on a held-out test set. Also test for regressions on specific slices (e.g., performance by category).
+3. **Automated retraining triggers**: Retrain when data drift is detected, when a new data batch arrives, or on a schedule.
+4. **Canary deployments**: Deploy the new model to a small percentage of traffic, monitor metrics, then roll out fully.
+
+## Model Registry and Lifecycle
+
+A [model registry](/articles/model-versioning-registry-comparison) is the single source of truth for your models. It tracks:
+- **Staging vs production**: Models progress from staging to production after validation.
+- **Rollback strategies**: When a model degrades in production, you need to roll back quickly. The registry should make this a one-command operation.
+- **Model cards**: Document the model's intended use, training data, performance, and known limitations.
+
+<Note>
+The most common MLOps mistake is treating models like code. Models have a lifecycle — they train, deploy, drift, and need retraining. Design your pipeline for this lifecycle, not for a one-time deployment.
+</Note>
+
+A well-designed MLOps pipeline makes model iteration fast, safe, and reproducible. The upfront investment pays off the first time you need to answer "which model version is in production and what data was it trained on?"
+
+

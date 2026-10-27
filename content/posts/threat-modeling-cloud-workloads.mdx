@@ -1,0 +1,238 @@
+---
+title: "Threat Modeling for Cloud Workloads"
+slug: threat-modeling-cloud-workloads
+description: "A practical approach to threat modeling cloud-native applications — STRIDE, attack trees, and K8s-specific risks."
+date: "2025-12-16"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: false
+relatedArticles: ["kubernetes-penetration-testing", "cloud-native-security-best-practices", "devsecops-hardening-checklist", "kubernetes-rbac-configuration", "runtime-security-falco-tetragon"]
+image: https://cdn.activenerds.com/images/posts/threat-modeling-cloud-workloads.png
+imageAlt: "Threat modeling for cloud workloads — STRIDE methodology and attack tree analysis for cloud apps"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Model early**: threat modeling during architecture review is 100x cheaper than fixing issues in production
+- **Use STRIDE**: it's accessible, teachable, and maps cleanly to security properties
+- **Focus on trust boundaries**: that's where the real threats live
+- **Prioritize by likelihood × impact**: don't treat all threats equally
+- **Make it living**: threat models that don't evolve are useless
+</Callout>
+
+Threat modeling is the practice of systematically identifying what could go wrong before it does. For cloud-native workloads running on Kubernetes, the attack surface is larger and more dynamic than traditional infrastructure — containers spin up and down, network paths multiply, and the control plane itself is a target. This guide covers practical threat modeling for cloud-native applications.
+
+## Threat Modeling Fundamentals
+
+### Why Model Threats
+
+Most security efforts are reactive — patching CVEs, responding to incidents, fixing misconfigurations found by scanners. Threat modeling is proactive: you identify potential attack vectors during design, before code is written or infrastructure is deployed. This is dramatically cheaper than fixing security issues in production.
+
+### STRIDE Framework
+
+STRIDE is Microsoft's threat categorization model. Each letter represents a class of threat:
+
+| Letter | Threat Type | Property Violated | Cloud-Native Example |
+|--------|------------|-------------------|----------------------|
+| S | Spoofing | Authentication | Forged service account token |
+| T | Tampering | Integrity | Mutated container image in registry |
+| R | Repudiation | Non-repudiation | No audit log for kubectl exec |
+| I | Information Disclosure | Confidentiality | Secret leaked in pod logs |
+| D | Denial of Service | Availability | Noisy neighbor exhausts node resources |
+| E | Elevation of Privilege | Authorization | Pod escapes to node via privileged container |
+
+<Callout type="info">
+STRIDE isn't the only framework — PASTA (Process for Attack Simulation and Threat Analysis) and attack trees are alternatives. STRIDE is the most accessible starting point because it maps cleanly to security properties and is easy to teach in a workshop setting.
+</Callout>
+
+### When to Model
+
+Threat modeling is most valuable at three points:
+
+1. **Architecture review** — before infrastructure is built, model the system's trust boundaries and data flows
+2. **Major changes** — when adding new components, exposing new APIs, or changing authentication flows
+3. **Periodic review** — annually or after significant security incidents, revisit and update existing models
+
+## Cloud-Native Attack Surfaces
+
+### Control Plane Exposure
+
+The Kubernetes API server is the control plane's front door. Attack vectors:
+
+- **Exposed API server** — if the API server is internet-facing without proper authentication, it's game over
+- **Compromised kubeconfig** — stolen credentials with cluster-admin access
+- **RBAC misconfiguration** — overly permissive roles that allow privilege escalation
+- **Admission controller bypass** — if admission controllers aren't configured, any pod can be deployed
+
+### Supply Chain Vectors
+
+Your container images are a major attack surface:
+
+- **Malicious base images** — a compromised base image in Docker Hub infects every build
+- **Registry compromise** — if an attacker can push to your registry, they can replace images
+- **Dependency vulnerabilities** — a vulnerable package in your image becomes an exploit path
+- **Build pipeline compromise** — if CI/CD is compromised, attackers can inject code into images
+
+```bash
+# Verify image signatures with cosign
+cosign verify --key cosign.pub myregistry.com/app:v1.2.0
+
+# Scan for vulnerabilities
+trivy image myregistry.com/app:v1.2.0
+```
+
+### Runtime Threats
+
+Once workloads are running:
+
+- **Container escape** — a vulnerability in the container runtime or kernel allows escape to the host
+- **Lateral movement** — a compromised pod reaches other pods or services via network
+- **Secret theft** — a compromised pod reads mounted secrets or service account tokens
+- **Cryptomining** — resource hijacking for cryptocurrency mining
+
+## K8s-Specific Threats
+
+### Privilege Escalation Paths
+
+Common escalation paths in Kubernetes:
+
+1. **Privileged containers** — `privileged: true` gives the container full host access
+2. **HostPath mounts** — mounting host directories gives access to host files
+3. **Host network** — `hostNetwork: true` bypasses network isolation
+4. **Host PID** — `hostPID: true` allows viewing host processes
+5. **Capability escalation** — adding `SYS_ADMIN` or `SYS_PTRACE` capabilities
+
+```yaml
+# Dangerous pod spec — do NOT use in production
+spec:
+  containers:
+  - name: app
+    image: app:v1
+    securityContext:
+      privileged: true          # Full host access
+      capabilities:
+        add: ["SYS_ADMIN"]      # Root-equivalent capability
+    volumeMounts:
+    - mountPath: /host
+      name: host                # Host filesystem access
+  volumes:
+  - name: host
+    hostPath:
+      path: /
+```
+
+<Warning>
+Each of these settings is a potential container escape vector. Pod Security Standards (PSS) restricted policy blocks all of them. Enforce PSS at the namespace level — see our [hardening checklist](/blog/devsecops-hardening-checklist) for configuration details.
+</Warning>
+
+### Network Exposure
+
+- **No network policies** — by default, all pods can communicate with all other pods
+- **Exposed services** — LoadBalancer services accidentally exposed to the internet
+- **Metadata service access** — pods can reach cloud metadata endpoints (169.254.169.254) to steal cloud credentials
+
+### Container Escape
+
+Container escape occurs when an attacker breaks out of the container's isolation to access the host. Vectors include:
+
+- **Kernel vulnerabilities** — CVEs in the Linux kernel (e.g., dirty pipe, overlayfs bugs)
+- **Runtime vulnerabilities** — containerd or runc exploits
+- **Misconfigured mounts** — hostPath, docker.sock, or /proc mounts
+
+## Practical Modeling Session
+
+### Data Flow Diagrams
+
+Start by drawing how data moves through your system. For a typical microservice architecture:
+
+```text
+User → Ingress → Frontend Service → Backend API → Database
+                                        ↓
+                                   Cache (Redis)
+                                        ↓
+                                   Message Queue
+                                        ↓
+                                   Worker Service
+```
+
+### Trust Boundaries
+
+Mark where data crosses trust boundaries — these are the points where threats are most likely:
+
+```text
+[Internet] ──trust boundary──> [Ingress Controller]
+[Ingress] ──trust boundary──> [Frontend Namespace]
+[Frontend] ──trust boundary──> [Backend Namespace]
+[Backend] ──trust boundary──> [Database Namespace]
+[Pod] ──trust boundary──> [Cloud Metadata Service]
+```
+
+### Prioritizing Mitigations
+
+Not all threats are equal. Prioritize by:
+
+1. **Likelihood** — how probable is this attack?
+2. **Impact** — what's the damage if it succeeds?
+3. **Cost to mitigate** — how much effort to fix?
+
+Focus on high-likelihood, high-impact threats first. For example:
+
+| Threat | Likelihood | Impact | Priority |
+|--------|-----------|--------|----------|
+| No network policies | High | High | P0 |
+| Privileged containers allowed | Medium | Critical | P0 |
+| No image scanning | High | Medium | P1 |
+| No audit logging | Medium | High | P1 |
+| Missing pod resource limits | High | Medium | P2 |
+
+## Integrating into DevSecOps
+
+### Threat Modeling in CI
+
+Automate threat model validation in your CI pipeline:
+
+```yaml
+# .github/workflows/security-scan.yml
+- name: Run kube-bench (CIS benchmarks)
+  run: |
+    kubectl apply -f https://raw.githubusercontent.com/aquasecurity/kube-bench/main/job.yaml
+    kubectl logs job.batch/kube-bench --tail=200
+
+- name: Verify Pod Security Standards
+  run: |
+    kubectl get namespaces -o json | jq '.items[].metadata.labels."pod-security.kubernetes.io/enforce"'
+    
+- name: Check for network policies
+  run: |
+    NAMESPACE_COUNT=$(kubectl get namespaces -o json | jq '.items | length')
+    POLICY_COUNT=$(kubectl get networkpolicies --all-namespaces -o json | jq '.items | length')
+    echo "Namespaces: $NAMESPACE_COUNT, Network Policies: $POLICY_COUNT"
+```
+
+### Living Threat Models
+
+Threat models shouldn't be one-time documents that gather dust. Treat them as living artifacts:
+
+- Store threat models alongside infrastructure code (IaC)
+- Update them when architecture changes
+- Link them to the mitigations (security policies, admission rules)
+- Review them during security incidents — did the model predict this?
+
+### Team Workshops
+
+The most effective threat modeling happens in workshops with cross-functional teams:
+
+1. **Participants**: 2-4 engineers (at least one security-minded, one infrastructure, one application)
+2. **Duration**: 90 minutes per major system
+3. **Output**: A prioritized list of threats with assigned owners and remediation timelines
+4. **Cadence**: New systems get modeled before deployment; existing systems reviewed quarterly
+
+<Callout type="tip">
+**Movement break:** Threat modeling is intense cognitive work. After 45 minutes, take a 5-minute break. Walk around, stretch your shoulders, look away from the screen. You'll come back with sharper threat identification — fatigue makes you miss obvious attack paths.
+</Callout>
+
+## Summary & Next Steps
+
+Threat modeling is a skill that compounds — the more you do it, the faster you spot architectural weaknesses. Start with one critical system, run a workshop, and build from there. Pair this with our [runtime security guide](/blog/runtime-security-falco-tetragon) for defense-in-depth.
+

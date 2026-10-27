@@ -1,0 +1,57 @@
+{
+  "batch": "keywords-batch-06",
+  "createdAt": "2026-06-29T00:00:00.000Z",
+  "totalKeywords": 15,
+  "clusters": [
+    {
+      "category": "ai-machine-learning",
+      "keywords": [
+        { "id": "kw-091", "term": "diffusion model optimization techniques", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "tutorial", "primaryTag": "pytorch", "targetPillar": "generative", "status": "ready" },
+        { "id": "kw-092", "term": "transformer architecture explained", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "llms", "targetPillar": "architecture", "status": "ready" }
+      ]
+    },
+    {
+      "category": "containers-kubernetes",
+      "keywords": [
+        { "id": "kw-097", "term": "kubernetes multi-cluster management", "searchIntent": "informational", "targetAudience": "advanced", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "fleet", "status": "ready" },
+        { "id": "kw-098", "term": "kubernetes pod security standards", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "security", "status": "ready" },
+        { "id": "kw-099", "term": "container image signing cosign", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "tutorial", "primaryTag": "docker", "targetPillar": "supply-chain", "status": "ready" }
+      ]
+    },
+    {
+      "category": "fitness-wellness-tech",
+      "keywords": [
+        { "id": "kw-105", "term": "desk yoga routines for programmers", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "desk-stretches", "targetPillar": "mobility", "status": "ready" },
+        { "id": "kw-106", "term": "stretching for wrist pain relief", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "desk-stretches", "targetPillar": "wrists", "status": "ready" },
+        { "id": "kw-107", "term": "lunch break workouts for developers", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "habit-building", "targetPillar": "movement", "status": "ready" }
+      ]
+    },
+    {
+      "category": "devsecops-security",
+      "keywords": [
+        { "id": "kw-110", "term": "cloud security posture management", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "devsecops", "targetPillar": "posture", "status": "ready" },
+        { "id": "kw-111", "term": "secrets scanning in CI pipelines", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "devsecops", "targetPillar": "secrets", "status": "ready" }
+      ]
+    },
+    {
+      "category": "gear-gadgets",
+      "keywords": [
+        { "id": "kw-114", "term": "wrist rest for keyboard guide", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "ergonomics", "targetPillar": "peripherals", "status": "ready" },
+        { "id": "kw-116", "term": "posture corrector device review", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "review", "primaryTag": "ergonomics", "targetPillar": "posture", "status": "ready" }
+      ]
+    },
+    {
+      "category": "events-community",
+      "keywords": [
+        { "id": "kw-119", "term": "hackathon judging criteria guide", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "conferences", "targetPillar": "hackathons", "status": "ready" }
+      ]
+    },
+    {
+      "category": "platform-engineering-devops",
+      "keywords": [
+        { "id": "kw-122", "term": "progressive delivery with argo rollouts", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "tutorial", "primaryTag": "kubernetes", "targetPillar": "delivery", "status": "ready" },
+        { "id": "kw-125", "term": "feature flags implementation guide", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "release", "status": "ready" }
+      ]
+    }
+  ]
+}

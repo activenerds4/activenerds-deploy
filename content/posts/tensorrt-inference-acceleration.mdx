@@ -1,0 +1,151 @@
+---
+title: "TensorRT Inference Acceleration Guide"
+slug: tensorrt-inference-acceleration
+description: "Speed up model inference with NVIDIA TensorRT — from model conversion to optimization profiles and deployment."
+date: "2025-09-17"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["llms", "pytorch"]
+featured: false
+relatedArticles: ["fine-tuning-llms-guide", "model-quantization-techniques", "attention-mechanism-explained", "gpu-vs-tpu-model-training", "knowledge-distillation-model-compression"]
+image: https://cdn.activenerds.com/images/posts/tensorrt-inference-acceleration.png
+imageAlt: "TensorRT inference acceleration — GPU optimization techniques for faster ML model serving"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Speed up model inference with NVIDIA TensorRT.
+- **Key Capabilities**: from model conversion to optimization profiles and deployment.
+- **What TensorRT Does**: Apply structured configurations and validated production patterns.
+- **Model Conversion Pipeline**: Apply structured configurations and validated production patterns.
+</Callout>
+
+If you're serving models on NVIDIA GPUs and not using TensorRT, you're leaving significant performance on the table. TensorRT is NVIDIA's inference optimization library, and for production deployments, it can deliver 2-5x speedup over [vanilla PyTorch](/articles/pytorch-lightning-vs-vanilla-pytorch) with minimal code changes. The catch: it requires an explicit model conversion step and locks you to specific GPU architectures.
+
+This guide walks through the full pipeline from PyTorch model to optimized TensorRT engine.
+
+## What TensorRT Does
+
+TensorRT applies several optimization passes to your model's computation graph:
+
+**Layer fusion** combines operations that can be executed together — for example, fusing a Conv2D + Bias + ReLU sequence into a single kernel. This reduces kernel launch overhead and enables better memory access patterns.
+
+**Precision calibration** converts FP32 weights and activations to FP16 or INT8, reducing memory bandwidth requirements and enabling faster tensor core operations. For INT8, TensorRT uses a calibration dataset to determine the optimal scaling factors that minimize accuracy loss.
+
+**Kernel auto-tuning** benchmarks multiple kernel implementations for each operation and selects the fastest one for your specific GPU and tensor shapes. This is why a TensorRT engine built for an A100 won't work on an H100 — the optimal kernels are hardware-specific.
+
+<Note>
+TensorRT engines are not portable across GPU architectures. You must build the engine on the same GPU type you'll deploy on. Plan your CI/CD accordingly.
+</Note>
+
+## Model Conversion Pipeline
+
+The standard path is PyTorch → ONNX → TensorRT:
+
+```python
+import torch
+import torch.onnx
+
+# Step 1: Export to ONNX
+model = MyModel().eval()
+dummy_input = torch.randn(1, 3, 224, 224)
+
+torch.onnx.export(
+    model,
+    dummy_input,
+    "model.onnx",
+    input_names=["input"],
+    output_names=["output"],
+    dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
+    opset_version=17,
+)
+```
+
+The `dynamic_axes` parameter is critical for production — it tells TensorRT that the batch dimension can vary, enabling dynamic batching at inference time.
+
+```python
+# Step 2: Build TensorRT engine
+import tensorrt as trt
+
+TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+builder = trt.Builder(TRT_LOGGER)
+
+# Create network from ONNX
+network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+parser = trt.OnnxParser(network, TRT_LOGGER)
+
+with open("model.onnx", "rb") as f:
+    parser.parse(f.read())
+
+# Configure builder
+config = builder.create_builder_config()
+config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 4 << 30)  # 4GB
+
+# Enable FP16
+if builder.platform_has_fast_fp16:
+    config.set_flag(trt.BuilderFlag.FP16)
+
+# Create optimization profile for dynamic shapes
+profile = builder.create_optimization_profile()
+profile.set_shape("input", (1, 3, 224, 224), (8, 3, 224, 224), (32, 3, 224, 224))
+config.add_optimization_profile(profile)
+
+# Build and serialize engine
+engine = builder.build_serialized_network(network, config)
+with open("model.engine", "wb") as f:
+    f.write(engine)
+```
+
+## Performance Gains
+
+In practice, TensorRT delivers:
+
+- **2-3x latency reduction** for CNN-based models (ResNet, EfficientNet)
+- **3-5x throughput improvement** for transformer models with FP16
+- **30-50% memory reduction** from weight quantization and activation optimization
+- **INT8 quantization** can add another 2x on top of FP16, but requires careful calibration
+
+The gains are most dramatic for models with many small operations (transformers, deep CNNs) where kernel fusion and launch overhead reduction compound.
+
+## Deployment Patterns
+
+**Triton Inference Server** is NVIDIA's recommended serving framework for TensorRT engines. It handles model loading, dynamic batching, and multi-model serving:
+
+```protobuf
+# config.pbtxt
+name: "my_model"
+platform: "tensorrtplan"
+max_batch_size: 32
+input {
+  name: "input"
+  data_type: TYPE_FP16
+  dims: [3, 224, 224]
+}
+output {
+  name: "output"
+  data_type: TYPE_FP16
+  dims: [1000]
+}
+dynamic_batching {
+  preferred_batch_size: [8, 16, 32]
+  max_queue_delay_microseconds: 50000
+}
+```
+
+Triton's dynamic batching is powerful — it collects inference requests and batches them up to your preferred size, dramatically improving throughput without adding noticeable latency.
+
+## Limitations and Alternatives
+
+TensorRT's main limitation is **hardware lock-in**. An engine built for an A100 won't run on an H100 or even a T4. For teams with mixed GPU fleets, this means maintaining multiple engine versions or building on each target GPU.
+
+<Callout type="tip">
+If hardware portability matters more than peak performance, consider ONNX Runtime. It offers 1.5-2x speedup over PyTorch (less than TensorRT) but runs on any GPU and even CPU.
+</Callout>
+
+**ONNX Runtime** is the main alternative. It's less aggressive in optimization but far more portable. For many teams, the 80% solution with ONNX Runtime is better than the 100% solution with TensorRT's operational complexity.
+
+**When to skip TensorRT**: if you're already using vLLM or TGI for LLM serving, they have built-in optimization that may make TensorRT redundant. For research and prototyping, vanilla PyTorch or ONNX Runtime is sufficient.
+
+TensorRT is a production optimization tool. If you're not yet at the scale where inference latency and cost are real concerns, it's premature optimization. But when you are serving millions of requests on GPU, the 2-5x speedup translates directly to infrastructure savings.
+
+

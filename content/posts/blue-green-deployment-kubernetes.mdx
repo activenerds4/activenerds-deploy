@@ -1,0 +1,75 @@
+---
+title: "Blue-Green Deployment on Kubernetes"
+slug: blue-green-deployment-kubernetes
+description: "Implement blue-green deployments on Kubernetes — instant cutover, two environments, traffic switching, and when it beats canary."
+date: "2026-08-07"
+author: activenerds-team
+category: platform-engineering-devops
+tags: ["kubernetes"]
+featured: false
+relatedArticles: ["service-mesh-istio-linkerd", "canary-deployment-strategies-kubernetes", "devsecops-hardening-checklist", "infrastructure-as-code-terraform-pulumi", "secrets-management-kubernetes-vault"]
+image: https://cdn.activenerds.com/images/posts/blue-green-deployment-kubernetes.png
+imageAlt: "Blue-green deployment traffic switching between two Kubernetes environments — abstract technical visualization in deep slate and spring green"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Implement blue-green deployments on Kubernetes.
+- **Key Capabilities**: instant cutover, two environments, traffic switching, and when it beats canary.
+- **What Blue-Green Gives You**: Apply structured configurations and validated production patterns.
+- **Implementation on K8s**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Blue-green deployment is the simplest progressive delivery strategy that still gives you instant cutover and instant rollback. You run two full environments — blue and green — and switch traffic between them. The new version deploys into the inactive environment, you test it there, and when you're confident you flip traffic over in one move.
+
+If something breaks, you flip back. It's the deployment pattern that trades resource cost for operational simplicity, and it's the right choice for a specific set of workloads. This is how to implement it on Kubernetes and when to choose it over canary.
+
+## What Blue-Green Gives You
+
+**Instant cutover and rollback.** The defining feature is that the switch is atomic — all traffic moves from blue to green at once, and if green is broken, all traffic moves back to blue at once. There's no gradual ramp, no partial exposure, no "we're at 5% and watching metrics." This is the advantage when you want zero partial exposure to a bad release: either everyone's on the new version or no one is. For workloads where a partial release is worse than a full one (a schema-dependent change, a feature that breaks if only some instances have it), instant cutover is a feature, not a limitation.
+
+**Two full environments.** The cost is that you run two complete copies of the application at all times. Blue is live; green is staging the next release. This doubles your resource footprint for the application, which is the main reason teams reach for canary instead — canary runs a small additional footprint and ramps it up. Blue-green's resource cost is constant; canary's is proportional to the ramp. For an application that's expensive to run, blue-green's doubled cost is a real objection.
+
+**The resource cost.** The practical implication is that blue-green suits workloads where the doubled cost is acceptable in exchange for the operational simplicity — internal services, smaller deployments, or environments where the simplicity of instant cutover is worth paying for. It's a poor fit for very large stateless services where canary's incremental ramp is more resource-efficient and the partial-exposure risk is manageable.
+
+## Implementation on K8s
+
+**Two Services and Deployments.** The basic shape is two Deployments (blue and green) each running a version of the app, and two Services, but only one Service receives traffic at a time. In practice, the common pattern is one Service that you re-point between the Deployments by changing its selector, rather than two Services with traffic switched at the ingress. The selector-switch pattern is simpler and avoids DNS changes.
+
+**Selector and label switching.** The mechanism is labels: both Deployments share a common label (e.g., `app: myapp`) and each has a version label (`version: blue` or `version: green`). The Service selects `app: myapp` plus the active version label. To switch, you update the Service's selector to point at the new version. The cutover is a single kubectl apply, and it's instant:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp
+spec:
+  selector:
+    app: myapp
+    version: green   # flip to blue to roll back
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+**Ingress and [service mesh](/articles/service-mesh-istio-linkerd) routing.** For more control — header-based routing, weighted splits, or routing at the edge — you move the switch to the Ingress or service mesh. An Ingress can route to one Service or another via a config change; a service mesh (Istio, Linkerd) can do the same via VirtualService. The advantage of routing at this layer is that the switch is a config change to a single object, and you can do more sophisticated patterns (a split between blue and green for a brief test) before the full cutover. The cost is the complexity of running a mesh, which is overkill if all you want is blue-green. See our [canary deployment strategies](/blog/canary-deployment-strategies-kubernetes) guide for when the mesh-based approach pays off.
+
+## State and Databases
+
+This is where blue-green gets hard, and where most teams either compromise or choose a different strategy.
+
+**The shared database problem.** Blue and green typically share one database, because running two databases doubles the stateful cost and creates a sync problem. But a shared database means the new version's schema changes affect the old version too — if green runs a migration, blue is now talking to a migrated schema it wasn't written for. The fix is backward-compatible migrations: any schema change must work with both the old and new code, so blue keeps running after green's migration, and you can roll back to blue without rolling back the database. This is the expand-contract pattern: expand the schema (additive, backward-compatible), deploy the new code, then contract (remove the old columns) in a later release.
+
+**Migrations between versions.** The discipline is that migrations are decoupled from code deploys. Run the migration as a separate step, ahead of the code deploy, and ensure it's backward-compatible. The blue-green cutover then only switches code, not schema. If a migration goes wrong, you roll back the migration separately from the code. Conflating the two is what makes blue-green dangerous with stateful workloads.
+
+**Stateful workload caveats.** Blue-green is a poor fit for stateful workloads where the instances hold state that can't be reconstructed — a message broker with in-flight messages, a database primary, a stateful service with sticky sessions. For these, the cutover isn't atomic because the state has to drain or migrate, and you lose the instant-rollback property that's the whole point. Stateful workloads are better served by canary or by dedicated stateful migration patterns; blue-green is fundamentally a stateless-deployment strategy.
+
+## When to Choose It
+
+**Blue-green vs canary.** The decision comes down to three factors. Resource cost: blue-green doubles the footprint, canary ramps incrementally — if the application is expensive, canary wins. Partial exposure: blue-green is all-or-nothing, canary exposes a fraction — if partial exposure is risky (incompatible changes), blue-green wins; if you want to catch issues early with a small blast radius, canary wins. Operational complexity: blue-green is simple (two deployments, a selector flip), canary needs metric-based gating and rollback automation — if your team's tooling is basic, blue-green is easier to operate correctly. See our [progressive delivery with Argo Rollouts](/blog/progressive-delivery-argo-rollouts) guide for the tooling that makes canary safe.
+
+**Resource and complexity tradeoffs.** For internal services, smaller deployments, and teams without progressive-delivery tooling, blue-green's simplicity is worth the doubled cost — the operational win of instant rollback and no metric-gating setup is real. For large customer-facing services where the doubled cost is significant and you have the tooling to do canary safely, canary is the better default. The mistake is choosing canary because it's "more advanced" without the tooling to gate it; an ungated canary is just a slow blue-green with worse rollback characteristics.
+
+**Best-fit workloads.** Blue-green fits stateless web services and APIs where the doubled cost is acceptable, schema changes are backward-compatible, and instant cutover is valuable. It doesn't fit stateful workloads, very large deployments where doubling is prohibitive, or changes that can't be made backward-compatible. Within its fit, it's the simplest deployment strategy that gives you real rollback, and its simplicity is its enduring advantage — a blue-green setup you can reason about in one paragraph is worth more than a sophisticated canary setup your team can't operate confidently.
+
+

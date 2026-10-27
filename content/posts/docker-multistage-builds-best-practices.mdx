@@ -1,0 +1,190 @@
+---
+title: "Docker Multi-Stage Builds Best Practices"
+slug: docker-multistage-builds-best-practices
+description: "Shrink Docker images and secure your supply chain with multi-stage builds — caching, distroless, and BuildKit."
+date: "2025-10-23"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["docker", "kubernetes"]
+featured: false
+relatedArticles: ["cicd-pipeline-optimization", "container-image-security-scanning", "devops-tools-benchmark-comparison", "devsecops-hardening-checklist", "distroless-container-images-security"]
+image: https://cdn.activenerds.com/images/posts/docker-multistage-builds-best-practices.png
+imageAlt: "Docker multistage builds best practices — optimized build pipelines separating compilation from runtime for smaller images"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Shrink Docker images and secure your supply chain with multi-stage builds.
+- **Key Capabilities**: caching, distroless, and BuildKit.
+- **Why Multi-Stage Matters**: Apply structured configurations and validated production patterns.
+- **Stage Design Patterns**: Apply structured configurations and validated production patterns.
+</Callout>
+
+A 1.2GB Docker image for a Go binary is a sign something went wrong. Multi-stage builds fix this by separating the build environment from the runtime image — you compile in a fat builder stage, then copy only the binary into a minimal runtime image. The result: smaller images, faster pulls, and a smaller attack surface.
+
+## Why Multi-Stage Matters
+
+### Image Size Impact
+
+Large images slow down everything — CI builds, deployments, scaling events, and `docker pull` on cold nodes. A Python app with build tools and caches can easily hit 900MB. The same app in a multi-stage build with a slim runtime often drops to 150MB or less.
+
+### Security Surface Reduction
+
+Build tools (compilers, [package managers](/articles/developer-environment-setup-checklist), shells) in a runtime image are attack vectors. If an attacker gets RCE in your container, they can use `gcc`, `curl`, or `apt-get` to escalate. A distroless or scratch runtime image has no shell — there's nothing to exploit beyond your application binary.
+
+### Build vs Runtime Separation
+
+Multi-stage builds enforce a clean boundary: the builder stage has everything needed to compile, test, and lint. The runtime stage has only what's needed to run. This separation prevents accidental dependency leaks into production.
+
+## Stage Design Patterns
+
+### Builder and Runtime Stages
+
+The classic pattern: one stage builds the artifact, another runs it.
+
+```dockerfile
+# Builder stage
+FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /app/server -ldflags="-s -w" ./cmd/server
+
+# Runtime stage
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /app/server /server
+EXPOSE 8080
+ENTRYPOINT ["/server"]
+```
+
+The builder stage uses `golang:1.22-alpine` (~300MB) with the full toolchain. The runtime stage uses `distroless/static` (~2MB) — just the binary and CA certs. Final image: ~15MB.
+
+### Distroless Base Images
+
+Google's distroless images come in several flavors:
+
+- `static-debian12` — no shell, no package manager, just CA certs and timezone data
+- `base-debian12` — adds glibc for C-based runtimes
+- `python3-debian12` — Python runtime without pip
+- `nodejs18-debian12` — Node.js runtime without npm
+
+<Callout type="info">
+Distroless images have no shell. You can't `docker exec -it <pod> sh` into them. For debugging, use `kubectl debug` with an ephemeral container, or include a debug sidecar. This is a feature, not a bug — it forces you to use proper observability tools instead of poking around in production containers.
+</Callout>
+
+### Alpine Trade-offs
+
+Alpine is tiny (~5MB) but uses musl libc instead of glibc. Most Go and Rust binaries work fine. Python and some C extensions may break. Test thoroughly before committing to Alpine for non-static binaries.
+
+## Layer Caching Optimization
+
+### Dependency-First Ordering
+
+Docker caches layers. If a layer changes, all subsequent layers rebuild. Order your Dockerfile so the least-frequently-changing layers come first:
+
+```dockerfile
+# Bad: COPY . . before dependency install — any code change busts the cache
+COPY . .
+RUN pip install -r requirements.txt
+
+# Good: Copy only requirements first, install, then copy code
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+```
+
+### BuildKit Cache Mounts
+
+BuildKit lets you mount cache directories that persist across builds without adding layers to the image:
+
+```dockerfile
+# syntax=docker/dockerfile:1.6
+FROM python:3.12-slim AS builder
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
+```
+
+For Go:
+
+```dockerfile
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -o /app/server ./cmd/server
+```
+
+This can cut rebuild times from minutes to seconds for incremental changes.
+
+### Multi-Platform Builds
+
+Use `docker buildx` for multi-arch images without separate Dockerfiles:
+
+```bash
+docker buildx create --use
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t myregistry/app:v1 \
+  --push .
+```
+
+## Security Hardening
+
+### Non-Root Users
+
+Distroless images run as root by default. Always specify a non-root user:
+
+```dockerfile
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /app/server /server
+USER nonroot:nonroot
+ENTRYPOINT ["/server"]
+```
+
+### Read-Only Filesystem
+
+In Kubernetes, enforce a read-only root filesystem:
+
+```yaml
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  runAsNonRoot: true
+  capabilities:
+    drop: ["ALL"]
+```
+
+<Warning>
+If your app writes temp files, mount an `emptyDir` volume for `/tmp`. A read-only filesystem will crash apps that expect write access to the root.
+</Warning>
+
+## CI Integration
+
+### GitHub Actions Caching
+
+```yaml
+- uses: docker/build-push-action@v5
+  with:
+    context: .
+    push: true
+    tags: myregistry/app:v1
+    cache-from: type=gha
+    cache-to: type=gha,mode=max
+```
+
+### Image Scanning in Pipeline
+
+Always scan the final image, not the builder. Builder stages have compilers and dev dependencies that trigger false positives:
+
+```bash
+trivy image --severity HIGH,CRITICAL myregistry/app:v1
+```
+
+<Callout type="tip">
+**Movement break:** Container builds are a great trigger for a quick stretch. While your image builds, stand up and do 10 calf raises. Your calves pump blood back to your heart — counteracting the sitting position. By the time the build finishes, you're refreshed and your image is ready.
+</Callout>
+
+## Summary
+
+Multi-stage builds are non-negotiable for production containers. Start with the builder/runtime pattern, use distroless for the runtime stage, optimize [layer caching](/articles/cicd-pipeline-optimization) with BuildKit, and always scan the final image. The payoff is smaller images, faster deploys, fewer vulnerabilities, and a cleaner separation between build and runtime concerns.
+
+

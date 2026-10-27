@@ -1,0 +1,133 @@
+---
+title: "Debugging OOM Errors in PyTorch"
+slug: debugging-oom-pytorch
+description: "A systematic approach to diagnosing and fixing out-of-memory errors during PyTorch training — from gradient checkpointing to memory profiling."
+date: "2025-06-05"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["pytorch", "mlops"]
+featured: false
+relatedArticles: ["optimize-pytorch-training-speed", "mixed-precision-training-pytorch", "distributed-training-torchrun-ddp", "experiment-tracking-mlflow-vs-wandb", "gradient-clipping-deep-learning"]
+image: https://cdn.activenerds.com/images/posts/debugging-oom-pytorch.png
+imageAlt: "A spring-green GPU memory bar nearing overflow with diagnostic profiling lines on a deep slate background"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: A systematic approach to diagnosing and fixing out-of-memory errors during PyTorch training.
+- **Key Capabilities**: from gradient checkpointing to memory profiling.
+- **Understanding CUDA OOM**: Apply structured configurations and validated production patterns.
+- **Memory Profiling Tools**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Every PyTorch developer has seen it: `RuntimeError: CUDA out of memory. Tried to allocate XX MiB`. It always seems to happen at the worst possible moment — right when you're about to start a long training run, or worse, 47 epochs into a 100-epoch run.
+
+The good news is that OOM errors are almost always fixable, and the fixes follow a predictable diagnostic path. This guide walks through a systematic approach to identifying and resolving CUDA OOM errors.
+
+## Understanding CUDA OOM
+
+CUDA OOM isn't always what it seems. The error message says "out of memory," but there are two distinct causes:
+
+1. **Real exhaustion**: Your model + data + optimizer state genuinely exceeds GPU memory.
+2. **Fragmentation**: You have enough total memory, but it's fragmented into small blocks that can't satisfy a large allocation request.
+
+The error message's "Tried to allocate XX MiB" tells you the size of the allocation that failed. If this is small (e.g., 2 MiB), you likely have fragmentation. If it's large (e.g., 2 GiB), you're genuinely out of memory.
+
+## Memory Profiling Tools
+
+Before fixing anything, measure. PyTorch provides several built-in tools:
+
+```python
+# Print a detailed memory breakdown
+print(torch.cuda.memory_summary(device=None, abbreviated=False))
+
+# Track peak memory usage
+torch.cuda.reset_peak_memory_stats()
+# ... your training code ...
+print(f"Peak memory: {torch.cuda.max_memory_allocated() / 1e9:.2f} GB")
+```
+
+`memory_summary()` shows a table of all allocations, their sizes, and which code paths created them. This is your single most important debugging tool.
+
+<Callout type="warning">
+Memory profiling adds overhead. Run it on a short training loop (a few batches), not during a full training run.
+</Callout>
+
+## Common Fixes
+
+### Reduce Batch Size
+
+The most obvious fix, but not always the best. Reducing batch size affects gradient noise, batch normalization statistics, and potentially model convergence. If you can, try other fixes first.
+
+### Gradient Accumulation
+
+Simulate a larger batch by accumulating gradients over multiple forward passes:
+
+```python
+accumulation_steps = 4
+for i, (inputs, targets) in enumerate(dataloader):
+    outputs = model(inputs)
+    loss = criterion(outputs, targets) / accumulation_steps
+    loss.backward()
+    
+    if (i + 1) % accumulation_steps == 0:
+        optimizer.step()
+        optimizer.zero_grad()
+```
+
+### Mixed Precision
+
+AMP reduces memory for activations and gradients by using FP16:
+
+```python
+from torch.cuda.amp import autocast, GradScaler
+scaler = GradScaler()
+
+with autocast():
+    outputs = model(inputs)
+    loss = criterion(outputs, targets)
+scaler.scale(loss).backward()
+scaler.step(optimizer)
+```
+
+### Free Intermediate Tensors
+
+Python's garbage collector doesn't always free CUDA tensors promptly. Explicitly del unused tensors:
+
+```python
+del intermediate_output
+torch.cuda.empty_cache()
+```
+
+`empty_cache()` releases cached memory back to the CUDA driver. It doesn't free tensors that are still referenced — you need `del` for that.
+
+## Gradient Checkpointing Deep Dive
+
+Gradient checkpointing is the most powerful memory optimization for deep models. Instead of storing all intermediate activations for the backward pass, it recomputes them on the fly.
+
+```python
+from torch.utils.checkpoint import checkpoint
+
+class CheckpointedModel(nn.Module):
+    def forward(self, x):
+        # Each layer is recomputed during backward
+        for layer in self.layers:
+            x = checkpoint(layer, x)
+        return x
+```
+
+The trade-off: backward pass takes roughly 1.5x longer because activations are recomputed. But memory usage can drop by 60%+, often enabling you to double or triple your batch size.
+
+## Advanced: Memory-Efficient Architectures
+
+If you've tried everything above and still hit OOM:
+
+- **FSDP (Fully Sharded Data Parallel)**: Shards model parameters across GPUs. Use when the model alone doesn't fit on one GPU.
+- **Peak memory estimation**: Before training, estimate memory: `model_params * 4 bytes * (2 for grads + 2 for optimizer state) + batch * activation_memory`.
+- **When to switch to FSDP**: If your model has >10B parameters, you almost certainly need FSDP or a similar sharding approach.
+
+<Note>
+Quick tip: set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` as an environment variable. This can significantly reduce fragmentation-related OOMs.
+</Note>
+
+

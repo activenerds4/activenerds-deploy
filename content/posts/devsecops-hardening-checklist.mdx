@@ -1,0 +1,343 @@
+---
+title: "DevSecOps Hardening Checklist Template"
+slug: devsecops-hardening-checklist
+description: "A comprehensive hardening checklist for cloud-native workloads — from cluster config to runtime security and compliance."
+date: "2025-12-19"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: true
+relatedArticles: ["cloud-native-security-best-practices", "kubernetes-network-policies-tutorial", "runtime-security-falco-tetragon", "supply-chain-security-k8s", "compliance-automation-kubernetes"]
+image: https://cdn.activenerds.com/images/posts/devsecops-hardening-checklist.png
+imageAlt: "DevSecOps hardening checklist — security baseline verification steps for cloud-native workloads and Kubernetes clusters"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: A comprehensive hardening checklist for cloud-native workloads.
+- **Key Capabilities**: from cluster config to runtime security and compliance.
+- **Cluster-Level Hardening**: Apply structured configurations and validated production patterns.
+- **Workload Hardening**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Security hardening is not a one-time task — it's a continuous process. This checklist covers every layer of a cloud-native stack, from the [Kubernetes](/articles/kubernetes-resource-quotas-limits) control plane down to individual pod configurations. Use it during cluster setup, periodic audits, and incident post-mortems.
+
+## Cluster-Level Hardening
+
+### API Server Flags
+
+The API server is your cluster's front door. These flags should be set on every production cluster:
+
+- [ ] `--anonymous-auth=false` — disable anonymous authentication
+- [ ] `--authorization-mode=Node,RBAC` — never use `AlwaysAllow`
+- [ ] `--enable-admission-plugins=NodeRestriction,PodSecurityPolicy` (or Pod Security Admission)
+- [ ] `--disable-admission-plugins=AlwaysAllow` — explicitly disable dangerous plugins
+- [ ] `--audit-log-maxage=30` — retain audit logs for 30 days minimum
+- [ ] `--audit-log-maxbackup=10` — keep at least 10 rotated log files
+- [ ] `--audit-log-path=/var/log/kubernetes/audit.log` — enable audit logging
+- [ ] `--encryption-provider-config` — enable etcd encryption at rest
+
+### etcd Encryption
+
+Enable encryption at rest for secrets stored in etcd:
+
+```yaml
+# encryption-config.yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+- resources:
+  - secrets
+  providers:
+  - aescbc:
+      keys:
+      - name: key1
+        secret: <base64-encoded-32-byte-key>
+  - identity: {}
+```
+
+<Warning>
+Without etcd encryption, anyone with access to etcd backups or etcd disk can read all secrets in plaintext. This is one of the most commonly missed hardening steps.
+</Warning>
+
+### Audit Logging
+
+Enable comprehensive audit logging to track who did what:
+
+```yaml
+# audit-policy.yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+- level: Metadata
+  resources:
+  - group: ""
+    resources: ["secrets", "configmaps"]
+- level: RequestResponse
+  resources:
+  - group: "rbac.authorization.k8s.io"
+    resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+- level: Request
+  verbs: ["create", "update", "patch", "delete"]
+- level: Metadata
+```
+
+Ship audit logs to a SIEM (Splunk, ELK, Datadog) for real-time alerting on suspicious activity.
+
+## Workload Hardening
+
+### Pod Security Standards
+
+Enforce Pod Security Standards (PSS) at the namespace level:
+
+```yaml
+# Enforce restricted policy on production namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+```
+
+The **restricted** policy blocks:
+- Privileged containers
+- hostPath, hostNetwork, hostPID, hostIPC
+- Most Linux capabilities
+- Running as root (requires `runAsNonRoot: true` or `runAsUser: > 0`)
+- hostPort usage
+
+### Resource Limits
+
+Every pod must have resource requests and limits:
+
+```yaml
+spec:
+  containers:
+  - name: app
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+```
+
+<Callout type="info">
+Without resource limits, a single noisy pod can exhaust node resources and take down all workloads on that node. This is both a reliability and a security issue — denial of service through resource exhaustion.
+</Callout>
+
+### Image Policies
+
+- [ ] Use specific image tags, never `:latest`
+- [ ] Pin image digests for production: `image@sha256:abc123...`
+- [ ] Scan all images in CI with Trivy or Grype
+- [ ] Use a private registry — don't pull from public Docker Hub
+- [ ] Configure image pull secrets for private registries
+- [ ] Set `imagePullPolicy: IfNotPresent` to avoid unnecessary pulls
+
+```yaml
+# Example: pinned image with digest
+spec:
+  containers:
+  - name: app
+    image: registry.internal/app@sha256:5a3f1b2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2
+    imagePullPolicy: IfNotPresent
+```
+
+## Network Hardening
+
+### Default Deny Policies
+
+Apply a default-deny network policy in every namespace:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  namespace: production
+  name: default-deny-all
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+```
+
+Then add specific allow policies for required traffic. See our [network policies tutorial](/blog/kubernetes-network-policies-tutorial) for detailed patterns.
+
+### mTLS Enforcement
+
+- [ ] Use a service mesh (Istio or Linkerd) for automatic mTLS between services
+- [ ] Enforce mTLS in strict mode (not permissive)
+- [ ] Verify mTLS with periodic connectivity tests
+- [ ] Rotate service mesh certificates automatically
+
+### Egress Control
+
+Control what your pods can reach outside the cluster:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  namespace: production
+  name: allow-egress-specific
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-api
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: database
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+        except:
+        - 169.254.169.254/32  # Block cloud metadata
+    ports:
+    - protocol: TCP
+      port: 443
+```
+
+<Warning>
+Block access to the cloud metadata service (169.254.169.254) from all pods unless explicitly needed. A compromised pod can use this endpoint to steal cloud credentials — this was the root cause of the Capital One breach.
+</Warning>
+
+## Runtime Security
+
+### Falco Rules
+
+Deploy Falco for runtime threat detection:
+
+```yaml
+# Key Falco rules to enable
+- rule: Terminal shell in container
+  desc: A shell was opened in a container
+  condition: evt.type = execve and container.id != host
+  output: Shell opened in container (user=%user.name container=%container.name)
+  priority: WARNING
+
+- rule: Contact cloud metadata service from container
+  desc: Container attempted to contact cloud metadata service
+  condition: fd.sip="169.254.169.254" and container.id != host
+  output: Metadata service contact from container (container=%container.name)
+  priority: CRITICAL
+
+- rule: Write below etc
+  desc: Write to /etc directory in container
+  condition: open_write and fd.name startswith /etc/ and container.id != host
+  output: Write to /etc in container (file=%fd.name container=%container.name)
+  priority: WARNING
+```
+
+### Admission Controllers
+
+Deploy Kyverno or OPA Gatekeeper to enforce policies at admission time:
+
+```yaml
+# Kyverno: Block privileged containers
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: block-privileged-containers
+spec:
+  validationRules:
+  - name: no-privileged
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "Privileged containers are not allowed"
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.spec.containers[?].securityContext.privileged | [0] }}"
+            operator: Equals
+            value: true
+```
+
+### Continuous Scanning
+
+- [ ] Scan images in CI on every build
+- [ ] Scan running images periodically (Trivy server mode)
+- [ ] Scan infrastructure as code (checkov, tfsec)
+- [ ] Scan Kubernetes manifests (kube-bench, kube-hunter)
+- [ ] Set up alerting for new CVEs affecting your images
+
+## Compliance Mapping
+
+### CIS Kubernetes Benchmark
+
+Run kube-bench regularly to check CIS compliance:
+
+```bash
+# Run CIS benchmark checks
+kube-bench --benchmark cis-1.8
+
+# Output includes pass/fail for each control
+# Fix all FAIL items and document exceptions for SKIP items
+```
+
+### NIST Mapping
+
+Map your hardening controls to NIST frameworks:
+
+| NIST Control | Hardening Step |
+|-------------|---------------|
+| AC-2 Account Management | RBAC with least privilege |
+| AU-2 Audit Events | Audit logging enabled |
+| SC-8 Transmission Confidentiality | mTLS via service mesh |
+| SI-2 Flaw Remediation | Image scanning and patching |
+| CP-9 System Backup | etcd backups with encryption |
+
+### SOC2 Alignment
+
+For SOC2 [compliance](/articles/compliance-automation-kubernetes), document:
+
+- [ ] Access control policies (RBAC documentation)
+- [ ] Audit log retention policies (30+ days)
+- [ ] Encryption at rest (etcd encryption)
+- [ ] Encryption in transit (mTLS)
+- [ ] Change management (GitOps with approval)
+- [ ] Incident response procedures
+
+<Callout type="tip">
+**Movement break:** You just went through a dense security checklist. Stand up, do 10 shoulder blade squeezes, and take 5 deep breaths. Security work is detail-heavy — a short reset helps you catch what you might have missed.
+</Callout>
+
+## Checklist Summary
+
+| Category | Items | Priority |
+|----------|-------|----------|
+| Cluster-level | API server flags, etcd encryption, audit logging | P0 |
+| Workload | PSS restricted, resource limits, image policies | P0 |
+| Network | Default deny, mTLS, egress control | P0 |
+| Runtime | Falco, admission controllers, continuous scanning | P1 |
+| Compliance | CIS benchmarks, NIST mapping, SOC2 alignment | P1 |
+
+## Implementation Order
+
+Don't try to do everything at once. Follow this order:
+
+1. **Week 1**: Cluster-level hardening (API server, etcd, audit logging)
+2. **Week 2**: Pod [Security Standards](/articles/cloud-native-security-best-practices) enforcement on all namespaces
+3. **Week 3**: [Network policies](/articles/kubernetes-network-policies-tutorial) (default deny + specific allow rules)
+4. **Week 4**: Image scanning in CI + admission controllers
+5. **Week 5**: [Runtime security](/articles/runtime-security-falco-tetragon) (Falco [deployment](/articles/ml-model-deployment-workflow) + rule tuning)
+6. **Week 6**: Compliance scanning + documentation
+
+For the full [implementation](/articles/feature-flags-implementation-guide) details on each area, see our [RBAC guide](/blog/kubernetes-rbac-configuration), [secrets management guide](/blog/secrets-management-kubernetes-vault), and [compliance automation article](/blog/compliance-automation-kubernetes).
+
+

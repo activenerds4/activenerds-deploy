@@ -1,0 +1,433 @@
+---
+title: "Helm & Kustomize Packaging Cheat Sheet"
+description: "Package and customize Kubernetes manifests — Helm template helpers, values overrides, Kustomize overlay directories, and secret generators."
+category: kubernetes-containers
+slug: helm-kustomize-packaging
+lastUpdated: "2026-08-28"
+tags: ["kubernetes", "helm", "kustomize", "devsecops"]
+published: true
+---
+
+import { TabsGroup, TabsList, TabsTrigger, TabsContent } from "@/components/mdx/TabsGroup";
+import { Callout } from "@/components/mdx/Callout";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Helm & Kustomize Packaging Cheat Sheet
+
+**Two tools, one goal: stop hand-editing YAML for every environment.**
+
+Helm templates; Kustomize overlays. This sheet covers when to reach for each, the template patterns that keep charts maintainable, and the overlay structure that makes multi-env deploys painless.
+
+---
+
+## Table of Contents
+
+1. [Helm vs Kustomize](#1-helm-vs-kustomize)
+2. [Helm Chart Structure](#2-helm-chart-structure)
+3. [Helm Template Helpers](#3-helm-template-helpers)
+4. [Values & Overrides](#4-values--overrides)
+5. [Kustomize Overlays](#5-kustomize-overlays)
+6. [Secret Generators](#6-secret-generators)
+7. [Workflow Checklist](#7-workflow-checklist)
+
+---
+
+## 1. Helm vs Kustomize
+
+<ComparisonTable
+  title="Helm vs Kustomize"
+  columns={["Helm", "Kustomize"]}
+  rows={[
+    { label: "Approach", values: ["Templating (Go templates)", "Overlay patching (no templates)"] },
+    { label: "Best for", values: ["Reusable charts, many config knobs", "Env-specific diffs, forks of upstream"] },
+    { label: "Learning curve", values: ["Steeper (Go templates)", "Gentler (YAML patches)"] },
+    { label: "Config", values: ["values.yaml + --set", "kustomization.yaml + patches"] },
+    { label: "Secrets", values: ["secrets plugin / external", "SecretGenerator (literal/encrypted)"] },
+    { label: "Built into kubectl", values: ["No (separate binary)", "Yes (`kubectl apply -k`)"] },
+  ]}
+/>
+
+<Callout variant="tip" title="Rule of thumb">
+Use **Helm** when you're packaging an app for reuse across teams (a chart with many configurable knobs). Use **Kustomize** when you have a fixed set of manifests and just need per-environment tweaks (dev/staging/prod overlays). Many teams use Helm for vendor charts and Kustomize for their own apps.
+</Callout>
+
+---
+
+## 2. Helm Chart Structure
+
+```text
+my-chart/
+├── Chart.yaml          # chart metadata
+├── values.yaml         # default values
+├── templates/
+│   ├── _helpers.tpl    # named templates (partials)
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── NOTES.txt       # post-install instructions
+└── charts/             # subchart dependencies
+```
+
+### Chart.yaml
+
+```yaml
+apiVersion: v2
+name: my-app
+description: A demo app
+type: application
+version: 1.2.3          # CHART version (SemVer)
+appVersion: "3.1.0"     # APP version (what you're deploying)
+```
+
+### Core commands
+
+```bash
+helm create my-chart                 # scaffold a chart
+helm install my-app ./my-chart -n prod   # install
+helm upgrade my-app ./my-chart -n prod   # upgrade (idempotent)
+helm upgrade --install my-app ./my-chart -n prod  # install-or-upgrade
+helm uninstall my-app -n prod        # remove
+helm list -n prod                    # installed releases
+helm history my-app -n prod          # revision history
+helm rollback my-app 2 -n prod       # rollback to revision 2
+helm template my-app ./my-chart -f prod.yaml  # render to stdout (dry run)
+```
+
+---
+
+## 3. Helm Template Helpers
+
+### Named templates (`_helpers.tpl`)
+
+```bash
+{{- define "myapp.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "myapp.labels" -}}
+helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+app.kubernetes.io/name: {{ include "myapp.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{- define "myapp.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "myapp.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+```
+
+### Using helpers in templates
+
+```bash
+{{- include "myapp.labels" . | nindent 4 }}
+{{- include "myapp.selectorLabels" . | nindent 6 }}
+```
+
+### Common template functions
+
+| Function | Purpose |
+|----------|---------|
+| `{{ .Values.x }}` | Read a value |
+| `{{ .Release.Name }}` | Release name (unique per install) |
+| `{{ .Chart.Version }}` | Chart version |
+| `{{ default "fallback" .Values.x }}` | Default if empty |
+| `{{ toYaml .Values.resources \| nindent 12 }}` | Dump a map as YAML, indented |
+| `{{ include "name" . }}` | Call a named template |
+| `{{ required "msg" .Values.x }}` | Fail render if value missing |
+| `{{- ... -}}` | Trim whitespace (the dashes) |
+
+<Callout variant="warning" title="Mind your whitespace">
+`{{-` trims preceding whitespace; `-}}` trims trailing whitespace. Forgetting the `-` produces YAML with stray blank lines that can break parsing. When dumping nested YAML with `toYaml`, always pipe through `nindent N` (newline + indent), not `indent N`.
+</Callout>
+
+### Conditional blocks
+
+```bash
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+...
+{{- end }}
+
+{{- if eq .Values.env "prod" }}
+  replicas: {{ .Values.replicas.prod }}
+{{- else }}
+  replicas: {{ .Values.replicas.dev }}
+{{- end }}
+```
+
+### Ranges (loops)
+
+```bash
+{{- range .Values.ingress.hosts }}
+- host: {{ .host }}
+  http:
+    paths:
+      - path: {{ .path }}
+{{- end }}
+```
+
+---
+
+## 4. Values & Overrides
+
+### values.yaml (defaults)
+
+```yaml
+replicaCount: 2
+image:
+  repository: myapp
+  tag: ""
+  pullPolicy: IfNotPresent
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+ingress:
+  enabled: false
+  hosts: []
+```
+
+### Override at deploy time
+
+```bash
+# Override file (env-specific)
+helm upgrade my-app ./my-chart -n prod -f values-prod.yaml
+
+# Inline override (single value)
+helm upgrade my-app ./my-chart -n prod --set replicaCount=5
+
+# Nested set
+helm upgrade my-app ./my-chart -n prod --set image.tag=v3.1.0
+
+# Set multiple
+helm upgrade my-app ./my-chart -n prod \
+  -f values-prod.yaml \
+  --set replicaCount=5 \
+  --set image.tag=v3.1.0
+```
+
+### Precedence (highest wins)
+
+```text
+--set flags  >  -f override files  >  values.yaml  >  chart defaults
+```
+
+<Callout variant="tip" title="Use required() for critical values">
+Mark values that must be supplied with `{{ required "image.tag is required" .Values.image.tag }}`. The chart fails to render instead of deploying with an empty tag. This catches misconfigurations at `helm template` time, not at runtime.
+</Callout>
+
+### Validate before applying
+
+```bash
+# Render + review (never deploy unrendered)
+helm template my-app ./my-chart -f values-prod.yaml > rendered.yaml
+diff rendered-prod.yaml rendered-staging.yaml   # see env diffs
+
+# Lint the chart
+helm lint ./my-chart
+
+# Dry-run install (validates against the cluster)
+helm install my-app ./my-chart -n prod --dry-run
+```
+
+---
+
+## 5. Kustomize Overlays
+
+### Base + overlay structure
+
+```text
+my-app/
+├── base/
+│   ├── kustomization.yaml
+│   ├── deployment.yaml
+│   └── service.yaml
+└── overlays/
+    ├── dev/
+    │   ├── kustomization.yaml
+    │   └── replica-patch.yaml
+    ├── staging/
+    │   ├── kustomization.yaml
+    │   └── resources-patch.yaml
+    └── prod/
+        ├── kustomization.yaml
+        └── resources-patch.yaml
+```
+
+### base/kustomization.yaml
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+commonLabels:
+  app.kubernetes.io/name: my-app
+resources:
+  - deployment.yaml
+  - service.yaml
+```
+
+### overlays/prod/kustomization.yaml
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: production
+namePrefix: prod-
+commonLabels:
+  environment: production
+resources:
+  - ../../base
+patches:
+  - path: resources-patch.yaml
+    target:
+      kind: Deployment
+configMapGenerator:
+  - name: app-config
+    literals:
+      - LOG_LEVEL=warn
+      - FEATURE_FLAG=true
+```
+
+### Strategic merge patch (resources-patch.yaml)
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+        - name: app
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+```
+
+### Apply an overlay
+
+```bash
+# Built into kubectl
+kubectl apply -k overlays/prod
+
+# Or build to stdout and review
+kubectl kustomize overlays/prod
+
+# Compare envs
+diff <(kubectl kustomize overlays/dev) <(kubectl kustomize overlays/prod)
+```
+
+<Callout variant="note" title="Strategic merge vs JSON 6902">
+Kustomize has two patch types. **Strategic merge** (shown above) is simpler — you write the fields you want to change. **JSON 6902 patches** (`patchesStrategicMerge` vs `patchesJson6902`) are needed for operations like array element removal or CRDs that don't support strategic merge. Prefer strategic merge; reach for 6902 only when you must.
+</Callout>
+
+---
+
+## 6. Secret Generators
+
+### Kustomize: literal secrets (dev only)
+
+```yaml
+# overlays/dev/kustomization.yaml
+secretGenerator:
+  - name: db-creds
+    literals:
+      - DB_USER=devuser
+      - DB_PASS=devpass
+```
+
+### Kustomize: encrypted secrets (production)
+
+```bash
+# Encrypt with SOPS, reference the encrypted file
+secretGenerator:
+  - name: db-creds
+    files:
+      - db-creds.enc.yaml
+```
+
+<TabsGroup defaultValue="helm">
+<TabsList>
+<TabsTrigger value="helm">Helm Secrets</TabsTrigger>
+<TabsTrigger value="kustomize">Kustomize + SOPS</TabsTrigger>
+<TabsTrigger value="external">External Secrets</TabsTrigger>
+</TabsList>
+<TabsContent value="helm">
+
+Use the `helm-secrets` plugin with SOPS-encrypted values files:
+
+```bash
+helm secrets upgrade my-app ./my-chart -f secrets-prod.yaml
+# secrets-prod.yaml is SOPS-encrypted; plugin decrypts at render time
+```
+
+</TabsContent>
+<TabsContent value="kustomize">
+
+```bash
+# Encrypt with SOPS + age/KMS
+sops --encrypt --age <recipient> secrets.yaml > secrets.enc.yaml
+
+# Kustomize decrypts via ksops plugin
+secretGenerator:
+  - name: db-creds
+    behavior: replace
+    encryptedRegex: '^(data|stringData)$'
+    source: secrets.enc.yaml
+```
+
+</TabsContent>
+<TabsContent value="external">
+
+Best for production: don't store secrets in Git at all. Use **External Secrets Operator** to sync from Vault/AWS SM/GCP SM:
+
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+spec:
+  secretStoreRef:
+    name: vault-backend
+  target:
+    name: db-creds
+  data:
+    - secretKey: DB_PASS
+      remoteRef:
+        key: prod/db
+        property: password
+```
+
+</TabsContent>
+</TabsGroup>
+
+<Callout variant="warning" title="Never commit plaintext secrets">
+Literal `secretGenerator` entries and `--set` secrets end up in Git and in the rendered manifests. For anything beyond dev, use SOPS-encrypted files or External Secrets Operator pulling from a real secrets manager. Encoded ≠ encrypted.
+</Callout>
+
+---
+
+## 7. Workflow Checklist
+
+<ChecklistBox title="Before you deploy" items={[
+  "✅ **Render first**: `helm template` or `kubectl kustomize` — review the actual YAML.",
+  "✅ **Lint**: `helm lint ./chart` catches template errors.",
+  "✅ **Diff envs**: compare rendered dev vs prod to catch unintended changes.",
+  "✅ **Pin versions**: chart `version` + `appVersion`, image digests not `:latest`.",
+  "✅ **Use required()** for critical values so misconfigs fail at render time.",
+  "✅ **Namespace isolation**: each env in its own namespace with its own RBAC.",
+  "✅ **No plaintext secrets**: SOPS or External Secrets Operator.",
+  "✅ **Test rollback**: `helm rollback` / re-apply previous overlay before you need it live.",
+  "✅ **Atomic upgrades**: `helm upgrade --atomic` rolls back on failure.",
+  "✅ **GitOps it**: ArgoCD/Flux reconciles from Git, not `helm upgrade` by hand."
+]} />
+
+<Callout variant="tip" title="--atomic for safe deploys">
+`helm upgrade --atomic --timeout 5m` rolls back automatically if any resource fails to become ready within the timeout. It turns a half-deployed mess into a clean revert. Pair with `--wait` so the release only succeeds when all pods are ready.
+</Callout>

@@ -1,0 +1,224 @@
+---
+title: "Kubernetes Security News Monthly"
+slug: kubernetes-security-news-monthly
+description: "Your monthly digest of Kubernetes security news — CVEs, tool releases, policy updates, and community highlights."
+date: "2025-12-31"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: false
+relatedArticles: ["devsecops-hardening-checklist", "container-image-security-scanning", "runtime-security-falco-tetragon", "kubernetes-penetration-testing", "kubernetes-pod-security-standards"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-security-news-monthly.png
+imageAlt: "Kubernetes security news monthly roundup — CVE alerts patches and vulnerability disclosures for cloud-native"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Your monthly digest of Kubernetes security news.
+- **Key Capabilities**: CVEs, tool releases, policy updates, and community highlights.
+- **This Month's CVEs**: Apply structured configurations and validated production patterns.
+- **Tool Releases**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Welcome to the [Kubernetes Security](/articles/kubernetes-pod-security-standards) News Monthly — your digest of the most important K8s security developments. Each month we cover critical CVEs, new tool releases, policy and standards updates, and community highlights. Skim it in 5 minutes, act on the criticals, and stay ahead of emerging threats.
+
+## This Month's CVEs
+
+### Critical Vulnerabilities
+
+**CVE-2025-1974 — Kubernetes ingress-nginx RCE**
+- **Severity**: Critical (CVSS 9.8)
+- **Affected**: ingress-nginx < 1.12.1 and < 1.11.5
+- **Impact**: Remote code execution via crafted annotations in Ingress resources. Any user who can create or modify Ingress objects can execute code in the controller pod.
+- **Patch**: Upgrade to ingress-nginx 1.12.1 or 1.11.5 immediately
+- **Workaround**: Restrict Ingress creation permissions via RBAC
+
+```bash
+# Check your ingress-nginx version
+kubectl get deployment -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+# Upgrade
+helm upgrade ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --set controller.image.tag=1.12.1
+```
+
+**CVE-2025-1097 — runc container escape**
+- **Severity**: High (CVSS 8.6)
+- **Affected**: runc < 1.2.5
+- **Impact**: A malicious container could escape isolation and access the host filesystem through a file descriptor leak in the runc init process.
+- **Patch**: Update containerd to the latest patch release, which bundles runc 1.2.5+
+
+**CVE-2025-10281 — ArgoCD path traversal**
+- **Severity**: High (CVSS 7.5)
+- **Affected**: ArgoCD < 2.13.3
+- **Impact**: Path traversal in the repo server could allow reading arbitrary files from the ArgoCD server filesystem.
+- **Patch**: Upgrade to ArgoCD 2.13.3+
+
+### Affected Versions and Patch Guidance
+
+| CVE | Component | Severity | Fixed In | Action |
+|-----|-----------|----------|----------|--------|
+| CVE-2025-1974 | ingress-nginx | Critical | 1.12.1 / 1.11.5 | Upgrade immediately |
+| CVE-2025-1097 | runc | High | 1.2.5 | Update containerd |
+| CVE-2025-10281 | ArgoCD | High | 2.13.3 | Upgrade |
+| CVE-2025-0890 | kubelet | Medium | 1.29.12 / 1.30.8 / 1.31.4 | Patch at next maintenance |
+
+## Tool Releases
+
+### New Security Tools
+
+**Tetragon 1.0 — GA Release**
+Tetragon, Cilium's eBPF-based runtime security tool, reached 1.0 GA. Key features in the release:
+- Kubernetes-native CRD policy management
+- Real-time process kill (enforcement mode)
+- Integration with Cilium identity for label-aware policies
+- Hubble integration for unified observability
+
+```bash
+# Install Tetragon 1.0
+helm upgrade cilium cilium/cilium \
+  --namespace kube-system \
+  --set tetragon.enabled=true \
+  --set tetragon.grpc.enabled=true
+```
+
+See our [Falco vs Tetragon comparison](/blog/runtime-security-falco-tetragon) for a detailed feature breakdown.
+
+**kube-bench 0.10 — CIS 1.9 Benchmark Support**
+The latest kube-bench release adds support for the CIS Kubernetes Benchmark 1.9, which includes new controls for:
+- Pod Security Admission (replacing Pod Security Policies)
+- Seccomp profile requirements
+- Network policy default deny recommendations
+
+```bash
+# Run CIS 1.9 benchmark
+kube-bench --benchmark cis-1.9
+```
+
+### Notable Updates
+
+**Falco 0.41 — New Rule Engine**
+- Improved rule evaluation performance (30% faster)
+- New `evt.rawres` field for system call return values
+- Enhanced Kubernetes audit event support
+- New community rules for cryptomining detection
+
+**Kyverno 1.13 — Generate Policies**
+- New `generateExisting` feature to apply generate policies to existing resources
+- Improved policy report performance
+- New `apiCall` capability for dynamic data in policies
+
+**Trivy 0.58 — Enhanced K8s Scanning**
+- New `--scanners misconfig` flag for K8s manifest scanning
+- Improved SBOM generation with CycloneDX 1.6 support
+- Faster image scanning with parallel layer analysis
+
+### Deprecations
+
+- **Pod Security Policies**: Fully removed in K8s 1.25. If you're still using PSPs, migrate to Pod Security Admission immediately.
+- **kubectl auth can-i --list** without namespace: Now defaults to the current namespace instead of all namespaces. Use `--all-namespaces` explicitly.
+
+## Policy and Standards
+
+### CIS Updates
+
+**CIS Kubernetes Benchmark 1.9.0 Released**
+The new benchmark includes:
+- Updated controls for K8s 1.29-1.31
+- New section on Pod Security Admission
+- Enhanced network policy recommendations
+- Updated etcd encryption guidance
+
+Key changes from 1.8.0:
+- New control 5.7: "Ensure that Pod Security Admission is configured"
+- Updated control 4.1: Now requires seccomp profiles by default
+- Removed control 5.2 (Pod Security Policies — deprecated)
+
+### NIST Guidance
+
+**NIST SP 800-204D — Security Strategies for Cloud-Native Applications**
+New NIST publication covering:
+- Microservices security architecture patterns
+- Service mesh security considerations
+- Zero-trust implementation for K8s
+- Supply chain security for container images
+
+Recommended reading for anyone designing cloud-native security architecture.
+
+### Industry Frameworks
+
+**SOC2 Type II — Kubernetes Control Mapping Guide**
+The Cloud Security Alliance released a mapping guide for SOC2 controls to K8s configurations. Key mappings:
+
+| SOC2 Control | K8s Implementation |
+|-------------|-------------------|
+| CC6.1 Logical Access | RBAC + Pod Security Admission |
+| CC7.1 System Monitoring | Audit logging + Falco/Tetragon |
+| CC7.2 Anomaly Detection | Runtime security alerts |
+| CC8.1 Change Management | GitOps with policy enforcement |
+
+## Community Highlights
+
+### Security Blog Posts
+
+- **"Attacking Kubernetes via the Supply Chain"** — Aqua Security's deep dive into image registry attacks and how to defend against them
+- **"Zero Trust Network Policies in Practice"** — Isovalent's guide to implementing zero-trust networking with Cilium
+- **"The State of K8s Security 2025"** — Red Hat's annual survey of K8s security practices and trends
+
+### Conference Talks
+
+- **KubeCon NA 2025**: "Runtime Security at Scale with eBPF" — Netflix's journey deploying Tetragon across 100+ clusters
+- **KubeCon NA 2025**: "RBAC Auditing at Enterprise Scale" — how Stripe automated RBAC review across 500+ namespaces
+- **Security BSides 2025**: "Container Escape Techniques and Defenses" — hands-on workshop on container isolation
+
+### Open-Source Contributions
+
+- **kube-hunter** added 15 new hunting modules for RBAC misconfigurations
+- **Popeye** added support for Pod Security Admission checks
+- **checkov** added K8s admission controller policy checks
+
+## Action Items
+
+### This Month's Checklist
+
+- [ ] Patch ingress-nginx to 1.12.1+ (CVE-2025-1974 — critical)
+- [ ] Update containerd/runc to latest (CVE-2025-1097)
+- [ ] Upgrade ArgoCD to 2.13.3+ (CVE-2025-10281)
+- [ ] Run kube-bench with CIS 1.9 benchmark
+- [ ] Review and update network policies
+- [ ] Verify Pod Security Admission is enforced on all namespaces
+
+### Recommended Patches
+
+Priority order for this month:
+
+1. **ingress-nginx** — critical RCE, patch immediately
+2. **runc/containerd** — container escape, patch at next maintenance window
+3. **ArgoCD** — path traversal, patch if using ArgoCD
+4. **kubelet** — medium severity, patch in regular cycle
+
+### Best Practice Reminders
+
+- **Pin image digests**: Use `image@sha256:...` not `image:tag` for production
+- **Audit RBAC monthly**: Run `rbac-lookup` and review for over-permissive roles
+- **Enable audit logging**: If you haven't, enable it now — see our [hardening checklist](/blog/devsecops-hardening-checklist)
+- **Review network policies**: Ensure default-deny is in place for all namespaces
+- **Scan images continuously**: Don't just scan in CI — scan running images too
+
+<Callout type="tip">
+**Movement break:** You just skimmed a month's worth of security news. Stand up, do 10 shoulder rolls, and look out a window for 20 seconds. Then go patch that ingress-nginx — it's critical.
+</Callout>
+
+## Stay Updated
+
+Subscribe to these feeds for continuous K8s security updates:
+
+- [Kubernetes CVE feed](https://nvd.nist.gov/vuln/search/results?query=kubernetes)
+- [Falco security announcements](https://github.com/falcosecurity/falco/security/advisories)
+- [Cilium security advisories](https://github.com/cilium/cilium/security/advisories)
+- [CNCF security TAG](https://github.com/cncf/tag-security)
+
+See you next month with another security digest. For ongoing security guidance, check our [DevSecOps hardening checklist](/blog/devsecops-hardening-checklist) and [compliance automation guide](/blog/compliance-automation-kubernetes).
+
+

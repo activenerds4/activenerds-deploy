@@ -1,0 +1,153 @@
+---
+title: "Production Outage Incident Response Checklist"
+description: "Triage a production outage without panic — CrashLoopBackOff/OOMKilled triage, ephemeral debug containers, node drain/cordon, Helm rollbacks, and blameless post-mortem data."
+category: kubernetes
+slug: production-outage-incident-response-checklist
+lastUpdated: "2026-08-28"
+tags: ["kubernetes", "devsecops", "incident-response", "kubectl"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Production Outage Incident Response Checklist
+
+**The page is down. Here's what to do in the first 15 minutes.**
+
+Incidents are won or lost in the first few minutes — by triage discipline, not heroics. This checklist is the runbook for the common Kubernetes outage: pods crashing, nodes dying, bad rollouts. Follow it in order, capture data as you go, and keep a cool head for the post-mortem.
+
+---
+
+## Table of Contents
+
+1. [Triage & Scope (First 5 min)](#1-triage--scope-first-5-min)
+2. [CrashLoopBackOff / OOMKilled](#2-crashloopbackoff--oomkilled)
+3. [Debugging with Ephemeral Containers](#3-debugging-with-ephemeral-containers)
+4. [Node Drain / Cordon](#4-node-drain--cordon)
+5. [Rollback (Helm / kubectl)](#5-rollback-helm--kubectl)
+6. [Post-Mortem Data Capture](#6-post-mortem-data-capture)
+
+---
+
+## 1. Triage & Scope (First 5 min)
+
+<ChecklistBox
+  title="Triage & Scope"
+  items={[
+    "Confirm the outage is real (check monitoring, not just a user report)",
+    "Declare the incident and assign an Incident Commander (one person coordinates, others execute)",
+    "Identify blast radius: which service, which namespace, which users are affected",
+    "Check the timeline: what changed in the last hour? (deploy, config, scaling, infra)",
+    "Page the right on-call — don't guess; use the ownership/service catalog",
+    "Open the incident channel and start a running timeline log from minute zero",
+    "Communicate status to stakeholders within 15 min (internal) / per policy (external)",
+  ]}
+/>
+
+<Callout variant="warning" title="Stabilize before you diagnose">
+  If customers are down, your first job is to restore service, not to find root cause. Roll back, scale up, fail over — whatever restores service fastest. You can diagnose on a stable system. Capture evidence first (see section 6) before you change anything destructive.
+</Callout>
+
+---
+
+## 2. CrashLoopBackOff / OOMKilled
+
+<ChecklistBox
+  title="CrashLoopBackOff / OOMKilled"
+  items={[
+    "`kubectl get pods -n <ns>` — note which pods are CrashLoopBackOff / OOMKilled / Pending",
+    "`kubectl describe pod <pod>` — read the Events section for the actual failure reason",
+    "`kubectl logs <pod> --previous` — logs from the crashed container, not the restarting one",
+    "OOMKilled? Compare memory limit vs actual usage; check for a memory leak or bigger workload",
+    "CrashLoopBackOff? Check the startup command, env vars, and config/secrets mounts",
+    "ImagePullBackOff? Verify image tag/registry and imagePullSecrets",
+    "Pending? Check node resources, taints, and affinity — `kubectl get events --sort-by=.lastTimestamp`",
+  ]}
+/>
+
+---
+
+## 3. Debugging with Ephemeral Containers
+
+<ChecklistBox
+  title="Ephemeral Debug Containers"
+  items={[
+    "`kubectl debug -it <pod> --image=busybox:1.36 --target=<container>` to attach a debug shell",
+    "Use `--copy-to` to debug a copy of the pod without touching the production pod",
+    "Share process namespace (`--share-processes`) to inspect the target container's processes",
+    "Check filesystem, env, and network from inside the pod's actual context",
+    "For distroless images with no shell, ephemeral containers are your only in-pod access",
+    "Capture debug output to the incident timeline before deleting the ephemeral container",
+    "Clean up debug pods — don't leave them running in production",
+  ]}
+/>
+
+---
+
+## 4. Node Drain / Cordon
+
+<ChecklistBox
+  title="Node Drain / Cordon"
+  items={[
+    "`kubectl cordon <node>` to stop new pods scheduling (non-disruptive first step)",
+    "`kubectl drain <node> --ignore-daemonsets --delete-emptydir-data` to evict pods",
+    "Verify PDBs allow the drain (a blocked drain means you'd break an SLO — reassess)",
+    "Confirm evicted pods reschedule to healthy nodes and become Ready",
+    "Only `kubectl delete node` after the node is drained and removed from the load balancer",
+    "For a bad node (not a bad workload): cordon + drain, then let autoscaler replace it",
+    "Uncordon (`kubectl uncordon`) once the node is healthy and ready for traffic again",
+  ]}
+/>
+
+---
+
+## 5. Rollback (Helm / kubectl)
+
+<ChecklistBox
+  title="Rollback (Helm / kubectl)"
+  items={[
+    "Helm: `helm history <release> -n <ns>` to list revisions",
+    "Helm: `helm rollback <release> <revision> -n <ns>` to the last known-good revision",
+    "kubectl: `kubectl rollout undo deployment/<name> -n <ns>` to the previous revision",
+    "kubectl: `kubectl rollout undo deployment/<name> --to-revision=<n>` for a specific revision",
+    "Watch the rollback: `kubectl rollout status deployment/<name> -n <ns>`",
+    "Confirm the rollback restored service before declaring resolved",
+    "If rollback fails (e.g. schema migration), fall back to the documented failover plan",
+  ]}
+/>
+
+<Callout variant="tip" title="Rollback is not always safe">
+  A rollback reverses the deployment, not the data. If the bad release ran a forward-only migration (a column add, a destructive update), rolling back the code can leave the system in an inconsistent state. Know your migration strategy before you need to roll back — some changes require a forward-fix, not a rollback.
+</Callout>
+
+---
+
+## 6. Post-Mortem Data Capture
+
+<ChecklistBox
+  title="Post-Mortem Data Capture"
+  items={[
+    "Full incident timeline captured (detection → triage → mitigation → resolution) with timestamps",
+    "Relevant logs, events, and metrics exported before they roll off retention",
+    "kubectl describe output for affected pods/nodes saved",
+    "Deploy/diff that triggered the incident preserved (don't just delete the bad commit)",
+    "Customer impact quantified (duration, % of users, requests failed)",
+    "Blameless framing: capture what failed in the system, not who to blame",
+    "Action items with owners and due dates created before the incident channel closes",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Resolution Sign-off"
+  items={[
+    "Service confirmed restored and stable for at least 15 minutes",
+    "All hands off the system (no one still running manual kubectl in prod)",
+    "Incident declared resolved and stakeholders notified",
+    "Post-mortem scheduled within 5 business days with action items tracked",
+  ]}
+/>

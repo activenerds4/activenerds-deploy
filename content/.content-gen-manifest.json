@@ -1,0 +1,25 @@
+{
+  "specFile": "content-spec-batch-07.json",
+  "specHash": "sha256:content-spec-batch-07",
+  "totalArticles": 15,
+  "completed": 15,
+  "pending": 0,
+  "errors": 0,
+  "articles": {
+    "mixed-precision-training-pytorch": { "status": "published", "path": "content/posts/mixed-precision-training-pytorch.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "prompt-engineering-techniques-guide": { "status": "published", "path": "content/posts/prompt-engineering-techniques-guide.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "kubernetes-statefulset-patterns-guide": { "status": "published", "path": "content/posts/kubernetes-statefulset-patterns-guide.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "container-image-registry-comparison": { "status": "published", "path": "content/posts/container-image-registry-comparison.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "walking-pad-under-desk-review": { "status": "published", "path": "content/posts/walking-pad-under-desk-review.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "desk-cycling-machine-benefits": { "status": "published", "path": "content/posts/desk-cycling-machine-benefits.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "kubernetes-certificate-management-cert-manager": { "status": "published", "path": "content/posts/kubernetes-certificate-management-cert-manager.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "owasp-top-10-cloud-native": { "status": "published", "path": "content/posts/owasp-top-10-cloud-native.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "ergonomic-monitor-stand-guide": { "status": "published", "path": "content/posts/ergonomic-monitor-stand-guide.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "fitness-smartwatch-for-developers": { "status": "published", "path": "content/posts/fitness-smartwatch-for-developers.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "developer-conference-talk-templates": { "status": "published", "path": "content/posts/developer-conference-talk-templates.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "hackathon-team-formation-strategies": { "status": "published", "path": "content/posts/hackathon-team-formation-strategies.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "blue-green-deployment-kubernetes": { "status": "published", "path": "content/posts/blue-green-deployment-kubernetes.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "terraform-module-design-patterns": { "status": "published", "path": "content/posts/terraform-module-design-patterns.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null },
+    "deep-work-environment-setup": { "status": "published", "path": "content/posts/deep-work-environment-setup.mdx", "updatedAt": "2026-08-25T00:00:00.000Z", "error": null }
+  }
+}

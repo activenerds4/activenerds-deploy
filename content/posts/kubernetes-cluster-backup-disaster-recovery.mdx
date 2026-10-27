@@ -1,0 +1,76 @@
+---
+title: "Kubernetes Cluster Backup & Disaster Recovery"
+slug: kubernetes-cluster-backup-disaster-recovery
+description: "Build a Kubernetes backup and disaster recovery strategy — etcd backups, Velero, and tested restore procedures for production clusters."
+date: "2025-10-17"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: true
+relatedArticles: ["kubernetes-penetration-testing", "k8s-crashloopbackoff-troubleshooting", "kubernetes-certificate-management-cert-manager", "kubernetes-multi-cluster-management", "kubernetes-network-security-policies"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-cluster-backup-disaster-recovery.png
+imageAlt: "Kubernetes cluster backup and disaster recovery — Velero etcd backup strategies and restore procedures for K8s"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Build a Kubernetes backup and disaster recovery strategy.
+- **Key Capabilities**: etcd backups, Velero, and tested restore procedures for production clusters.
+- **What You Actually Need to Back Up**: Apply structured configurations and validated production patterns.
+- **Velero in Practice**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Most teams think about Kubernetes backups the week after they needed one. A cluster failure without a tested restore procedure isn't a technical problem — it's an incident with a timer on it. This guide covers what you actually need to back up, how to do it with etcd snapshots and Velero, and why an untested backup is barely better than no backup.
+
+## What You Actually Need to Back Up
+
+A Kubernetes cluster holds two categories of state, and they need different treatment.
+
+**Cluster state** lives in etcd — every Deployment, Service, ConfigMap, Secret, and CRD is stored there. etcd is the single source of truth for "what should be running." If you lose etcd, you lose the entire definition of your cluster. Backing it up is non-negotiable.
+
+**Application data** lives in persistent volumes — databases, object storage, file systems. etcd backups don't capture this. A Velero backup of a namespace without volume snapshots gives you back the Pod definitions but not the database they ran. You need a separate, data-aware strategy for persistent volumes, which usually means volume snapshots via the CSI driver or an application-level backup (e.g. `pg_dump`).
+
+The mental model: etcd backups restore your *intent* (what should exist); volume backups restore your *data* (what the workload produced). You need both.
+
+## Velero in Practice
+
+Velero is the standard tool for backing up Kubernetes resources and persistent volumes together. It runs as a controller in your cluster, takes scheduled or on-demand backups, and stores them in object storage (S3, GCS, Azure Blob).
+
+A Velero backup captures the Kubernetes API objects you select (by namespace, label, or resource type) and optionally snapshots associated persistent volumes via the cloud provider's snapshot API. On restore, it recreates the objects and, if volume snapshots were taken, provisions new volumes from them.
+
+Use **scheduled backups** for routine protection — a daily backup of critical namespaces with a retention policy (e.g. keep 30 days) gives you rollback windows. Use **on-demand backups** before risky operations: cluster upgrades, major config changes, or migrations. The discipline of "backup before you change" saves you from the changes that don't go as planned.
+
+```bash
+# Schedule a daily backup of the production namespace, retain 30 days
+velero schedule create prod-daily \
+  --include-namespaces production \
+  --schedule="0 1 * * *" \
+  --ttl 720h
+
+# On-demand backup before an upgrade
+velero backup create pre-upgrade-2026-01 --include-namespaces production
+```
+
+<Note>
+Velero backs up resources but not their cluster-scoped dependencies like StorageClasses or CRDs by default. For a full cluster restore you need to account for these separately. Document what's required to recreate the cluster from scratch, not just the workloads.
+</Note>
+
+## Testing Recovery
+
+An untested backup is a hope, not a recovery. The most common restore failures only show up when you actually try: snapshots that can't be restored across availability zones, Secrets referencing missing service accounts, or CRDs whose controllers aren't installed in the restore cluster.
+
+Run **restore drills** regularly in an isolated environment. Restore the backup into a fresh cluster, verify the workloads come up, and check the data is intact. Measure how long it takes — that's your real recovery time. Define **RTO** (how fast you must recover) and **RPO** (how much data you can afford to lose) explicitly, and let those targets drive your backup frequency and restore design. A daily backup gives you a 24-hour RPO; if you need tighter, you need more frequent or continuous protection.
+
+## Multi-Region and Failover
+
+For genuine disaster resilience, backups need to live in a different region than the cluster. A regional outage that takes down both your cluster and your backup bucket defeats the purpose. Store Velero backups in a separate region's object storage.
+
+For failover, the hard parts aren't the backups — they're DNS and traffic. Have a documented runbook for redirecting traffic to a standby cluster, and test that cutover too. A backup you can restore in 30 minutes is useless if it takes 4 hours to repoint DNS and warm up the replacement.
+
+<Callout type="tip">
+Treat your disaster recovery runbook like code: version it, review it, and run it on a schedule. The teams that recover fastest from real outages are the ones who've already practiced the recovery, not the ones with the most sophisticated backup tooling.
+</Callout>
+
+Backups are cheap insurance; tested restores are the actual insurance. Spend the engineering time to validate your recovery path before you need it — because the day you need it is the worst day to discover it doesn't work.
+
+

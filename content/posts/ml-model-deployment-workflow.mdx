@@ -1,0 +1,185 @@
+---
+title: "ML Model Deployment Workflow Template"
+slug: ml-model-deployment-workflow
+description: "A step-by-step deployment workflow template for ML models — from packaging to serving, monitoring, and rollback."
+date: "2025-10-02"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["mlops", "kubernetes"]
+featured: false
+relatedArticles: ["cloud-native-security-best-practices", "devsecops-hardening-checklist", "distributed-data-parallel-vs-model-parallel", "gpu-vs-tpu-model-training", "mlops-pipeline-best-practices"]
+image: https://cdn.activenerds.com/images/posts/ml-model-deployment-workflow.png
+imageAlt: "A packaged model moving through serving, monitoring and rollback stages as spring-green nodes on a deep slate background"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Batch serving**: Run predictions on a schedule (hourly, daily).
+- **Online serving**: Real-time predictions with latency requirements (typically &lt;100ms).
+- **Canary deployment**: Route 5-10% of traffic to the new model while keeping the majority on the previous version.
+- **Performance metrics**: latency (p50, p95, p99), throughput, error rate.
+</Callout>
+
+Deploying an ML model to production is where the "MLOps" rubber meets the road. It's also where most teams discover that training a good model was the easy part. The deployment workflow — packaging, serving, monitoring, and rolling back — is a different skill set entirely, and getting it wrong means unhappy users and broken predictions.
+
+This template gives you a step-by-step workflow you can adapt for any model deployment.
+
+## The Deployment Checklist
+
+Before deploying any model, walk through this checklist:
+
+1. **Model is packaged** with all dependencies pinned
+2. **Container image** is built and scanned for vulnerabilities
+3. **Serving framework** is chosen and configured
+4. **Monitoring** is set up for drift, latency, and errors
+5. **Rollback strategy** is defined and tested
+6. **Model card** documents expected behavior and limitations
+
+<Note>
+If you can't tick all six boxes, you're not ready to deploy. Skipping monitoring or rollback is how teams end up with production models that silently degrade for weeks before anyone notices.
+</Note>
+
+## Packaging and Versioning
+
+Your model artifact should be self-contained: the weights, the tokenizer/processor, and any preprocessing logic. The goal is that anyone can load the model and get predictions without needing your training codebase.
+
+```python
+# Save model with metadata
+import json
+import torch
+
+model_metadata = {
+    "model_name": "sentiment-classifier-v2",
+    "version": "2.1.0",
+    "framework": "pytorch",
+    "pytorch_version": torch.__version__,
+    "python_version": "3.11",
+    "input_shape": [1, 512],
+    "output_classes": ["negative", "neutral", "positive"],
+    "training_data": "imdb-reviews-2025-08",
+    "metrics": {"f1": 0.923, "accuracy": 0.918},
+    "created_at": "2025-10-01T00:00:00Z",
+}
+
+torch.save(model.state_dict(), "model_weights.pt")
+json.dump(model_metadata, open("model_metadata.json", "w"), indent=2)
+```
+
+**Dependency pinning** is critical. A model trained with `transformers==4.35.0` may produce different outputs with `transformers==4.40.0` due to changes in tokenization or model internals. Pin everything in a `requirements.txt` or `environment.yml`:
+
+```yaml
+# environment.yml
+name: model-serving
+dependencies:
+  - python=3.11
+  - pytorch=2.1.0
+  - transformers=4.35.0
+  - numpy=1.24.3
+  - pip:
+    - sentencepiece==0.1.99
+```
+
+## Serving Architecture
+
+The serving architecture depends on your use case:
+
+**Batch serving**: Run predictions on a schedule (hourly, daily). Simplest to implement — a cron job that loads the model and processes a queue. No latency requirements.
+
+**Online serving**: Real-time predictions with latency requirements (typically &lt;100ms). This is where it gets complex. You need a serving framework that handles:
+- Model loading and warmup
+- Request batching for throughput
+- Health checks and auto-scaling
+- Load balancing across replicas
+
+```python
+# KServe inference service (Kubernetes-based)
+from kserve import KServeClient
+
+inference_service = {
+    "apiVersion": "serving.kserve.io/v1beta1",
+    "kind": "InferenceService",
+    "metadata": {"name": "sentiment-classifier-v2"},
+    "spec": {
+        "predictor": {
+            "torchserve": {
+                "storageUri": "s3://models/sentiment-v2",
+                "resources": {
+                    "requests": {"cpu": "2", "memory": "4Gi", "nvidia.com/gpu": "1"},
+                    "limits": {"cpu": "4", "memory": "8Gi", "nvidia.com/gpu": "1"},
+                }
+            }
+        }
+    }
+}
+
+KServeClient().create(inference_service, namespace="ml-serving")
+```
+
+**Canary deployment**: Route 5-10% of traffic to the new model while keeping the majority on the previous version. Compare metrics before full rollout. This is the safest deployment pattern for production models.
+
+<Callout type="tip">
+Use KServe or Seldon Core for Kubernetes-native model serving. They handle canary deployments, A/B testing, and auto-scaling out of the box. For simpler setups, FastAPI + Uvicorn works well for single-model serving.
+</Callout>
+
+## Monitoring Post-Deploy
+
+Monitoring is what separates a deployment from a launch-and-pray. Three categories to monitor:
+
+**Performance metrics**: latency (p50, p95, p99), throughput, error rate. These tell you if the serving infrastructure is healthy.
+
+**Model metrics**: prediction distribution, input feature drift, output confidence distribution. These tell you if the model is still making good predictions.
+
+**Business metrics**: click-through rate, conversion rate, user satisfaction. These tell you if the model is actually helping.
+
+```python
+# Input drift detection with basic statistics
+import numpy as np
+from scipy.stats import wasser_distance
+
+reference_distribution = np.load("reference_features.npy")
+current_batch = get_recent_predictions(window="1h")
+
+drift_score = wasser_distance(
+    reference_distribution.mean(axis=0),
+    current_batch.mean(axis=0)
+)
+
+if drift_score > DRIFT_THRESHOLD:
+    alert_team(f"Input drift detected: {drift_score:.3f}")
+```
+
+<Warning>
+The most common production failure mode is silent drift: the model keeps serving predictions, the infrastructure looks healthy, but the predictions are wrong because the input data distribution has shifted. Without drift monitoring, this can go unnoticed for weeks.
+</Warning>
+
+## Rollback Strategy
+
+Every deployment should have a rollback plan that's been tested before you need it:
+
+**Shadow deployment**: Deploy the new model alongside the old one. Both receive the same traffic, but only the old model's predictions are returned. Compare outputs without risk.
+
+**Instant rollback**: Keep the previous model version loaded and ready. If the new model shows problems, switch traffic back in seconds. With KServe or Seldon, this is a config change.
+
+**A/B testing**: Split traffic between old and new models. Compare business metrics over a statistically significant period before committing.
+
+```bash
+# KServe canary rollback
+kubectl apply -f - <<EOF
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: sentiment-classifier
+spec:
+  predictor:
+    canary:
+      trafficPercent: 0  # Route 0% to new model = instant rollback
+    torchserve:
+      storageUri: s3://models/sentiment-v2
+EOF
+```
+
+The key principle: **deploy slowly, rollback quickly**. A [canary deployment](/articles/canary-deployment-strategies-kubernetes) that takes 2 hours to reach 100% traffic is fine. A rollback that takes 2 hours is a disaster.
+
+Model deployment is fundamentally a software engineering problem, not an ML problem. The model is just one component of a serving system that needs the same operational rigor as any production service: monitoring, alerting, rollback, and incident response. Treat it that way.
+
+

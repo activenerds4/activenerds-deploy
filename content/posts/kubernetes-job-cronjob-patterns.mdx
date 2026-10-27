@@ -1,0 +1,97 @@
+---
+title: "Kubernetes Job & CronJob Patterns"
+slug: kubernetes-job-cronjob-patterns
+description: "Run batch workloads reliably in Kubernetes — Job patterns for parallelism, retries, and CronJob scheduling pitfalls every platform engineer should know."
+date: "2026-03-16"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: false
+relatedArticles: ["kubernetes-node-affinity-taints", "kubernetes-autcaling-hpa-keda", "kubernetes-custom-controller-development", "kubernetes-debugging-k9s-kubectl", "kubernetes-network-policies-tutorial"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-job-cronjob-patterns.png
+imageAlt: "Kubernetes Job and CronJob patterns — batch processing scheduled tasks and parallel workloads in K8s"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Run batch workloads reliably in Kubernetes.
+- **Key Capabilities**: Job patterns for parallelism, retries, and CronJob scheduling pitfalls every platform engineer should know.
+- **Jobs vs Deployments**: Apply structured configurations and validated production patterns.
+- **Parallelism and Completions**: Apply structured configurations and validated production patterns.
+</Callout>
+
+A Deployment assumes your workload runs forever. The moment you have work that *finishes* — a batch transform, a [model training](/articles/gpu-vs-tpu-model-training) run, a nightly report, a database migration — a Deployment is the wrong tool. It'll restart the pod when it exits, treating completion as failure. Jobs and CronJobs are Kubernetes' answer for work that has a beginning and an end, and they have a set of semantics that trip up engineers who treat them as "Deployments that stop."
+
+This guide covers when to reach for a Job, the parallelism and retry controls, and the CronJob pitfalls that cause 3am pages.
+
+## Jobs vs Deployments
+
+The distinction is the completion semantics. A Deployment's pods are expected to run indefinitely; when a pod exits (for any reason), the controller replaces it. A Job's pods are expected to exit; the Job tracks completion and stops replacing pods once the work is done.
+
+Use a Job when the work has a defined end: a one-off data backfill, a model training run, a database schema migration, a batch inference pass over a dataset. Use a Deployment for long-running servers. Use a CronJob when the work repeats on a schedule — nightly reports, periodic cleanup, scheduled retraining.
+
+The pod restart policy under a Job is restricted for a reason: `Always` (the Deployment default) makes no sense for a Job because it would restart a completed pod forever. Jobs allow `OnFailure` (restart only if the pod exits non-zero) or `Never` (don't restart; let the Job controller handle retries by creating new pods). The choice affects how retries work — `OnFailure` reuses the pod object, `Never` creates a fresh one, which matters if your pod accumulates state you don't want carried into a retry.
+
+## Parallelism and Completions
+
+For embarrassingly parallel work — process N shards of a dataset — the Job's parallelism and completions fields are the controls. `completions` is how many successful pod exits you want total; `parallelism` is how many run at once. Set `completions: 100, parallelism: 10` and you get 10 pods processing shards concurrently, with new ones starting as others finish, until 100 have succeeded.
+
+```yaml
+spec:
+  completions: 100
+  parallelism: 10
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: worker
+          image: batch-worker:latest
+          # each pod processes its shard based on JOB_COMPLETION_INDEX
+```
+
+The `Indexed` completion mode is the key to sharded work. With `completionMode: Indexed`, each pod gets a `JOB_COMPLETION_INDEX` env var (0, 1, 2, ...) that it uses to pick its shard. Without it, all pods see the same inputs and you have to coordinate sharding yourself — a common source of duplicate work or missed shards.
+
+The work-queue pattern is the alternative for dynamic sharding: run a fixed number of long-lived worker pods that pull tasks from a queue (Redis, SQS, a database table). Use this when the work units aren't known upfront or vary in cost. The Job just keeps N workers alive; the queue handles distribution. This decouples parallelism from the total work count, which is more flexible but adds a queue as infrastructure.
+
+Avoiding duplicate work is the subtle part. With `OnFailure` and a non-idempotent workload, a pod that partially completes then crashes and restarts will re-run from the start — duplicating the work it already did. Make batch workloads idempotent (check if the output exists before processing) or use checkpointing so a retry resumes rather than restarts. This isn't optional for expensive work like training runs; a crash at 90% that re-runs from 0% is a real cost.
+
+## CronJob Scheduling
+
+CronJobs add a schedule on top of a Job template. The schedule is a standard cron expression, and that's where the first set of pitfalls lives.
+
+**Timezone gotchas.** A CronJob schedule is interpreted in the timezone of the kube-controller-manager, which is UTC by default and not configurable per-CronJob. A schedule of `0 9 * * *` means 09:00 UTC, not 09:00 local — a classic cause of reports running at the wrong hour. Either express your schedule in UTC explicitly (and document it) or set the controller manager's timezone cluster-wide. There's no per-CronJob timezone override, despite years of requests for one.
+
+**Concurrency policies.** `concurrencyPolicy` controls what happens when it's time to run and the previous run hasn't finished: `Allow` (default, run another), `Forbid` (skip the new run), `Replace` (kill the old, start the new). For most batch work `Forbid` is what you want — overlapping runs of a report or a migration cause data races and double-processing. `Allow` is only appropriate for genuinely independent work where overlap is harmless.
+
+```yaml
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: OnFailure
+```
+
+**Starting deadline handling.** `startingDeadlineSeconds` sets how long the CronJob controller has to start a missed run. If the controller is down or saturated past this window, the missed run is skipped rather than fired late. Without it, a controller outage can cause a backlog of missed runs to all fire at once when it recovers — which for a CronJob meant to run hourly can mean 24 simultaneous runs. Set it to a sensible window (e.g., 200s) so a brief outage doesn't pile up runs.
+
+## Reliability Patterns
+
+A few patterns separate CronJobs that run unattended from ones that page you.
+
+**Backoff limits** cap retries. `backoffLimit: 6` means the Job fails after 6 failed pod attempts. Set this deliberately — too low and a transient failure (a flaky dependency, a momentary network blip) fails the whole run; too high and a genuinely broken run wastes compute retrying. For work with flaky dependencies, a higher limit with exponential backoff is appropriate; for work where a failure means something is genuinely wrong, a low limit fails fast so alerts fire.
+
+**Pod disruption budgets for jobs.** PDBs are usually for Deployments, but Jobs interacting with voluntary disruptions (node drains) benefit from thinking about disruption. A Job evicted mid-run by a drain will retry — usually fine, but for long-running jobs set a `ttlSecondsAfterFinished` so completed Job objects don't accumulate and clutter the cluster. Without it, every CronJob run leaves a Job object behind forever, which slowly bloats etcd.
+
+**Cleaning up old jobs.** `successfulJobsHistoryLimit` and `failedJobsHistoryLimit` control how many completed/failed Job objects to retain. Defaults are generous (3 and 1), but for high-frequency CronJobs even that accumulates. Set them to match how much history you actually need to debug failures — usually the last couple of failures are enough.
+
+The deeper reliability pattern is observability. A CronJob that silently stops running is worse than one that fails loudly — you don't notice the missing report until someone asks for it. Alert on `kube_job_status_failed` and on missing runs (a CronJob that hasn't created a Job in its expected interval). The latter catches the failure mode where the controller itself is wedged and nothing fires at all.
+
+Batch workloads are the quiet backbone of most platforms — training, reporting, cleanup, migration. Treating them with the same care as your serving workloads, rather than as an afterthought, is what keeps them quiet in the good way instead of the 3am way.
+
+

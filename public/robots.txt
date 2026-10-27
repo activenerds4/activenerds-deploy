@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /search
+Disallow: /api
+
+Sitemap: https://www.activenerds.com/sitemap.xml

@@ -1,0 +1,87 @@
+---
+title: "Mixed Precision Training in PyTorch"
+slug: mixed-precision-training-pytorch
+description: "Speed up PyTorch training and cut GPU memory with mixed precision — AMP, autocast, GradScaler, and the pitfalls that break convergence."
+date: "2026-07-02"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["pytorch", "mlops"]
+featured: true
+relatedArticles: ["optimize-pytorch-training-speed", "debugging-oom-pytorch", "distributed-training-torchrun-ddp", "data-augmentation-techniques-pytorch", "gradient-clipping-deep-learning"]
+image: https://cdn.activenerds.com/images/posts/mixed-precision-training-pytorch.png
+imageAlt: "Spring-green half-precision and full-precision tensor blocks side by side with a scaling factor on a deep slate background"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Speed up PyTorch training and cut GPU memory with mixed precision.
+- **Key Capabilities**: AMP, autocast, GradScaler, and the pitfalls that break convergence.
+- **Why Mixed Precision**: Apply structured configurations and validated production patterns.
+- **PyTorch AMP Basics**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Training large models in full FP32 is a choice to spend twice the memory and half the speed you could be getting, in exchange for precision you mostly don't need. Mixed [precision training](/articles/optimize-pytorch-training-speed) keeps the parts that need full precision in FP32 and drops the rest to FP16 or BF16 — and on modern GPUs that support fast lower-precision math, the speedup is real and the memory savings let you fit larger batches or bigger models on the same hardware. The catch is that FP16 has a narrower numeric range, and naive use of it will silently break your training with NaNs that appear from nowhere.
+
+This is the practical guide to mixed precision in PyTorch: what it actually does, how PyTorch's automatic mixed precision (AMP) handles it, the GradScaler dance that FP16 requires, and the pitfalls that turn a speedup into a debugging session.
+
+## Why Mixed Precision
+
+The core idea is that not every operation in a neural network needs the 7 decimal digits of precision that FP32 gives you. The forward pass and most of the backward pass can tolerate FP16's ~3 decimal digits without meaningful accuracy loss — the gradients are noisy approximations anyway, and the optimizer's tiny updates are where precision matters most. Mixed precision keeps the master weights and the optimizer state in FP32 (where small updates accumulate) and runs the compute-heavy forward and backward in FP16 (where the speed is).
+
+**Where the speedup comes from.** Modern NVIDIA GPUs (Volta and later) have dedicated hardware — Tensor Cores — that perform FP16 matrix multiplies much faster than FP32. A matmul that's the bottleneck of your training step runs roughly 2x faster in FP16 on hardware with Tensor Cores. If your training is matmul-bound (most transformer and conv training is), you get a near-linear speedup. If you're bottlenecked on data loading or small element-wise ops, the speedup is smaller — mixed precision helps the compute, not the I/O.
+
+**The memory win.** FP16 tensors take half the bytes of FP32. Activations, gradients, and the intermediate tensors that dominate a training step's memory footprint all halve in size. This is the other half of the appeal: you can fit a larger batch size, a larger model, or both in the same GPU memory. For anyone who has hit OOM on a model that "should fit," mixed precision is often the difference between training and not training. See our guide to [debugging OOM in PyTorch](/blog/debugging-oom-pytorch) for the broader memory-management toolkit.
+
+**FP16 vs BF16.** FP16 has a large dynamic range problem: it can represent very small and very large numbers, but not both at once, so gradients that span a wide range can underflow to zero or overflow to inf. BF16 (Brain Float) solves this by keeping the same exponent range as FP32 but with fewer mantissa bits — it trades precision for range, which is exactly what gradient computation wants. On Ampere and later GPUs, BF16 is the better choice because it eliminates most of the overflow/underflow headaches of FP16. On older hardware that only supports FP16, you deal with the range problem via loss scaling, which is what the GradScaler does.
+
+## PyTorch AMP Basics
+
+PyTorch's AMP doesn't require you to manually cast tensors or maintain two copies of your weights. You wrap the compute in an `autocast` context that automatically casts operations to the appropriate precision based on an internal list of what's safe in FP16, and (for FP16) you use a `GradScaler` to handle the loss scaling that keeps gradients from underflowing.
+
+```python
+from torch.amp import autocast, GradScaler
+
+scaler = GradScaler(device="cuda")
+
+for inputs, targets in dataloader:
+    inputs, targets = inputs.cuda(), targets.cuda()
+    optimizer.zero_grad()
+
+    with autocast(device_type="cuda"):
+        outputs = model(inputs)
+        loss = loss_fn(outputs, targets)
+
+    scaler.scale(loss).backward()
+    scaler.step(optimizer)
+    scaler.update()
+```
+
+**autocast** is the magic. Inside the context, PyTorch automatically runs operations like matmul, convolution, and linear layers in FP16 (or BF16 if you specify it), while keeping operations like softmax, layer norm, and reductions in FP32 where precision matters. You don't change your model code — the casts happen automatically based on operation type. The master weights stay FP32; only the activations and the compute drop to lower precision.
+
+**GradScaler** exists because of FP16's narrow range. Gradients in deep networks are often tiny — smaller than FP16's minimum representable value — so they'd round to zero during the backward pass, and you'd train nothing. Loss scaling multiplies the loss by a large factor before backprop, which scales the gradients up into FP16's representable range, then the scaler divides the gradients back down before the optimizer step. The scaler dynamically adjusts the scale factor: if it sees inf/NaN gradients, it reduces the scale and skips the step; if steps succeed, it cautiously increases the scale. This is the dance that keeps FP16 training stable.
+
+**When BF16 needs no scaler.** If you're on Ampere+ and use `autocast(device_type="cuda", dtype=torch.bfloat16)`, you can drop the GradScaler entirely. BF16's range matches FP32, so gradients don't underflow, and loss scaling is unnecessary. This is the simpler path — fewer moving parts, no scale-factor tuning — and it's the default choice on hardware that supports it. The only reason to use FP16 + scaler on modern GPUs is if a specific op or kernel performs notably better in FP16, which is uncommon.
+
+## Common Pitfalls
+
+Mixed precision is mostly transparent, but the places it breaks are specific and worth knowing before you hit them.
+
+**Loss scaling and overflow.** If your scale factor is too high, gradients overflow to inf, the scaler skips the step, and training stalls (you'll see "skipped step" warnings). If it's too low, gradients underflow to zero and training silently learns nothing. The GradScaler auto-tunes this, but if you see constant skips, your model may have genuinely large gradients (try gradient clipping — see our [gradient clipping guide](/blog/gradient-clipping-deep-learning)) or a numerical instability in a specific layer. Watch the skip rate in the first few hundred steps; a healthy run skips occasionally, not constantly.
+
+**Ops that must stay FP32.** Autocast handles this automatically, but if you write custom ops or disable autocast in a region, you can accidentally run precision-sensitive ops in FP16. Reductions over many elements (sums across large tensors), softmax, and anything involving exponentials or logarithms can produce wrong results in FP16 due to accumulation error. The rule: if an op aggregates many values or is near a numerical boundary (log of near-zero, exp of large values), keep it FP32. Autocast's defaults are correct; deviate only with a reason.
+
+**Numerical instability debugging.** The symptom of a mixed-precision bug is usually NaNs appearing partway through training, sometimes only after many steps. The fastest diagnosis is to temporarily disable autocast and confirm the model trains in pure FP32 — if it does, the problem is precision-related. Then re-enable autocast and bisect: run different sections in FP32 to find which op introduces the NaN. Common culprits are custom loss functions, attention implementations, and any op that divides by a value that can approach zero.
+
+## Practical Setup
+
+Enabling AMP is a small change to the training loop, but getting the full benefit requires a couple of adjustments.
+
+**Enabling AMP in a training loop.** The code snippet above is the complete change for a standard loop. The two additions are the `autocast` context around the forward pass and the `scaler.scale(loss).backward()` / `scaler.step(optimizer)` / `scaler.update()` sequence replacing the plain backward and step. If you use gradient accumulation, apply the scaler to the accumulated loss and call `scaler.update()` once per optimizer step, not per micro-batch. If you use gradient clipping, clip the unscaled gradients — call `scaler.unscale_(optimizer)` before clipping, then `scaler.step`.
+
+**Benchmarking the speedup.** Measure before you celebrate. Run a fixed number of steps with and without autocast, with the same batch size, and time them. The speedup depends on your model's compute profile: transformer and conv models often see 1.5–2x; models dominated by small ops or I/O see less. Also measure memory — you can often increase the batch size with the freed memory, which compounds the throughput gain. Don't assume the speedup; measure it for your specific model and hardware.
+
+**When mixed precision isn't worth it.** If your model is small and trains in minutes, the setup and debugging overhead isn't worth the speedup. If you're on hardware without fast FP16/BF16 (older GPUs, some CPUs), there's no speedup — autocast will cast and uncast without the Tensor Core benefit, and you'll pay overhead for nothing. And if your model has numerical pathologies that make FP16 training unstable despite correct setup, the debugging time may exceed the training time saved. Mixed precision is a tool for large models on capable hardware where the speedup is real; for small models or older hardware, plain FP32 is simpler and often faster.
+
+The honest summary: mixed precision is one of the highest-leverage optimizations in PyTorch training — a small code change that can roughly double throughput and halve memory on the right hardware. The cost is the GradScaler complexity (avoidable with BF16) and a handful of numerical pitfalls that are well-understood once you've hit them. For anyone training models large enough that training time or memory is a constraint, it's worth the setup. Pair it with [optimizing PyTorch training speed](/blog/optimize-pytorch-training-speed) for the broader performance toolkit and [gradient clipping](/blog/gradient-clipping-deep-learning) for the stability side, and the training loop gets noticeably faster without sacrificing correctness.
+
+

@@ -1,0 +1,307 @@
+---
+title: "Local LLM Development & Offline Tooling Architecture"
+description: "Run production-grade LLM tooling on your own hardware — Ollama and vLLM setups, Apple Silicon Metal vs CUDA optimization, local privacy routers, and the cost/latency trade-offs of self-hosted inference."
+category: ai-ml
+slug: local-llm-offline-tooling-guide
+lastUpdated: "2026-08-28"
+tags: ["llms", "local-llm", "ollama", "inference"]
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Local LLM Development & Offline Tooling Architecture
+
+**Running an LLM locally isn't just about privacy — it's about latency, cost predictability, and not being rate-limited out of your own workflow.** Cloud LLM APIs are convenient until you're iterating on 10,000 prompts and the bill arrives, or until the API is down and your CI is blocked. This guide covers the architecture of a local LLM stack: the runtimes (Ollama, vLLM), the hardware (Apple Silicon Metal vs NVIDIA CUDA), the optimization (quantization, batching), and the routing layer that makes local models usable as a daily tool.
+
+---
+
+## Table of Contents
+
+1. [Why Local LLM Tooling](#1-why-local-llm-tooling)
+2. [Runtime Selection: Ollama vs vLLM](#2-runtime-selection-ollama-vs-vllm)
+3. [Hardware: Metal vs CUDA](#3-hardware-metal-vs-cuda)
+4. [Quantization & Memory Math](#4-quantization--memory-math)
+5. [Local Privacy Routers](#5-local-privacy-routers)
+6. [Cost & Latency Trade-offs](#6-cost--latency-trade-offs)
+
+---
+
+## 1. Why Local LLM Tooling
+
+Before architecting the stack, understand when local LLM tooling is the right call — and when it isn't.
+
+### Where Local Wins
+
+| Use case | Why local wins |
+|---|---|
+| High-volume batch processing | Cloud per-token costs compound; local is fixed cost |
+| Sensitive data (PII, proprietary code) | Data never leaves your machine |
+| Offline / air-gapped environments | No network dependency |
+| Latency-sensitive interactive tools | No network round-trip; sub-100ms TTFT achievable |
+| CI/CD integration | No API key management, no rate limits, no outages |
+| Experimentation & fine-tuning | Full control over the model and inference path |
+
+### Where Cloud Wins
+
+| Use case | Why cloud wins |
+|---|---|
+| Frontier model quality | Local hardware can't run the largest models at full precision |
+| Zero infrastructure burden | No GPU management, no quantization tuning |
+| Elastic scale | Burst capacity without buying hardware |
+| Multi-modal at scale | Vision/audio models need significant VRAM |
+
+<Callout variant="note" title="The hybrid reality">
+  Most production setups are hybrid: local models for the high-volume, latency-sensitive, or sensitive work; cloud APIs for the tasks that need frontier quality. The architecture question isn't "local or cloud" — it's "which workload goes where." A good local stack includes a routing layer that can fall back to cloud when local quality is insufficient.
+</Callout>
+
+---
+
+## 2. Runtime Selection: Ollama vs vLLM
+
+The two dominant local LLM runtimes serve different purposes. Choosing the wrong one wastes hardware.
+
+### Ollama — The Developer Experience Runtime
+
+Ollama is optimized for ease of use and single-user interactive workflows. It manages models, quantization, and the inference server for you.
+
+**Strengths:**
+- One-command model installation (`ollama pull llama3`)
+- Automatic quantization (GGUF format)
+- OpenAI-compatible API (`localhost:11434/v1`)
+- Great for IDE integration, chat, single-user dev
+
+**Limitations:**
+- Not built for high-throughput batching
+- Limited concurrency — designed for one user, not many
+- Less control over inference parameters
+
+**Use when:** You're a single developer running models for IDE assistance, chat, or local experimentation.
+
+### vLLM — The Throughput Runtime
+
+vLLM is optimized for production inference throughput. It uses PagedAttention to maximize VRAM utilization and supports continuous batching.
+
+**Strengths:**
+- High throughput via continuous batching
+- PagedAttention minimizes VRAM fragmentation
+- Supports tensor parallelism for multi-GPU
+- OpenAI-compatible API
+- Production-grade concurrency
+
+**Limitations:**
+- More setup complexity than Ollama
+- GPU-only (no CPU/Metal support)
+- Heavier resource footprint
+
+**Use when:** You're serving a local model to a team, running batch inference, or building a local API endpoint that needs concurrency.
+
+| Dimension | Ollama | vLLM |
+|---|---|---|
+| Target user | Single developer | Team / production |
+| Hardware | CPU, GPU, Metal | NVIDIA GPU only |
+| Throughput | Low (single request) | High (batched) |
+| Setup | One command | Config + launch |
+| Quantization | GGUF (built-in) | AWQ, GPTQ, FP8 |
+| Concurrency | Limited | High |
+
+<Callout variant="tip" title="Start with Ollama, graduate to vLLM">
+  If you're unsure, start with Ollama. It gets you running in minutes and handles the 90% case (single-user interactive). When you hit its limits — you need to serve a team, or batch processing is too slow — graduate to vLLM. Don't start with vLLM's complexity unless you have a concrete throughput requirement.
+</Callout>
+
+---
+
+## 3. Hardware: Metal vs CUDA
+
+The hardware decision determines which models you can run and how fast. The two paths for local LLM inference are Apple Silicon (Metal) and NVIDIA GPUs (CUDA).
+
+### Apple Silicon (Metal)
+
+Apple's unified memory architecture is uniquely suited to LLM inference: the GPU and CPU share the same memory pool, so a 64GB Mac can load a model that needs 40GB of VRAM — impossible on a discrete GPU with 24GB of VRAM.
+
+**Strengths:**
+- Unified memory — large models fit without VRAM limits
+- Excellent performance-per-watt for inference
+- No separate GPU purchase (it's your laptop/desktop)
+- Metal acceleration via llama.cpp / Ollama
+
+**Limitations:**
+- No vLLM support (CUDA only)
+- Lower raw throughput than high-end NVIDIA GPUs
+- Not suitable for training or fine-tuning at scale
+
+**Memory-to-model sizing (Apple Silicon):**
+
+| Mac RAM | Usable for inference | Max practical model |
+|---|---|---|
+| 16 GB | ~10 GB | 7B at Q4 (4-bit quantized) |
+| 32 GB | ~22 GB | 13B at Q4, or 7B at Q8 |
+| 64 GB | ~48 GB | 34B at Q4, or 13B at Q8 |
+| 128 GB | ~100 GB | 70B at Q4, or 34B at Q8 |
+
+### NVIDIA GPU (CUDA)
+
+NVIDIA GPUs are the performance leader for LLM inference, with CUDA support across all major runtimes including vLLM.
+
+**Strengths:**
+- Highest inference throughput (especially with vLLM)
+- Full runtime support (Ollama, vLLM, TGI, etc.)
+- Tensor parallelism for multi-GPU setups
+- Suitable for fine-tuning and training, not just inference
+
+**Limitations:**
+- VRAM is the hard limit (can't use system RAM for the model)
+- Higher power consumption
+- Separate hardware purchase
+
+**VRAM-to-model sizing (NVIDIA):**
+
+| GPU VRAM | Max practical model |
+|---|---|
+| 8 GB | 7B at Q4 (tight) |
+| 16 GB | 7B at Q8, or 13B at Q4 |
+| 24 GB | 13B at Q8, or 34B at Q4 |
+| 48 GB | 34B at Q8, or 70B at Q4 |
+| 80 GB | 70B at Q8 |
+
+<Callout variant="warning" title="VRAM is a hard wall, unified memory is soft">
+  On NVIDIA, if a model needs 26GB and your GPU has 24GB, it won't run — period. On Apple Silicon, if a model needs 40GB and your Mac has 64GB, it runs, just slower (some layers offload to CPU). This is why Apple Silicon is surprisingly competitive for large-model inference despite lower raw GPU throughput: the memory ceiling is higher.
+</Callout>
+
+---
+
+## 4. Quantization & Memory Math
+
+Quantization is how you fit large models into limited memory. It reduces the precision of the model weights, shrinking memory usage at a small quality cost.
+
+### The Quantization Spectrum
+
+| Format | Bits per weight | Quality | Use case |
+|---|---|---|---|
+| FP16 / BF16 | 16 | Full | Training, max quality inference |
+| Q8 / INT8 | 8 | Near-full | High-quality local inference |
+| Q6 | 6 | Minimal loss | Good balance |
+| Q5 | 5 | Slight loss | Common local default |
+| Q4 | 4 | Noticeable but usable | Max model size in limited memory |
+| Q3 / Q2 | 3–2 | Significant loss | Last resort for very large models |
+
+### The Memory Formula
+
+Model memory usage is approximately:
+
+```text
+Memory (GB) = (parameter_count × bits_per_weight) / 8
+
+Examples (7B parameter model):
+  FP16:  (7 × 10^9 × 16) / 8 = 14 GB
+  Q8:    (7 × 10^9 × 8)  / 8 = 7 GB
+  Q4:    (7 × 10^9 × 4)  / 8 = 3.5 GB
+
+Add ~20% for KV cache and overhead at typical context lengths.
+```
+
+<Callout variant="tip" title="The quantization sweet spot">
+  For most local use cases, Q4 to Q6 is the sweet spot. Q4 lets you run a model 2x larger than FP16 in the same memory, with quality that's good enough for most tasks. Drop to Q4 only when you need to fit a larger model; use Q6 or Q8 when you have memory headroom and want maximum quality. Q3 and below are rarely worth the quality loss.
+</Callout>
+
+### Format Selection
+
+- **GGUF** — The format Ollama and llama.cpp use. Best for CPU/Metal inference and single-user GPU. Supports a wide range of quantization levels.
+- **AWQ** — Activation-aware quantization. Better quality than naive Q4, supported by vLLM. Best for GPU inference at scale.
+- **GPTQ** — Older quantization format, also GPU-focused. Largely superseded by AWQ for new deployments.
+- **FP8** — Hardware-accelerated 8-bit on newer NVIDIA GPUs (H100, Ada). Near-FP16 quality at half the memory.
+
+---
+
+## 5. Local Privacy Routers
+
+A local LLM is only useful if your tools can route to it. The privacy router is the layer that makes local models drop-in replacements for cloud APIs.
+
+### The Router Architecture
+
+```text
+  Tool / IDE / App
+        |
+        ↓
+  Privacy Router (OpenAI-compatible API)
+        |
+        ├─── Local model (Ollama / vLLM)  [default, free, fast]
+        |
+        └─── Cloud API (fallback)         [when local quality insufficient]
+```
+
+The router exposes an OpenAI-compatible endpoint. Your tools point at the router instead of OpenAI directly. The router decides, per request, whether to use the local model or fall back to cloud.
+
+### Routing Logic
+
+| Signal | Route to |
+|---|---|
+| Simple completion / code completion | Local (fast, free, sufficient quality) |
+| Summarization / extraction | Local (well within local model capability) |
+| Complex reasoning / large context | Cloud (frontier model needed) |
+| Sensitive data | Local (always — privacy requirement) |
+| Local model quality insufficient (detected) | Cloud fallback |
+
+### Implementation
+
+Several open-source routers provide this:
+
+- **LiteLLM** — Unified API across 100+ providers including local; supports fallback chains
+- **OpenRouter** (self-hostable variants) — Routing with cost/latency awareness
+- **Custom FastAPI proxy** — Full control over routing logic for specific needs
+
+<Callout variant="note" title="The OpenAI-compatible contract is the leverage">
+  The reason local LLM tooling works is that Ollama, vLLM, and most routers expose an OpenAI-compatible API. Your tools don't know or care whether the backend is a local model or OpenAI — they just call the endpoint. This is what makes local models drop-in: the contract is standardized. Build your stack around that contract, not around a specific runtime.
+</Callout>
+
+---
+
+## 6. Cost & Latency Trade-offs
+
+The decision to run local isn't free — you're trading cloud per-token costs for hardware and electricity. Here's the math.
+
+### The Break-Even Analysis
+
+```text
+Cloud cost:    $X per 1M tokens
+Local cost:    Hardware amortized over its useful life + electricity
+
+Break-even:    Cloud monthly spend = Local monthly amortized cost
+
+Example:
+  Cloud: $0.005 per 1K tokens, 50M tokens/month = $250/month
+  Local: $2000 Mac mini, 3-year life = ~$55/month + ~$10 electricity
+  Break-even: ~$65/month of cloud spend justifies the Mac
+```
+
+For a developer doing heavy LLM work, the break-even is reached quickly. For occasional use, cloud remains cheaper.
+
+### Latency Comparison
+
+| Path | Typical TTFT | Notes |
+|---|---|---|
+| Cloud API (warm) | 200–500ms | Network round-trip dominates |
+| Cloud API (cold) | 1–3s | Model loading, queue |
+| Local (Metal, 7B Q4) | 50–150ms | No network, model in memory |
+| Local (CUDA, 7B Q4) | 30–80ms | Faster GPU, no network |
+| Local (large model, swapping) | 1–5s | Model partially offloaded to disk |
+
+<Callout variant="tip" title="Local wins on interactive latency">
+  For interactive tools (IDE completion, chat), local's sub-100ms TTFT is a qualitatively different experience from cloud's 300ms+. The difference between "instant" and "fast" is perceptible, and it changes how you use the tool. If your workflow is interactive and high-frequency, local's latency advantage alone may justify it, independent of cost.
+</Callout>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Local LLM Tooling Sign-off"
+  items={[
+    "Runtime selected: Ollama (single-user) or vLLM (throughput) based on workload",
+    "Hardware path chosen: Apple Silicon (memory ceiling) or NVIDIA (throughput) based on constraints",
+    "Quantization level selected (Q4–Q6 sweet spot) with memory math verified",
+    "Privacy router deployed with OpenAI-compatible API and cloud fallback",
+    "Cost break-even calculated for the specific usage pattern",
+    "Latency requirements mapped to the chosen stack (interactive vs batch)",
+  ]}
+/>

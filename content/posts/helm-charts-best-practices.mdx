@@ -1,0 +1,265 @@
+---
+title: "Helm Charts Best Practices Guide"
+slug: helm-charts-best-practices
+description: "Write maintainable, secure Helm charts — templating, values structure, library charts, and CI validation."
+date: "2025-10-14"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes", "docker"]
+featured: false
+relatedArticles: ["devcontainer-setup-consistent-environments", "cicd-pipeline-optimization", "containerd-vs-cri-o-runtime-comparison", "devops-tools-benchmark-comparison", "docker-multistage-builds-best-practices"]
+image: https://cdn.activenerds.com/images/posts/helm-charts-best-practices.png
+imageAlt: "Helm charts best practices — structuring maintainable Kubernetes Helm templates with proper values hierarchy"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Use named templates for repeated patterns**: The `_helpers.tpl` file should contain all your reusable snippets:.
+- **Set resource defaults**: never leave resources unspecified:.
+- **Versioning strategy**: Use SemVer for chart versions.
+</Callout>
+
+Helm is the package manager for Kubernetes, and writing good Helm charts is an art that most teams learn through painful trial and error. A well-structured chart makes deployments reproducible and configurable; a poorly structured chart creates a maintenance nightmare that nobody wants to touch.
+
+This guide covers the practices that separate charts you can share with confidence from charts that only work on your cluster.
+
+## Chart Structure Done Right
+
+A Helm chart should have a clear, predictable structure:
+
+```
+my-app/
+├── Chart.yaml          # Chart metadata
+├── values.yaml         # Default configuration
+├── values.schema.json  # Schema for values validation
+├── templates/
+│   ├── _helpers.tpl    # Named templates (reusable snippets)
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── ingress.yaml
+│   ├── configmap.yaml
+│   ├── secret.yaml
+│   ├── hpa.yaml
+│   ├── serviceaccount.yaml
+│   └── tests/
+│       └── test-connection.yaml
+├── templates/NOTES.txt # Post-install notes
+└── README.md
+```
+
+The `Chart.yaml` should be explicit about versions and dependencies:
+
+```yaml
+apiVersion: v2
+name: my-app
+description: A Helm chart for my application
+type: application
+version: 1.2.3          # Chart version (SemVer)
+appVersion: "2.1.0"     # Application version
+maintainers:
+- name: ActiveNerds
+  email: dev@activenerds.com
+dependencies:
+- name: postgresql
+  version: 12.x.x
+  repository: https://charts.bitnami.com/bitnami
+  condition: postgresql.enabled
+```
+
+<Note>
+The `version` field is the chart version — it changes when you modify the chart templates or values. The `appVersion` is the application version — it changes when you release new application code. Keep them separate and update them independently.
+</Note>
+
+## Templating Best Practices
+
+**Use named templates for repeated patterns**. The `_helpers.tpl` file should contain all your reusable snippets:
+
+```yaml
+# templates/_helpers.tpl
+{{- define "myapp.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end -}}
+
+{{- define "myapp.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := include "myapp.name" . }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- define "myapp.labels" -}}
+helm.sh/chart: {{ include "myapp.chart" . }}
+{{ include "myapp.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{- define "myapp.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "myapp.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+```
+
+**Standardize labels** using the recommended Kubernetes label conventions. Every resource should have the standard labels: `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/version`, `app.kubernetes.io/managed-by`, and `helm.sh/chart`.
+
+**Set resource defaults** — never leave resources unspecified:
+
+```yaml
+# templates/deployment.yaml
+resources:
+  {{- toYaml .Values.resources | nindent 12 }}
+```
+
+```yaml
+# values.yaml
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+```
+
+## Values and Overrides
+
+**Environment separation** is best handled with multiple values files:
+
+```yaml
+# values.yaml (base defaults)
+replicaCount: 1
+image:
+  repository: my-app
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# values-dev.yaml
+replicaCount: 1
+image:
+  tag: "dev-latest"
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# values-prod.yaml
+replicaCount: 3
+image:
+  tag: "v2.1.0"
+  pullPolicy: IfNotPresent
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+```
+
+```bash
+# Deploy with environment-specific values
+helm install my-app ./my-app -f values.yaml -f values-prod.yaml
+```
+
+**Schema validation** catches misconfigured values before deployment:
+
+```json
+// values.schema.json
+{
+  "$schema": "http://json-schema.org/schema#",
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {"type": "string"},
+        "tag": {"type": "string"},
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      },
+      "required": ["repository"]
+    }
+  }
+}
+```
+
+<Callout type="tip">
+Always use `--dry-run --debug` before installing a chart for the first time. It renders all templates with your values and shows you exactly what will be deployed — catching errors before they hit your cluster.
+</Callout>
+
+## Testing and CI
+
+**helm lint** is your first line of defense:
+
+```bash
+helm lint ./my-app
+# Checks chart structure, template syntax, and values schema
+```
+
+**helm test** runs tests defined in `templates/tests/`:
+
+```yaml
+# templates/tests/test-connection.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "myapp.fullname" . }}-test"
+  annotations:
+    "helm.sh/hook": test
+spec:
+  restartPolicy: Never
+  containers:
+  - name: wget
+    image: busybox
+    command: ['wget']
+    args: ['{{ include "myapp.fullname" . }}:{{ .Values.service.port }}/health']
+```
+
+```bash
+helm test my-app
+```
+
+**CT (Chart Testing)** in CI validates charts across multiple versions and environments:
+
+```yaml
+# .github/workflows/chart-test.yml
+- name: Run chart-testing
+  run: |
+    ct lint --all
+    ct install --all
+```
+
+## Distribution
+
+**OCI registry publishing** is the modern way to distribute charts (replacing chart repositories):
+
+```bash
+# Package and push to OCI registry
+helm package ./my-app
+helm push my-app-1.2.3.tgz oci://ghcr.io/activenerds/charts
+```
+
+**Versioning strategy**: Use SemVer for chart versions. Breaking changes (template structure, required values) = major version. New features = minor. Bug fixes = patch. This lets consumers pin versions safely.
+
+<Warning>
+Never use `latest` as a chart version or appVersion tag. It makes rollbacks impossible because you can't distinguish which version was deployed. Always use explicit, immutable version tags.
+</Warning>
+
+The best Helm charts read like documentation — clear structure, sensible defaults, and values that make the configuration options obvious. Invest time in your chart structure upfront; it pays dividends every time someone deploys your application without having to read the templates.
+
+

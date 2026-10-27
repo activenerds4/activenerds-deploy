@@ -1,0 +1,153 @@
+---
+title: "Zero-Trust Container Build Checklist"
+description: "Build containers that assume breach — distroless bases, non-root UIDs, stripped package managers, dropped Linux capabilities, and read-only rootfs."
+category: devsecops
+slug: zero-trust-container-build-checklist
+lastUpdated: "2026-08-28"
+tags: ["devsecops", "docker", "containers", "security"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Zero-Trust Container Build Checklist
+
+**Build the image as if the runtime is already compromised.**
+
+A container that runs as root with every capability and a full shell is a free foothold for an attacker who breaks in. This checklist builds the opposite: minimal base, no root, no package manager, no capabilities, read-only filesystem. Each layer removes an attacker's options.
+
+---
+
+## Table of Contents
+
+1. [Base Image & Layers](#1-base-image--layers)
+2. [User & Privilege](#2-user--privilege)
+3. [Linux Capabilities](#3-linux-capabilities)
+4. [Filesystem & Surface Reduction](#4-filesystem--surface-reduction)
+5. [Build Pipeline Hygiene](#5-build-pipeline-hygiene)
+6. [Runtime Verification](#6-runtime-verification)
+
+---
+
+## 1. Base Image & Layers
+
+<ChecklistBox
+  title="Base Image & Layers"
+  items={[
+    "Distroless or minimal base used (gcr.io/distroless, scratch, alpine) — not a full OS",
+    "Multi-stage build: build artifacts in a builder stage, copy only runtime artifacts to final",
+    "Final image contains no compilers, no shells, no debug tools",
+    "Base image pinned to a digest, not a floating tag",
+    "Image scanned for known CVEs (Trivy/Grype) in the build pipeline",
+    "Layer count minimized (fewer layers = smaller attack surface and image size)",
+    "No secrets baked into any layer (no COPY of .env, no ARG with secret values)",
+  ]}
+/>
+
+<Callout variant="warning" title="No shell, no foothold">
+  Distroless images ship without a shell (`/bin/sh`), package managers, or utilities. An attacker who gets RCE in your app can't drop into a shell, curl out a reverse shell, or install tools — there's nothing there. The tradeoff is harder debugging, which ephemeral containers solve at runtime.
+</Callout>
+
+---
+
+## 2. User & Privilege
+
+<ChecklistBox
+  title="User & Privilege"
+  items={[
+    "Container runs as a non-root user (UID > 0)",
+    "Dedicated UID like 10001 used (avoid common UIDs that collide with host users)",
+    "USER directive in the Dockerfile sets the runtime user (not relying on K8s securityContext alone)",
+    "runAsNonRoot: true enforced in the pod securityContext",
+    "runAsUser set to the non-root UID in the securityContext",
+    "allowPrivilegeEscalation: false in the securityContext",
+    "No `sudo` in the image; the app doesn't need it",
+  ]}
+/>
+
+---
+
+## 3. Linux Capabilities
+
+<ChecklistBox
+  title="Linux Capabilities"
+  items={[
+    "All Linux capabilities dropped: `capabilities.drop: [ALL]` in securityContext",
+    "Only specific capabilities added back if the app genuinely needs them (documented + reviewed)",
+    "No privileged containers (`privileged: false`)",
+    "No `CAP_SYS_ADMIN`, `CAP_NET_ADMIN`, or `CAP_DAC_OVERRIDE` without strong justification",
+    "Capability additions reviewed by security and time-boxed (revisit whether still needed)",
+    "App refactored to not need capabilities where possible (e.g. bind to port > 1024 instead of CAP_NET_BIND_SERVICE)",
+    "SeccompProfile set to RuntimeDefault (or a custom profile) to restrict syscalls",
+  ]}
+/>
+
+---
+
+## 4. Filesystem & Surface Reduction
+
+<ChecklistBox
+  title="Filesystem & Surface Reduction"
+  items={[
+    "readOnlyRootFilesystem: true in the securityContext",
+    "App writes only to mounted volumes (emptyDir, PVC), not the root filesystem",
+    "Package manager (apt, apk, yum) not present in the final image",
+    "No curl, wget, nc, or other network utilities in the final image",
+    "No SSH server or unnecessary daemons in the image",
+    "tmp mounted as a writable volume if the app needs it",
+    "Image size reviewed — a bloated image usually carries attack surface",
+  ]}
+/>
+
+---
+
+## 5. Build Pipeline Hygiene
+
+<ChecklistBox
+  title="Build Pipeline Hygiene"
+  items={[
+    "Build runs in an ephemeral, isolated environment (not a shared long-lived builder)",
+    "Build secrets injected at build time, not embedded (BuildKit secret mounts, not ARG)",
+    "Image signed with Cosign in the pipeline",
+    "SBOM generated and stored with the image",
+    "`.dockerignore` configured to exclude .git, node_modules, local secrets from the build context",
+    "Build provenance (SLSA) generated and verifiable",
+    "Image pushed to a private registry with access control, not a public one",
+  ]}
+/>
+
+<Callout variant="tip" title="BuildKit secret mounts, not ARG">
+  Never pass secrets as `ARG` — they end up in image history and can be extracted. Use BuildKit's `--mount=type=secret` so a secret is available during the build step but never written to a layer. `docker history` on a correctly built image shows nothing.
+</Callout>
+
+---
+
+## 6. Runtime Verification
+
+<ChecklistBox
+  title="Runtime Verification"
+  items={[
+    "`docker inspect` / pod spec confirms USER is non-root and capabilities dropped",
+    "`kubectl exec` into the running pod and `id` returns the non-root UID",
+    "Attempt to write to the root filesystem fails (read-only confirmed)",
+    "No shell available: `kubectl exec ... -- /bin/sh` fails on a distroless image",
+    "Runtime security tool (Falco/Tetragon) alerts on unexpected syscalls or file writes",
+    "Pod Security Standard `restricted` admits the pod (no policy violations)",
+    "Image re-scanned periodically for new CVEs after publication (not just at build)",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Build Sign-off"
+  items={[
+    "Final image runs as UID 10001, non-root, with all capabilities dropped",
+    "readOnlyRootFilesystem confirmed; app writes only to mounted volumes",
+    "No shell, package manager, or network utilities in the final image",
+    "Image signed, SBOM attached, and admitted by the restricted Pod Security Standard",
+  ]}
+/>

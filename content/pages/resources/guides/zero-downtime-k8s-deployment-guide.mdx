@@ -1,0 +1,369 @@
+---
+title: "Zero-Downtime Kubernetes Deployment Architecture Guide"
+description: "Deploy to Kubernetes without dropping a single request — PodDisruptionBudgets, graceful SIGTERM termination, readiness gates, and canary service-mesh rollouts for truly zero-downtime production deploys."
+category: kubernetes
+slug: zero-downtime-k8s-deployment-guide
+lastUpdated: "2026-08-28"
+tags: ["kubernetes", "deployment", "devops", "zero-downtime"]
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Zero-Downtime Kubernetes Deployment Architecture Guide
+
+**"Zero-downtime deploy" is a claim, not a default.** Kubernetes gives you the primitives — rolling updates, readiness probes, PDBs — but it doesn't wire them together for you. A naive Deployment with default settings drops requests on every rollout. This guide covers the full architecture of a deploy that doesn't drop traffic: the termination sequence, the readiness gates, the disruption budgets, and the progressive-delivery layer that lets you ship with confidence.
+
+---
+
+## Table of Contents
+
+1. [Why Default Deploys Drop Traffic](#1-why-default-deploys-drop-traffic)
+2. [The Graceful Termination Sequence](#2-the-graceful-termination-sequence)
+3. [Readiness Gates & Probe Tuning](#3-readiness-gates--probe-tuning)
+4. [PodDisruptionBudgets](#4-poddisruptionbudgets)
+5. [Canary & Progressive Delivery](#5-canary--progressive-delivery)
+6. [The Full Zero-Downtime Checklist](#6-the-full-zero-downtime-checklist)
+
+---
+
+## 1. Why Default Deploys Drop Traffic
+
+A Kubernetes rolling update replaces old pods with new ones. The default behavior sounds safe — but it drops traffic in two windows that most teams don't realize exist.
+
+### The Two Drop Windows
+
+**Window 1 — Premature routing to new pods**
+
+When a new pod starts, Kubernetes adds it to the Service's endpoints as soon as the pod is `Ready`. But "Ready" (per the readiness probe) doesn't mean the pod can actually serve traffic — it might not have warmed its connection pool, loaded its cache, or registered with downstream services. Requests routed to a "Ready" but not-yet-functional pod fail.
+
+**Window 2 — Lingering traffic to terminating pods**
+
+When a pod is terminating, Kubernetes removes it from the Service endpoints — but iptables/ipvs rule propagation isn't instantaneous. Existing connections and in-flight requests continue routing to the terminating pod. If the pod shuts down before those requests complete, they fail.
+
+```text
+The default deploy timeline:
+
+  New pod starts → Ready immediately → traffic routed → FAILS (not warmed)
+  Old pod terminates → SIGTERM → shuts down → in-flight requests FAIL
+```
+
+<Callout variant="warning" title="Readiness != ready to serve">
+  The readiness probe answers "is the process responding?" not "can this pod handle production traffic?" A pod that passes a TCP check on port 8080 may not have established its database connections yet. Routing traffic to it drops requests. The fix is a readiness probe that checks actual readiness (can it query the DB? is the cache warm?) and a preStop hook that gives the pod time to drain.
+</Callout>
+
+---
+
+## 2. The Graceful Termination Sequence
+
+The termination sequence is where most zero-downtime deploys fail. The pod receives SIGTERM, and what it does in the next few seconds determines whether in-flight requests survive.
+
+### The Termination Timeline
+
+```text
+1. Pod marked for termination
+2. Pod removed from Service endpoints (async — takes time to propagate)
+3. SIGTERM sent to container (grace period countdown starts)
+4. Container should: stop accepting new requests, drain in-flight, cleanup
+5. Grace period expires (default 30s) → SIGKILL
+```
+
+The problem: step 2 (endpoint removal) and step 3 (SIGTERM) happen nearly simultaneously. The pod starts shutting down while the kube-proxy is still routing traffic to it. In-flight requests arriving in that window hit a shutting-down pod.
+
+### The preStop Hook Fix
+
+The solution is a `preStop` hook that introduces a delay between endpoint removal and SIGTERM. The pod sleeps briefly, giving the kube-proxy time to propagate the endpoint removal, so no new traffic arrives before the pod starts draining.
+
+```yaml
+spec:
+  containers:
+    - name: app
+      lifecycle:
+        preStop:
+          exec:
+            command: ["sleep", "10"]
+      terminationGracePeriodSeconds: 30
+```
+
+<Callout variant="tip" title="The sleep is not wasted time">
+  The 10-second preStop sleep looks wasteful, but it's the single most effective zero-downtime fix. It gives the kube-proxy time to stop routing new connections to the terminating pod before the application starts shutting down. Without it, you're racing the endpoint propagation. With it, new traffic has stopped arriving before SIGTERM, so the pod only needs to drain its existing connections.
+</Callout>
+
+### Application-Level Graceful Shutdown
+
+The preStop hook handles the routing race; the application must handle the actual drain. On SIGTERM, the application should:
+
+1. **Stop accepting new requests** — close the listener, reject new connections
+2. **Finish in-flight requests** — let active connections complete
+3. **Close downstream connections** — DB pools, message brokers, external clients
+4. **Exit cleanly** — within the grace period
+
+```text
+SIGTERM received
+  ↓
+[1] Stop accepting new connections (close listener)
+  ↓
+[2] Wait for in-flight requests to complete (with timeout)
+  ↓
+[3] Close downstream connections (DB, cache, brokers)
+  ↓
+[4] Flush logs, metrics, traces
+  ↓
+[5] Exit 0
+```
+
+<Callout variant="warning" title="Mind the grace period">
+  The `terminationGracePeriodSeconds` (default 30s) is the total time the pod has to shut down before SIGKILL. If your preStop hook sleeps 10s, the application only has 20s to drain. If your requests can take 25s, the pod gets killed mid-drain. Set the grace period to: preStop sleep + max request duration + buffer. A 45–60s grace period is common for services with long-running requests.
+</Callout>
+
+---
+
+## 3. Readiness Gates & Probe Tuning
+
+The readiness probe controls when a pod receives traffic. A poorly-tuned probe either routes traffic too early (to an unready pod) or too late (slowing the rollout).
+
+### Probe Types & What They Mean
+
+| Probe | Question it answers | Use |
+|---|---|---|
+| liveness | "Is the process alive and not deadlocked?" | Restart the pod if it's hung |
+| readiness | "Can this pod serve traffic right now?" | Add/remove from Service endpoints |
+| startup | "Has the pod finished initializing?" | Disable liveness/readiness during slow startup |
+
+### Readiness Probe Design
+
+A readiness probe should check **actual readiness to serve**, not just process health. The difference:
+
+```text
+Bad readiness probe (checks process health):
+  httpGet: /healthz
+  → returns 200 if the process is running
+  → routes traffic to a pod with no DB connection
+
+Good readiness probe (checks serve-readiness):
+  httpGet: /ready
+  → returns 200 only if: DB connected, cache warm, downstream reachable
+  → holds traffic until the pod can actually serve
+```
+
+### Probe Timing Parameters
+
+| Parameter | Recommended | Why |
+|---|---|---|
+| `initialDelaySeconds` | Use startup probe instead | Avoids guessing startup time |
+| `periodSeconds` | 5–10s | Frequent enough to catch issues, not so frequent it loads the pod |
+| `failureThreshold` | 3 | Don't remove on a single flake |
+| `timeoutSeconds` | 2–5s | A slow readiness check is a failing readiness check |
+| `successThreshold` | 1 (liveness), 2–3 (readiness after failure) | Require stability before re-adding |
+
+### The Startup Probe
+
+For pods with slow initialization (JVM warmup, large cache loads), use a startup probe. It disables liveness and readiness checks until startup succeeds, preventing the pod from being killed during a long but normal startup.
+
+```yaml
+startupProbe:
+  httpGet:
+    path: /startup
+    port: 8080
+  failureThreshold: 30
+  periodSeconds: 10
+```
+
+This gives the pod up to 300 seconds (30 × 10s) to start, without liveness checks killing it prematurely.
+
+<Callout variant="note" title="Separate health from readiness">
+  The most common probe mistake is using the same endpoint for liveness and readiness. Liveness checks "is the process healthy?" — a failure restarts the pod. Readiness checks "can it serve?" — a failure removes it from the load balancer. If they're the same endpoint, a transient downstream outage (DB unavailable) both removes the pod from service AND restarts it — cascading the failure. Keep them separate: liveness = process health, readiness = serve capability.
+</Callout>
+
+---
+
+## 4. PodDisruptionBudgets
+
+A PodDisruptionBudget (PDB) ensures that voluntary disruptions (deploys, node drains, autoscaling) don't take down too many pods at once. Without a PDB, a node drain can evict all your replicas simultaneously.
+
+### The PDB Contract
+
+A PDB specifies either a `minAvailable` or `maxUnavailable`:
+
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-pdb
+spec:
+  minAvailable: 2          # or: maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: api
+```
+
+This guarantees that at least 2 pods (or no more than 1 unavailable) are always serving. During a deploy or drain, Kubernetes won't evict a pod if it would violate the budget.
+
+### PDB Sizing
+
+| Replicas | minAvailable | maxUnavailable | Tolerates |
+|---|---|---|---|
+| 2 | 1 | 1 | 1 disruption at a time |
+| 3 | 2 | 1 | 1 disruption, 2 always serving |
+| 5 | 4 | 1 | 1 disruption, 4 always serving |
+| 5 | 3 | 2 | 2 disruptions, 3 always serving |
+
+<Callout variant="warning" title="PDBs can block drains">
+  A PDB that's too strict (minAvailable = replicas) blocks all voluntary evictions — including node drains during maintenance. The node can't drain, the drain hangs, and you're stuck. Always leave headroom: for N replicas, set minAvailable to N-1 or maxUnavailable to 1. A PDB that allows zero disruptions is a PDB that blocks operations.
+</Callout>
+
+### PDBs and Deploys
+
+During a rolling deploy, the PDB applies. If your deploy strategy tries to take down 2 pods but the PDB allows only 1 unavailable, the deploy waits — it doesn't violate the PDB. This is the mechanism that prevents a deploy from dropping all your capacity at once.
+
+---
+
+## 5. Canary & Progressive Delivery
+
+Rolling updates are binary — new version replaces old, gradually. Canary delivery is graduated — new version serves a small percentage of traffic, and only progresses if it's healthy. This is the architecture that lets you ship with confidence: a bad version affects 5% of traffic, not 100%.
+
+### The Progressive Delivery Spectrum
+
+| Strategy | Traffic shift | Rollback | Complexity |
+|---|---|---|---|
+| Rolling update | Pod-by-pod | Re-deploy old | Low |
+| Blue-green | 0% → 100% instant | Switch back | Medium |
+| Canary | 5% → 25% → 50% → 100% | Reduce to 0% | Medium |
+| Mesh canary | Header/route-based % | Instant | High |
+
+### Canary with a Service Mesh
+
+A service mesh (Istio, Linkerd) enables traffic-based canary, where you shift a percentage of traffic to the new version independent of pod count. This is finer-grained than pod-based canary.
+
+```text
+Canary progression (mesh-based):
+
+  v1 (stable): 95% traffic    v2 (canary): 5% traffic
+       ↓ metric check (error rate, latency) ↓
+  v1: 90%                     v2: 10%
+       ↓ metric check ↓
+  v1: 75%                     v2: 25%
+       ↓ metric check ↓
+  v1: 50%                     v2: 50%
+       ↓ metric check ↓
+  v1: 0%                      v2: 100%  (promote)
+```
+
+At each step, automated metrics (error rate, p99 latency, saturation) gate the progression. If the canary's metrics degrade, the rollout automatically reverts to the previous percentage.
+
+### The Automated Gate
+
+The canary is only as good as its gate. A manual canary ("watch the dashboard for 10 minutes") doesn't scale. The gate must be:
+
+- **Automated** — metrics checked programmatically, not by a human staring at a graph
+- **Multi-dimensional** — error rate AND latency AND saturation, not just one
+- **Comparative** — canary metrics vs. stable metrics, not absolute thresholds
+- **Fast** — check every 30–60s, not every 5 minutes
+
+<ChecklistBox
+  title="Canary Gate Metrics"
+  items={[
+    "Error rate: canary error rate within 0.1% of stable",
+    "p99 latency: canary within 10% of stable",
+    "p50 latency: canary within 5% of stable",
+    "Saturation: canary CPU/memory not exceeding stable by 15%",
+    "Custom business metrics: conversion, success rate (if applicable)",
+    "Gate checks every 30–60 seconds during progression",
+    "Automatic rollback if any gate fails for 2 consecutive checks",
+  ]}
+/>
+
+<Callout variant="tip" title="Canary catches what tests can't">
+  The value of canary isn't catching bugs — your tests should do that. The value is catching the issues that only manifest in production: a memory leak that appears under real load, a dependency that behaves differently at scale, a config that works in staging but not prod. Canary limits the blast radius of these production-only issues to 5% of traffic instead of 100%. That's the confidence to ship.
+</Callout>
+
+---
+
+## 6. The Full Zero-Downtime Checklist
+
+Bringing it all together — the complete architecture of a zero-downtime deploy:
+
+<ChecklistBox
+  title="Zero-Downtime Deploy Architecture"
+  items={[
+    "preStop hook with sleep (5–15s) to let endpoint removal propagate before SIGTERM",
+    "terminationGracePeriodSeconds set to preStop sleep + max request duration + buffer",
+    "Application handles SIGTERM: stop accepting, drain in-flight, close downstream, exit",
+    "Readiness probe checks serve-readiness (DB, cache, downstream), not just process health",
+    "Liveness and readiness probes use separate endpoints (don't cascade failures)",
+    "Startup probe for slow-initializing pods (prevents premature liveness kills)",
+    "PodDisruptionBudget: minAvailable = replicas - 1 (allows 1 disruption, blocks cascades)",
+    "Rolling update strategy: maxUnavailable 0, maxSurge 1 (never below desired capacity)",
+    "Canary or progressive delivery for high-risk changes (mesh-based if available)",
+    "Automated canary gate: error rate + latency + saturation, checked every 30–60s",
+    "Automatic rollback on gate failure (no manual intervention required)",
+  ]}
+/>
+
+### The Deployment Manifest
+
+A zero-downtime Deployment brings all the pieces together:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0      # never go below desired capacity
+      maxSurge: 1            # create 1 new pod at a time
+  template:
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: app
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "10"]
+          readinessProbe:
+            httpGet:
+              path: /ready    # checks DB, cache, downstream
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz  # process health only
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 10
+```
+
+<Callout variant="note" title="Zero-downtime is an architecture, not a setting">
+  There's no single flag that makes deploys zero-downtime. It's the combination of preStop hooks, probe tuning, PDBs, and progressive delivery — each addressing a different failure window. Skip any one and you have a gap where traffic drops. The good news: once architected, it's repeatable. Every service gets the same treatment, and zero-downtime becomes the default, not the exception.
+</Callout>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Zero-Downtime Deploy Sign-off"
+  items={[
+    "preStop hook deployed with sleep to cover endpoint-propagation race",
+    "Grace period sized for preStop + max request duration + buffer",
+    "Application SIGTERM handler implemented (stop, drain, close, exit)",
+    "Readiness probe checks serve-readiness; liveness checks process health (separate)",
+    "Startup probe deployed for slow-initializing pods",
+    "PDB deployed: minAvailable = replicas - 1, tested during node drain",
+    "Rolling update: maxUnavailable 0, maxSurge 1",
+    "Canary delivery with automated multi-metric gate for high-risk changes",
+    "Automatic rollback tested — bad version reverts without human action",
+  ]}
+/>

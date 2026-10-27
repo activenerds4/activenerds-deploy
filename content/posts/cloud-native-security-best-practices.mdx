@@ -1,0 +1,167 @@
+---
+title: "Cloud-Native Security Best Practices Guide"
+slug: cloud-native-security-best-practices
+description: "A comprehensive guide to securing cloud-native workloads — from pod security to network policies, secrets management, and runtime protection."
+date: "2025-07-25"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: true
+relatedArticles: ["runtime-security-falco-tetragon", "secrets-management-kubernetes-vault", "devsecops-hardening-checklist", "threat-modeling-cloud-workloads", "kubernetes-rbac-configuration"]
+image: https://cdn.activenerds.com/images/posts/cloud-native-security-best-practices.png
+imageAlt: "Layered security architecture diagram showing pod network secrets and runtime protection zones in slate and teal"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: A comprehensive guide to securing cloud-native workloads.
+- **Key Capabilities**: from pod security to network policies, secrets management, and runtime protection.
+- **The Cloud-Native Threat Model**: Apply structured configurations and validated production patterns.
+- **Pod Security Standards**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Cloud-native security is fundamentally different from traditional security. You're not protecting a perimeter — you're protecting a dynamic, ephemeral, distributed system where [workloads](/articles/threat-modeling-cloud-workloads) come and go, and the network is the computer. Whether you're deploying with [Cilium](/articles/deploy-secure-k8s-cilium) or another CNI, this guide covers the four layers of cloud-native security and the practices that actually matter.
+
+## The Cloud-Native Threat Model
+
+Before implementing security controls, understand what you're protecting against:
+
+1. **Shared responsibility**: Your cloud provider secures the infrastructure; you secure everything above it — including your container images, configurations, and application code.
+2. **Attack surfaces in K8s**: [Container runtime](/articles/containerd-vs-cri-o-runtime-comparison), API server, etcd, network, supply chain, and secrets. Each needs its own defense.
+3. **Supply chain risks**: A compromised dependency or base image can give an attacker a foothold in every container built from it.
+
+## Pod Security Standards
+
+Kubernetes replaced Pod Security Policies (PSP) with Pod Security Admission (PSA), which enforces Pod Security Standards at the namespace level.
+
+Three levels of security:
+
+| Level | What It Allows | Use For |
+|-------|---------------|---------|
+| Privileged | Everything | Never in production |
+| Baseline | Most things, no privileged containers | Dev/test workloads |
+| Restricted | Minimal — no privilege escalation, read-only root FS | Production |
+
+```yaml
+# Enforce restricted policy at namespace level
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+```
+
+<Callout type="warning">
+Start with `warn` and `audit` modes before enforcing. This lets you identify non-compliant workloads without breaking them.
+</Callout>
+
+## Network Security
+
+### Default Deny Posture
+
+Every namespace should start with a default-deny network policy. Then explicitly allow required traffic:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+```
+
+### Cilium vs Calico
+
+Both provide network policies beyond the K8s default:
+
+- **Cilium**: eBPF-based, L7 policies, built-in observability (Hubble). Best for security-heavy environments.
+- **Calico**: iptables/eBPF hybrid, widely adopted, good for general-purpose networking.
+
+### Service Mesh mTLS
+
+A service mesh (Istio, Linkerd) provides automatic mTLS between services. This encrypts all inter-service traffic without application changes.
+
+## Secrets Management
+
+### External Secrets Operator
+
+Don't store secrets in Kubernetes Secrets (they're only base64-encoded). Use the External Secrets Operator to sync from an external vault:
+
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: api-keys
+spec:
+  secretStoreRef:
+    name: vault-backend
+    kind: SecretStore
+  target:
+    name: api-keys-secret
+  data:
+    - secretKey: stripe-key
+      remoteRef:
+        key: production/stripe
+        property: secret_key
+```
+
+### RBAC for Secrets
+
+Limit which service accounts can read which secrets:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: api-secret-reader
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["api-keys-secret"]
+    verbs: ["get"]
+```
+
+## Runtime Security
+
+### Falco for Detection
+
+Falco monitors system calls in real-time using eBPF and alerts on suspicious behavior:
+
+```yaml
+# Example Falco rule
+- rule: Terminal shell in container
+  desc: A shell was spawned in a container
+  condition: >
+    spawned_process and container
+    and proc.name in (bash, sh, zsh)
+  output: >
+    Shell spawned in container (user=%user.name container=%container.name)
+  priority: WARNING
+```
+
+### eBPF-Based Monitoring
+
+Modern [runtime security](/articles/runtime-security-falco-tetragon) tools (Falco, Tetragon) use eBPF to observe kernel-level events without kernel modules. This provides deep visibility with minimal overhead.
+
+### Incident Response
+
+When Falco alerts fire:
+1. **Triage**: Is it expected behavior? (A CI pipeline might legitimately spawn shells in containers)
+2. **Contain**: If malicious, isolate the pod
+3. **Investigate**: Check logs, network flows, and container image
+4. **Remediate**: Fix the root cause, not just the symptom
+
+<Note>
+Security is layers, not a single wall. Each control — pod security, network policies, [secrets management](/articles/secrets-management-kubernetes-vault), runtime monitoring — catches different threats. No single control is sufficient, but together they create defense in depth.
+</Note>
+
+Cloud-native security is an ongoing practice, not a one-time setup. New workloads, new dependencies, and new attack vectors mean your [security posture](/articles/cloud-security-posture-management) needs continuous evaluation and improvement.
+
+

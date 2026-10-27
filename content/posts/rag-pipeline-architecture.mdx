@@ -1,0 +1,169 @@
+---
+title: "RAG Pipeline Architecture Best Practices"
+slug: rag-pipeline-architecture
+description: "Build production-grade retrieval-augmented generation pipelines — chunking, embedding, vector stores, and evaluation."
+date: "2025-09-20"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["llms", "mlops"]
+featured: true
+relatedArticles: ["llm-inference-optimization", "vector-database-comparison", "ai-ml-news-roundup-weekly", "knowledge-distillation-model-compression", "ml-model-deployment-workflow"]
+image: https://cdn.activenerds.com/images/posts/rag-pipeline-architecture.png
+imageAlt: "RAG pipeline architecture for LLMs — retrieval augmented generation with vector databases and context injection"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Build production-grade retrieval-augmented generation pipelines.
+- **Key Capabilities**: chunking, embedding, vector stores, and evaluation.
+- **RAG Fundamentals**: Apply structured configurations and validated production patterns.
+- **Chunking Strategies**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Retrieval-augmented generation (RAG) has become the default architecture for building LLM applications that need current or domain-specific knowledge. But there's a big gap between a RAG demo that works on three documents and a production pipeline that handles thousands of documents with reliable retrieval quality. That gap is where most teams get stuck.
+
+This guide covers the architecture decisions that matter for production RAG — chunking, embedding, vector stores, retrieval, and evaluation.
+
+## RAG Fundamentals
+
+The core idea of RAG is simple: instead of relying on the LLM's parametric memory, you retrieve relevant context from an external knowledge base and include it in the prompt. The LLM then generates its answer conditioned on both the user's question and the retrieved context.
+
+```
+User Query → Embedding → Vector Search → Top-K Chunks → Augmented Prompt → LLM → Answer
+```
+
+The advantage over fine-tuning is significant: you can update your knowledge base without retraining, you can cite sources, and you avoid the cost and complexity of fine-tuning. The trade-off is that retrieval quality becomes your bottleneck — garbage in, garbage out.
+
+<Note>
+RAG and fine-tuning aren't mutually exclusive. Many production systems fine-tune for tone/format and use RAG for knowledge. Start with RAG if your problem is knowledge access; fine-tune if your problem is output style.
+</Note>
+
+## Chunking Strategies
+
+Chunking is the most underappreciated part of RAG. How you split documents into chunks determines what the retriever can find, and bad chunking will sabotage even the best embedding model.
+
+**Fixed-size chunking** (e.g., 512 tokens with 50-token overlap) is the simplest approach and works reasonably well for homogeneous text. The overlap ensures that relevant information spanning a chunk boundary isn't lost.
+
+**Semantic chunking** splits on natural boundaries — paragraphs, sections, or topic changes. This preserves context better but produces variable-length chunks, which some vector stores handle poorly.
+
+**Document structure-aware chunking** uses the document's structure (markdown headers, HTML tags, PDF sections) to create semantically coherent chunks. This is the best approach for structured documents:
+
+```python
+from langchain.text_splitter import MarkdownHeaderTextSplitter
+
+headers_to_split_on = [
+    ("#", "Header 1"),
+    ("##", "Header 2"),
+    ("###", "Header 3"),
+]
+
+splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+chunks = splitter.split_text(markdown_text)
+```
+
+<Callout type="tip">
+For technical documentation, chunk by section (H2/H3 headers) with a 100-200 token overlap. For code, chunk by function/class. For FAQs, each Q&A pair is a natural chunk.
+</Callout>
+
+## Embedding and Vector Stores
+
+Your embedding model choice affects retrieval quality more than almost any other decision. Current recommendations:
+
+| Model | Dimensions | Strengths | Cost |
+|-------|-----------|-----------|------|
+| OpenAI text-embedding-3-large | 3072 | Best general quality | $0.13/M tokens |
+| OpenAI text-embedding-3-small | 1536 | Good quality, lower cost | $0.02/M tokens |
+| BGE-large-en-v1.5 | 1024 | Best open-source, self-hostable | Free |
+| Cohere embed-v3 | 1024 | Multilingual, strong on technical | $0.10/M tokens |
+
+For vector stores, the choice depends on scale and existing infrastructure:
+
+**Pinecone** is the easiest managed option — zero setup, good performance, but pricing scales with pod usage. Best for teams that want to skip infrastructure management.
+
+**Weaviate** offers more flexibility with hybrid search (vector + BM25) built-in. Self-hostable or managed.
+
+**pgvector** (PostgreSQL extension) is ideal if you already have PostgreSQL. It's not as fast as dedicated vector databases at scale, but it eliminates a separate system to manage.
+
+**Qdrant** is a strong open-source option with excellent Rust-based performance and good filtering support.
+
+```python
+# Example: pgvector setup
+from pgvector import register_vector
+import psycopg2
+
+conn = psycopg2.connect("postgresql://localhost/mydb")
+register_vector(conn)
+
+# Create table with vector column
+cur = conn.cursor()
+cur.execute("""
+    CREATE TABLE IF NOT EXISTS documents (
+        id SERIAL PRIMARY KEY,
+        content TEXT,
+        embedding VECTOR(1536)
+    )
+""")
+
+# Create HNSW index for fast similarity search
+cur.execute("""
+    CREATE INDEX ON documents USING hnsw (embedding vector_cosine_ops)
+""")
+```
+
+## Retrieval Optimization
+
+Basic top-K vector search is rarely sufficient for production. Three techniques dramatically improve retrieval quality:
+
+**Hybrid search** combines dense vector similarity with sparse (BM25/keyword) search. This catches cases where exact terminology matters (API names, error codes) that embedding models might miss.
+
+**Re-ranking** uses a cross-encoder model to re-score the top 50-100 retrieved chunks and select the best 5-10. This is the single highest-ROI optimization for RAG quality. Cohere Rerank and BGE-reranker are popular options.
+
+**Query expansion** reformulates the user's query to improve retrieval — either by generating multiple query variants with the LLM or by adding synonyms and related terms.
+
+```python
+# Hybrid search with re-ranking
+from sentence_transformers import CrossEncoder
+
+reranker = CrossEncoder("BAAI/bge-reranker-large")
+
+def retrieve_with_reranking(query, vector_store, top_k=5):
+    # Step 1: Retrieve top 50 candidates
+    candidates = vector_store.similarity_search(query, k=50)
+    
+    # Step 2: Re-rank with cross-encoder
+    pairs = [[query, doc.page_content] for doc in candidates]
+    scores = reranker.predict(pairs)
+    
+    # Step 3: Return top K after re-ranking
+    ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
+    return [doc for doc, score in ranked[:top_k]]
+```
+
+## Evaluation and Monitoring
+
+RAG evaluation is harder than traditional ML because the "ground truth" is often subjective. The RAGAS framework provides useful metrics:
+
+- **Faithfulness**: Does the answer use only information from the retrieved context? (No hallucination)
+- **Answer relevance**: Is the answer relevant to the question?
+- **Context precision**: Did the retriever find the right context?
+- **Context recall**: Did the retriever find all necessary context?
+
+```python
+from ragas import evaluate
+from ragas.metrics import faithfulness, answer_relevancy, context_precision, context_recall
+
+results = evaluate(
+    dataset=eval_dataset,
+    metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+)
+```
+
+In production, monitor these metrics over time. If faithfulness drops, your retriever may be returning irrelevant context. If context precision drops, your embedding model may need updating or your documents have changed.
+
+<Warning>
+Don't evaluate RAG only on answer quality. A system that generates confident, fluent answers from wrong context is worse than one that says "I don't know." Always measure retrieval quality separately from generation quality.
+</Warning>
+
+The most important advice for RAG: iterate on retrieval before generation. Most RAG problems are retrieval problems in disguise. If the retriever can't find the right information, no amount of prompt engineering will fix the output.
+
+

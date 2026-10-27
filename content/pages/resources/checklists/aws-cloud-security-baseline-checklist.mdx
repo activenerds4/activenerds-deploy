@@ -1,0 +1,153 @@
+---
+title: "AWS Security Baseline & Well-Architected Review Checklist"
+description: "Baseline an AWS account for security — IAM root lockdown, S3 public block, KMS envelope encryption, GuardDuty/Security Hub, VPC flow logs, and SCPs."
+category: devsecops
+slug: aws-cloud-security-baseline-checklist
+lastUpdated: "2026-08-28"
+tags: ["devsecops", "aws", "cloud-security", "iam"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# AWS Security Baseline & Well-Architected Review Checklist
+
+**The cloud is secure by default only if you actually turned on the defaults.**
+
+An AWS account out of the box is permissive enough to ruin your quarter. This checklist covers the baseline controls that every account should have before it holds anything you care about — identity, storage, encryption, detection, and the organization-level guardrails that survive a misconfigured team.
+
+---
+
+## Table of Contents
+
+1. [IAM & Root Account](#1-iam--root-account)
+2. [Storage & Data Protection](#2-storage--data-protection)
+3. [Encryption (KMS)](#3-encryption-kms)
+4. [Detection & Monitoring](#4-detection--monitoring)
+5. [Network & Logging](#5-network--logging)
+6. [Organization Guardrails (SCPs)](#6-organization-guardrails-scps)
+
+---
+
+## 1. IAM & Root Account
+
+<ChecklistBox
+  title="IAM & Root Account"
+  items={[
+    "Root account has no access keys (delete any that exist)",
+    "Root MFA enabled (hardware or virtual TOTP)",
+    "Root account not used for day-to-day work (locked, emergency-only)",
+    "IAM users minimized — prefer SSO / federated roles over long-lived IAM users",
+    "MFA enforced for all human users with console access",
+    "No IAM policies with `Action: *` / `Resource: *` attached to roles or users",
+    "Access keys rotated; unused keys deleted (review via credential report)",
+  ]}
+/>
+
+<Callout variant="warning" title="Root keys are a breach waiting to happen">
+  A root access key bypasses almost every guardrail — it can disable GuardDuty, delete CloudTrail, and walk out with everything. If one exists, delete it now. Root should be a break-glass account with MFA, locked in a vault, used only for account recovery.
+</Callout>
+
+---
+
+## 2. Storage & Data Protection
+
+<ChecklistBox
+  title="Storage & Data Protection"
+  items={[
+    "S3 Block Public Access enabled at the account level (all four settings on)",
+    "S3 buckets default to private; public buckets require explicit justification and review",
+    "S3 bucket policies reviewed; no `Principal: *` with `s3:GetObject` on sensitive data",
+    "S3 default encryption enabled (SSE-S3 or SSE-KMS) on every bucket",
+    "S3 versioning enabled on buckets that hold stateful/important data",
+    "EBS snapshots and AMIs encrypted; no unencrypted volumes in production",
+    "RDS/Aurora encryption at rest enabled; backups encrypted",
+  ]}
+/>
+
+---
+
+## 3. Encryption (KMS)
+
+<ChecklistBox
+  title="Encryption (KMS)"
+  items={[
+    "Customer-managed KMS keys (CMKs) used for sensitive data (not just AWS-managed defaults)",
+    "KMS key policies scoped to least privilege — not `Principal: *`",
+    "Envelope encryption used for large/structured data (encrypt DEK with CMK, encrypt data with DEK)",
+    "KMS key rotation enabled for CMKs (automatic annual rotation)",
+    "Key usage logged via CloudTrail (KMS is a CloudTrail-data-event service)",
+    "Separate keys per environment / data classification where appropriate",
+    "Key deletion policy documented (7-day minimum waiting period is a feature, not a bug)",
+  ]}
+/>
+
+---
+
+## 4. Detection & Monitoring
+
+<ChecklistBox
+  title="Detection & Monitoring"
+  items={[
+    "GuardDuty enabled in all regions the account uses (and consider all regions)",
+    "GuardDuty findings routed to a monitored location (S3 + SNS/Slack, not just the console)",
+    "Security Hub enabled with the AWS Foundational Security Best Practices standard",
+    "Security Hub findings integrated with ticketing / on-call (not a dashboard nobody watches)",
+    "CloudTrail enabled in all regions with log file validation and SSE-KMS encryption",
+    "CloudTrail logs sent to a dedicated, separate logging account (not the production account)",
+    "Config rules enabled for continuous compliance (e.g. no public S3, encrypted EBS)",
+  ]}
+/>
+
+---
+
+## 5. Network & Logging
+
+<ChecklistBox
+  title="Network & Logging"
+  items={[
+    "VPC Flow Logs enabled for all VPCs (to S3 or CloudWatch Logs)",
+    "Flow logs capture `Reject` at minimum (accepted optional for high-sensitivity VPCs)",
+    "Security groups reviewed: no `0.0.0.0/0` on non-HTTP/HTTPS ports (e.g. SSH, RDP, DB)",
+    "SSH/RDP access via SSM Session Manager, not open security groups",
+    "NACLs left at default unless a specific need (SGs are the primary control)",
+    "VPCs use private subnets for data stores; public subnets only for load balancers/NAT",
+    "NAT Gateway used for controlled egress (no direct internet for private subnets)",
+  ]}
+/>
+
+<Callout variant="tip" title="Flow Logs to S3, partitioned">
+  Sending VPC Flow Logs to S3 (not CloudWatch Logs) with Hive partitioning (`region/year/month/day`) makes querying with Athena cheap and fast. You'll actually use them for forensics instead of dreading the CloudWatch Logs bill.
+</Callout>
+
+---
+
+## 6. Organization Guardrails (SCPs)
+
+<ChecklistBox
+  title="Organization Guardrails (SCPs)"
+  items={[
+    "AWS Organizations in use (not a standalone account for a real business)",
+    "Service Control Policies prevent leaving the org / disabling GuardDuty / root key creation",
+    "SCPs block new regions the org doesn't use (reduce blast radius)",
+    "SCPs deny disallowed services (e.g. no new IAM users) at the org or OU level",
+    "Account baseline (CloudTrail, Config, GuardDuty) enforced via SCP + Landing Zone/Control Tower",
+    "Member accounts cannot disable the central logging or security tools",
+    "SCP changes reviewed and tested in a sandbox OU before org-wide rollout",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Baseline Sign-off"
+  items={[
+    "Root account has no keys and MFA enabled (verified via credential report)",
+    "S3 Block Public Access on at the account level (verified in console/API)",
+    "GuardDuty + Security Hub + CloudTrail enabled in all used regions",
+    "No `0.0.0.0/0` security groups on SSH/RDP/DB ports (verified via Config rule)",
+  ]}
+/>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="canonical" href="https://www.activenerds.com/" />
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="ActiveNerds RSS Feed"
+      href="/feed.xml"
+    />
+    <link
+      rel="alternate"
+      type="application/atom+xml"
+      title="ActiveNerds Atom Feed"
+      href="/atom.xml"
+    />
+    <link rel="alternate" type="application/json" title="ActiveNerds JSON Feed" href="/feed.json" />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+
+    <!-- Preconnect to Cloudflare R2 image CDN for faster LCP fetch -->
+    <link rel="preconnect" href="https://cdn.activenerds.com" crossorigin />
+    <link rel="dns-prefetch" href="https://cdn.activenerds.com" />
+
+    <!-- Modern Typography: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap"
+      rel="stylesheet"
+    />
+
+    <title>
+      ActiveNerds — Tech Deep Dives & Desk-Friendly Fitness for AI/ML, K8s & DevSecOps Pros
+    </title>
+    <meta
+      name="description"
+      content="ActiveNerds is the go-to destination for AI/ML, Kubernetes, and DevSecOps professionals — sharp technical coverage woven with genuinely useful, non-preachy fitness and wellness content for desk-bound tech pros."
+    />
+    <meta name="author" content="ActiveNerds Team" />
+
+    <meta
+      property="og:title"
+      content="ActiveNerds — Tech Deep Dives & Desk-Friendly Fitness for AI/ML, K8s & DevSecOps Pros"
+    />
+    <meta
+      property="og:description"
+      content="ActiveNerds is the go-to destination for AI/ML, Kubernetes, and DevSecOps professionals — sharp technical coverage woven with genuinely useful, non-preachy fitness and wellness content for desk-bound tech pros."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.activenerds.com/" />
+    <meta property="og:site_name" content="ActiveNerds" />
+    <meta property="og:locale" content="en-US" />
+    <meta
+      property="og:image"
+      content="https://www.activenerds.com/og/default.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@activenerds" />
+    <meta
+      name="twitter:title"
+      content="ActiveNerds — Tech Deep Dives & Desk-Friendly Fitness for AI/ML, K8s & DevSecOps Pros"
+    />
+    <meta
+      name="twitter:description"
+      content="ActiveNerds is the go-to destination for AI/ML, Kubernetes, and DevSecOps professionals — sharp technical coverage woven with genuinely useful, non-preachy fitness and wellness content for desk-bound tech pros."
+    />
+    <meta
+      name="twitter:image"
+      content="https://www.activenerds.com/og/default.png"
+    />
+
+    <!-- Prevent theme flash: set dark class before paint -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("site-theme");
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          if (stored === "dark" || (!stored && prefersDark)) {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+
+  <body>
+    <noscript>
+      <div
+        id="noscript-content"
+        style="
+          max-width: 42rem;
+          margin: 2rem auto;
+          padding: 0 1.25rem;
+          font-family: system-ui, sans-serif;
+          color: #1e2532;
+        "
+      >
+        <h1 style="font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem">
+          ActiveNerds — Tech Deep Dives & Desk-Friendly Fitness
+        </h1>
+        <p style="font-size: 1.0625rem; line-height: 1.75; color: #4a4a5a; margin-bottom: 1.5rem">
+          ActiveNerds is the go-to destination for AI/ML, Kubernetes, and DevSecOps professionals —
+          sharp technical coverage woven with genuinely useful, non-preachy fitness and wellness
+          content for desk-bound tech pros. Browse our latest articles below, or enable JavaScript
+          for the full interactive experience including search, categories, and tags.
+        </p>
+        <h2 style="font-size: 1.25rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.5rem">
+          Latest Articles
+        </h2>
+        <p style="color: #6a6a7a; font-size: 0.9375rem">
+          Our articles cover AI/ML training and MLOps, Kubernetes and container orchestration,
+          DevSecOps and cloud-native security, platform engineering, plus desk-based fitness and
+          ergonomics for tech professionals.
+        </p>
+        <p style="color: #6a6a7a; font-size: 0.9375rem; margin-top: 1rem">
+          To browse all articles by category, tag, or author, please enable JavaScript. The full
+          site includes search, dark mode, reading progress tracking, and related article
+          recommendations.
+        </p>
+        <p style="color: #6a6a7a; font-size: 0.9375rem; margin-top: 1rem">
+          A machine-readable article index is available at
+          <a href="/article-index.json" style="color: #2dd4a7">/article-index.json</a>.
+        </p>
+      </div>
+    </noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

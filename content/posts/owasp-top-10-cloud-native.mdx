@@ -1,0 +1,59 @@
+---
+title: "OWASP Top 10 for Cloud-Native"
+slug: owasp-top-10-cloud-native
+description: "Map the OWASP Top 10 to cloud-native and Kubernetes risks — broken access control, misconfiguration, and injection in containerized workloads."
+date: "2026-07-23"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: false
+relatedArticles: ["cloud-native-security-best-practices", "secrets-management-kubernetes-vault", "kubernetes-rbac-configuration", "threat-modeling-cloud-workloads", "devsecops-hardening-checklist"]
+image: https://cdn.activenerds.com/images/posts/owasp-top-10-cloud-native.png
+imageAlt: "OWASP Top 10 for cloud-native applications — security risks and mitigation strategies for modern containerized apps"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Map the OWASP Top 10 to cloud-native and Kubernetes risks.
+- **Key Capabilities**: broken access control, misconfiguration, and injection in containerized workloads.
+- **OWASP in a Cloud-Native Context**: Apply structured configurations and validated production patterns.
+- **Access Control and Secrets**: Apply structured configurations and validated production patterns.
+</Callout>
+
+The OWASP Top 10 was written for web applications, and a lot of it doesn't map cleanly onto a Kubernetes-and-containers world. There's no single "application" to attack — there's a control plane, a fleet of pods, a registry full of images, and an IAM surface that spans clouds. But the underlying risks (broken access control, injection, misconfiguration, vulnerable dependencies) absolutely still apply, and the value of the Top 10 is as a familiar framework for thinking about where your cloud-native system is actually attackable. This is a mapping of the Top 10 to cloud-native risks and the controls that address them.
+
+## OWASP in a Cloud-Native Context
+
+**From web app to distributed system.** The shift is that the "application" is now a stack: the container image, the pod spec, the cluster config, the IAM policies, and the CI pipeline that built it. A vulnerability at any layer can compromise the whole thing, and the Top 10 categories show up at different layers than they used to. Injection isn't just SQL injection in your app code anymore — it's a misconfigured admission webhook, an over-permissive IAM role, or a supply-chain compromise that lets an attacker push a malicious image.
+
+**Where the Top 10 still applies.** Several categories translate directly. Broken access control is still broken access control, just expressed as RBAC and IAM instead of application authorization. Cryptographic failures are still about secrets in transit and at rest, now spread across service mesh mTLS and Secret encryption. Vulnerable and outdated components are now container base images with known CVEs, which is a bigger and more tractable problem than dependency scanning ever was. The controls are different; the risks rhyme.
+
+**New cloud-native risks.** Some risks are new or much worse in cloud-native. Misconfiguration is the dominant breach vector — an exposed S3 bucket, a public load balancer, an over-permissive security group — and it's a category that barely existed in the app-only world. Supply chain integrity (can you trust the image you're running) is a first-class concern. And the control plane itself (the Kubernetes API) is an attack surface that has no web-app equivalent. The Top 10 doesn't cover these well, which is why [cloud-native security](/articles/cloud-native-security-best-practices) adds its own frameworks (CIS benchmarks, NIST SP 800-190) on top.
+
+## Access Control and Secrets
+
+**Broken access control in K8s RBAC.** This is the cloud-native version of the #1 OWASP risk, and it's where most clusters are weakest. The common failures: default service accounts with broad permissions, RoleBindings that grant cluster-admin to a namespace workload, and human users who authenticate as admins for daily work. The fix is least-privilege RBAC scoped to namespaces, separate service accounts per workload, and no human use of cluster-admin — see our [Kubernetes RBAC configuration guide](/blog/kubernetes-rbac-configuration) for the patterns. The test: can you list what each service account is allowed to do, and is each one minimal?
+
+**[Secrets management](/articles/secrets-management-kubernetes-vault) gaps.** Cryptographic failures in cloud-native are mostly about secrets handling. Secrets stored in base images, secrets checked into git, secrets passed as environment variables that leak via `kubectl describe`, and secrets never rotated. The controls are external secret stores (Vault, cloud secret managers) with short-lived credentials, [secrets scanning in CI](/blog/secrets-scanning-ci-pipelines) to catch leaks before they ship, and encryption at rest with a managed key. The shift is from "store a secret" to "issue a short-lived secret on demand" — the static, long-lived secret is the vulnerability.
+
+**Over-privilege patterns.** The specific over-privilege patterns to hunt: `cluster-admin` in any RoleBinding (almost always wrong), `privileged` security context on pods (almost always wrong — see [pod security standards](/blog/kubernetes-pod-security-standards)), IAM roles with `*` in their action or resource, and service accounts that can read all Secrets cluster-wide. Each of these is a broken access control finding waiting to happen, and each has a least-privilege replacement.
+
+## Configuration and Injection
+
+**Misconfiguration as the new injection.** In the cloud-native world, misconfiguration is the dominant risk that injection was for web apps. A security group open to 0.0.0.0/0, a Service of type LoadBalancer that's publicly reachable, an S3 bucket with public read, a Kubernetes API exposed to the internet without auth — these are the "injection" of cloud-native, where a single config error exposes the system. The control is continuous configuration assessment via CSPM (see our [cloud security posture management](/blog/cloud-security-posture-management) guide) plus policy-as-code that blocks bad config at admission and in CI. The discipline is treating configuration as code that's reviewed and tested, not as a console someone clicked through.
+
+**Supply chain exposure.** The cloud-native version of "vulnerable and outdated components" extends from dependencies to the entire build chain. The image you run was built by a CI pipeline from a base image pulled from a registry from a source repo — a compromise at any link gives an attacker a path into your runtime. The controls are signed images verified at admission (cosign), SBOMs for visibility, and pinned digests so you know exactly what you're running. The [supply chain security](/blog/supply-chain-security-k8s) guide covers this end to end; the point here is that it's an OWASP-category risk that's much broader in cloud-native than in a traditional app.
+
+**Insecure defaults.** Many cloud-native defaults are insecure: containers run as root by default, pods get a default service account with whatever permissions that account has, namespaces have no network policy by default (every pod can talk to every pod), and cloud storage defaults to private but defaults change. The hardening work is explicitly setting the secure configuration rather than accepting defaults — run as non-root, define a network policy for every namespace, specify a dedicated service account per workload. The [DevSecOps hardening checklist](/blog/devsecops-hardening-checklist) is a good starting catalog.
+
+## Building a Defense
+
+** The practical output of this mapping is a control-to-risk table: for each Top 10 category, what cloud-native control addresses it and where that control is enforced (admission, CI, runtime). Broken access control → RBAC + IAM, enforced at admission and via CSPM. Misconfiguration → policy-as-code + CSPM, enforced in CI and at admission.
+
+Supply chain → image signing + SBOM, enforced in CI and at admission. Secrets → external secret stores + scanning, enforced in CI. The point of the mapping is to make the controls concrete and to find the gaps — the categories with no control assigned are the ones you're exposed on.
+
+**Policy-as-code guardrails.** The enforcement mechanism that makes the controls stick is policy-as-code: OPA Gatekeeper or Kyverno policies that reject bad config at admission, plus CI checks that catch it earlier. A policy that blocks `privileged` pods, a policy that requires a network policy in every namespace, a policy that rejects images that aren't signed — these turn "we have a standard" into "the standard is enforced." Without policy-as-code, the controls are advisory and drift; with it, they're guardrails that survive the next person to touch the config. See our [policy-as-code comparison](/blog/policy-as-code-opa-kyverno) for the tooling.
+
+**Continuous assessment.** Cloud-native systems drift: someone adds a policy exception, a new CVE drops, a cloud default changes. A one-time hardening pass decays within months. The durable control is continuous assessment — CSPM for cloud config, admission policy for cluster config, image scanning in CI for the supply chain, and periodic pen tests for the things automation can't catch (see [Kubernetes penetration testing](/blog/kubernetes-penetration-testing)). The OWASP Top 10 is useful here not as a checklist you complete once but as a framework you reassess against continuously, because the system you secured last quarter isn't the system you're running today.
+
+

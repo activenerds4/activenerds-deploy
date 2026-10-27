@@ -1,0 +1,306 @@
+---
+title: "Kubernetes Node & Memory Tuning for High-Density Workloads"
+description: "Squeeze maximum workload density from every node — cgroups v2 memory accounting, kernel sysctls, OOMKilled cascade prevention, and memory fragmentation tuning for high-density Kubernetes clusters."
+category: kubernetes
+slug: k8s-node-memory-tuning-guide
+lastUpdated: "2026-08-28"
+tags: ["kubernetes", "memory", "performance", "node-tuning"]
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Kubernetes Node & Memory Tuning for High-Density Workloads
+
+**Every OOMKilled pod is wasted money and a reliability incident.** High-density Kubernetes — packing many workloads onto each node to maximize utilization — is where memory tuning pays off most. But density without tuning creates cascading OOMs: one pod spikes, the kernel reclaims memory aggressively, innocent pods get killed, and the cascade spreads. This guide covers the node-level memory architecture: cgroups v2 accounting, the kernel sysctls that matter, OOM cascade prevention, and fragmentation tuning for stable high-density clusters.
+
+---
+
+## Table of Contents
+
+1. [The Memory Problem at High Density](#1-the-memory-problem-at-high-density)
+2. [cgroups v2 Memory Accounting](#2-cgroups-v2-memory-accounting)
+3. [Kernel Sysctls That Matter](#3-kernel-sysctls-that-matter)
+4. [OOMKilled Cascade Prevention](#4-oomkilled-cascade-prevention)
+5. [Memory Fragmentation](#5-memory-fragmentation)
+6. [Node Sizing & Workload Placement](#6-node-sizing--workload-placement)
+
+---
+
+## 1. The Memory Problem at High Density
+
+At low density (few pods per node), memory problems are rare — each pod has headroom. At high density (many pods per node), the node's memory is a shared, contended resource, and the kernel's memory management becomes the dominant factor in stability.
+
+### The Three Failure Modes
+
+| Failure mode | Symptom | Cause |
+|---|---|---|
+| Pod OOMKilled | Pod restarted, `OOMKilled` exit reason | Pod exceeded its memory limit |
+| Node OOM (system) | Random pods killed, node unstable | Node total memory exhausted |
+| Memory pressure stalls | Pods slow, high latency, no OOM | Kernel reclaiming memory aggressively |
+
+<Callout variant="warning" title="Node OOM is worse than pod OOM">
+  A pod OOMKilled is contained — Kubernetes restarts that pod, other pods are unaffected. A node OOM is chaotic — the kernel's OOM killer picks victims based on its own heuristics (often the highest-oom_score), which may be a critical system component or an innocent pod that happened to have a large score. Node OOMs cause unpredictable cascades. The goal of node tuning is to make pod OOMs happen (contained) and prevent node OOMs (chaotic).
+</Callout>
+
+### The Memory Hierarchy
+
+```text
+Node total memory
+  ├── System reserved (kubelet, OS)        — reserved, not for pods
+  ├── Kube-reserved (kubelet threshold)    — eviction threshold
+  ├── Eviction threshold                   — kubelet starts evicting pods
+  └── Allocatable (for pods)               — what workloads can use
+       ├── Pod A (request/limit)
+       ├── Pod B (request/limit)
+       └── Pod C (request/limit)
+```
+
+The key insight: **pods should OOM (hit their limit) before the node OOMs (runs out of total memory).** The reserved memory and eviction thresholds create a buffer that ensures this.
+
+---
+
+## 2. cgroups v2 Memory Accounting
+
+cgroups (control groups) are the kernel mechanism Kubernetes uses to enforce pod memory limits. cgroups v2 (the default on modern Kubernetes) changed how memory is accounted — understanding the change is essential for tuning.
+
+### cgroups v2 vs v1
+
+| Aspect | cgroups v1 | cgroups v2 |
+|---|---|---|
+| Memory accounting | Separate controllers | Unified hierarchy |
+| File-backed memory | Counted separately | Counted toward memory.max |
+| Reclaim behavior | Per-controller | Unified, more aggressive |
+| OOM handling | Per-cgroup | Hierarchical |
+
+The critical change: in cgroups v2, **file-backed memory (page cache) counts toward the cgroup's memory limit.** In v1, it was often treated more leniently. This means a pod that reads a lot of files can hit its memory limit via page cache, even if its RSS (resident set) is well under the limit.
+
+<Callout variant="note" title="Page cache counts in v2">
+  The most common surprise migrating to cgroups v2: pods OOMKilled that never OOMed before. The cause is page cache. A pod reading large files accumulates page cache, which now counts toward memory.max. The fix isn't to raise the limit — it's to understand that the limit must account for RSS + page cache. For I/O-heavy pods, this means higher limits or explicit cache management.
+</Callout>
+
+### Memory.max vs Memory.high
+
+cgroups v2 exposes two key limits:
+
+- **memory.max** — the hard limit. The cgroup is OOMkilled if exceeded. This is what Kubernetes sets from the pod's `resources.limits.memory`.
+- **memory.high** — the soft limit. The kernel starts reclaiming memory (not killing) when exceeded. Kubernetes doesn't set this by default, but it's a tuning lever.
+
+```text
+memory.current → memory.high → memory.max
+
+  Under high:    normal operation
+  high → max:    kernel reclaims aggressively (stalls, not kills)
+  At max:        OOM kill
+```
+
+Tuning `memory.high` (via a custom runtime or node tuning) lets you create a "soft ceiling" where the kernel reclaims before the hard OOM — smoothing spikes instead of killing.
+
+---
+
+## 3. Kernel Sysctls That Matter
+
+Several kernel sysctls govern memory behavior. Most defaults are conservative; high-density clusters benefit from tuning.
+
+### The Critical Sysctls
+
+| Sysctl | Default | Tuned | Effect |
+|---|---|---|---|
+| `vm.overcommit_memory` | 0 | 1 | Allow overcommit (Kubernetes manages limits) |
+| `vm.swappiness` | 60 | 1–10 | Minimize swapping (swap is slow, prefer OOM) |
+| `vm.vfs_cache_pressure` | 100 | 50 | Reduce inode/dentry cache reclaim aggressiveness |
+| `vm.dirty_ratio` | 20 | 10 | Less dirty memory before sync (faster reclaim) |
+| `vm.dirty_background_ratio` | 10 | 5 | Start background writeback sooner |
+| `kernel.panic_on_oom` | 0 | 0 | Don't panic on OOM (let kubelet handle it) |
+
+<Callout variant="tip" title="Swappiness to near-zero, not zero">
+  Setting `vm.swappiness=0` disables swap entirely on some kernels, which can cause unexpected behavior. Set it to 1–10 instead — swap is effectively disabled (the kernel won't swap unless desperate) but the mechanism remains for edge cases. On Kubernetes nodes with no swap configured, this is belt-and-suspenders; on nodes with swap, it prevents the performance cliff of swapping under pressure.
+</Callout>
+
+### Applying Sysctls
+
+Node-level sysctls are set via the kubelet's `--system-reserved` and node bootstrap scripts, or via a DaemonSet that runs `sysctl -w`. For pod-level sysctls (where safe), use the `securityContext`:
+
+```yaml
+spec:
+  securityContext:
+    sysctls:
+      - name: net.core.somaxconn
+        value: "4096"
+```
+
+Only a subset of sysctls are pod-safe (namespaced). Memory sysctls like `vm.swappiness` are node-wide and must be set at the node level.
+
+---
+
+## 4. OOMKilled Cascade Prevention
+
+The cascade: one pod spikes, the node enters memory pressure, the kubelet evicts pods, the evicted pods restart on the same or other nodes, the spike repeats, more evictions. Preventing this requires understanding the kubelet's eviction behavior.
+
+### The Eviction Threshold
+
+The kubelet evicts pods when node memory drops below the eviction threshold (`evictionHard`):
+
+```text
+evictionHard:
+  memory.available:  "500Mi"   # evict when < 500Mi available
+  nodefs.available:  "10%"
+  nodefs.inodesFree: "5%
+```
+
+When available memory drops below 500Mi, the kubelet starts evicting pods — ranked by their memory usage (over request) and priority. The goal is to free memory before the node hits a hard OOM.
+
+### The Cascade Mechanism
+
+```text
+1. Pod A spikes (memory pressure)
+2. Node available memory drops below eviction threshold
+3. Kubelet evicts pods (highest over-request first)
+4. Evicted pods reschedule — possibly to the SAME node
+5. New pods start, consuming memory
+6. Node re-enters pressure → evict again
+7. (cascade)
+```
+
+### Prevention Strategies
+
+**1. Size the eviction threshold to workload startup**
+
+The eviction threshold must be larger than the memory a restarting pod needs to start. If a pod needs 300Mi to start and the threshold is 500Mi, eviction frees 500Mi, the pod restarts and takes 300Mi, leaving 200Mi — still under pressure. Set the threshold to: max pod startup memory + buffer.
+
+**2. Use memory QoS (Guaranteed)**
+
+Pods with `requests == limits` get the Guaranteed QoS class. Under memory pressure, the kubelet evicts BestEffort (no requests/limits) and Burstable (requests < limits) pods first, protecting Guaranteed pods. For critical workloads, use Guaranteed QoS so they're evicted last.
+
+**3. Anti-affinity to prevent re-scheduling to the same node**
+
+If evicted pods reschedule to the same memory-pressured node, the cascade continues. Use pod anti-affinity or topology spread constraints to distribute pods across nodes, so an evicted pod reschedules elsewhere.
+
+**4. Cluster autoscaler for pressure relief**
+
+When nodes are under memory pressure, the cluster autoscaler should add nodes, giving evicted pods somewhere to go. Without autoscaling, evicted pods pile onto the remaining nodes, spreading the pressure.
+
+<ChecklistBox
+  title="OOM Cascade Prevention"
+  items={[
+    "Eviction threshold sized to max pod startup memory + buffer (not the default 500Mi)",
+    "Critical workloads on Guaranteed QoS (requests == limits) — evicted last",
+    "Pod anti-affinity / topology spread to prevent re-scheduling to pressured nodes",
+    "Cluster autoscaler enabled to add capacity under pressure",
+    "Memory requests set realistically (not just limits) — requests drive scheduling",
+    "PodDisruptionBudgets on critical workloads to prevent mass eviction",
+    "Node conditions monitored (MemoryPressure) and alerted before eviction starts",
+  ]}
+/>
+
+<Callout variant="warning" title="Requests drive scheduling, limits drive OOM">
+  A common mistake: setting high limits but low requests. The scheduler places pods based on requests (thinking there's room), but the pods can burst to their limits (consuming more than scheduled), causing node pressure. Requests and limits should be set together: requests for scheduling reality, limits for burst protection. A pod with 256Mi request and 4Gi limit on a 4Gi node is a scheduling time bomb.
+</Callout>
+
+---
+
+## 5. Memory Fragmentation
+
+Memory fragmentation — when free memory exists but is scattered into small, unusable chunks — causes allocation failures and OOMs even when total free memory appears sufficient. It's a hidden killer of high-density nodes.
+
+### The Fragmentation Problem
+
+```text
+Fragmented memory (can't allocate a 2MB page):
+
+  |A|B|C|A|D|B|E|A|F|C|  (free: 40%, but no contiguous 2MB block)
+
+Defragmented memory (can allocate):
+
+  |A|B|C|D|E|F|__________|  (free: 40%, contiguous block available)
+```
+
+The kernel's memory allocator can usually satisfy small allocations from fragmented memory, but large allocations (huge pages, large buffers) fail. Under fragmentation, the kernel may OOM kill even with free memory, because it can't assemble a contiguous block.
+
+### Detecting Fragmentation
+
+```text
+Check fragmentation score (0–1000, higher = more fragmented):
+
+  cat /proc/buddyinfo
+
+  Node 0, Zone Normal:
+    1-page:  1200   (free 4KB blocks)
+    2-page:  800    (free 8KB blocks)
+    ...
+    512-page: 3     (free 2MB blocks)  ← low = fragmented
+    1024-page: 1    (free 4MB blocks)  ← low = fragmented
+```
+
+If the high-order blocks (512-page, 1024-page) are near zero while low-order blocks are high, the node is fragmented.
+
+### Defragmentation Tuning
+
+| Sysctl | Default | Tuned | Effect |
+|---|---|---|---|
+| `vm.compact_memory` | (trigger) | 1 (on demand) | Trigger compaction |
+| `vm.compaction_proactiveness` | 0 | 20 | Proactive background compaction |
+| `vm.min_free_kbytes` | ~90MB | Tuned | Min free memory (affects allocation) |
+
+<Callout variant="tip" title="Proactive compaction for high-density nodes">
+  Setting `vm.compaction_proactiveness=20` lets the kernel compact memory proactively in the background, before fragmentation causes allocation failures. This is a low-risk, high-value tuning for high-density nodes — the cost is minor background CPU, the benefit is avoiding fragmentation-induced OOMs. Enable it on any node running memory-dense workloads.
+</Callout>
+
+### Transparent Huge Pages (THP)
+
+THP aggregates 4KB pages into 2MB huge pages, reducing TLB pressure. For most workloads it helps; for databases and some JVM workloads, it causes latency spikes. The recommendation:
+
+- **THP enabled (madvise)** for general workloads — apps that want huge pages get them, others aren't forced
+- **THP disabled** for databases (Redis, PostgreSQL) and latency-sensitive JVMs — they manage their own memory better without THP interference
+
+---
+
+## 6. Node Sizing & Workload Placement
+
+The final layer of memory tuning is architectural: sizing nodes and placing workloads to minimize memory contention.
+
+### Node Sizing Principles
+
+| Workload type | Node size | Why |
+|---|---|---|
+| Many small pods | Larger nodes (more pods/node) | Amortize system overhead, more bin-packing |
+| Few large pods | Right-sized nodes | Avoid waste, limit blast radius |
+| Mixed | Medium nodes | Balance density and isolation |
+
+### Workload Placement
+
+**1. Separate memory-hogs from latency-sensitive pods**
+
+A memory-hungry batch pod and a latency-sensitive API on the same node create contention. Use taints/tolerations or node affinity to separate them.
+
+**2. Right-size requests to actual usage**
+
+Over-requesting memory (requesting 4Gi for a pod that uses 512Mi) wastes schedulable capacity and reduces density. Under-requesting (requesting 256Mi for a pod that uses 2Gi) causes node pressure. Use metrics (Prometheus, VPA) to right-size.
+
+**3. Use the Vertical Pod Autoscaler (VPA) for right-sizing**
+
+VPA recommends (and can auto-apply) requests based on actual usage. Use it in recommendation mode first, review the suggestions, then enable auto-application for stable workloads.
+
+<Callout variant="note" title="Density is a tuning problem, not a risk">
+  High density isn't inherently risky — it's risky when untuned. A well-tuned high-density cluster (right-sized requests, proper eviction thresholds, QoS classes, fragmentation management) is more stable than a poorly-tuned low-density one. The goal isn't to avoid density; it's to tune for it. The cost savings of density are real, and they're achievable with the architecture in this guide.
+</Callout>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Node Memory Tuning Sign-off"
+  items={[
+    "cgroups v2 memory accounting understood (page cache counts toward limit)",
+    "Kernel sysctls tuned: swappiness 1–10, vfs_cache_pressure 50, dirty_ratio 10",
+    "Eviction threshold sized to max pod startup memory + buffer",
+    "Critical workloads on Guaranteed QoS (requests == limits)",
+    "Pod anti-affinity / topology spread prevents re-scheduling to pressured nodes",
+    "Cluster autoscaler enabled for pressure relief",
+    "Memory fragmentation monitored (/proc/buddyinfo) and proactive compaction enabled",
+    "THP set to madvise (or disabled for databases/latency-sensitive JVMs)",
+    "Requests right-sized to actual usage (VPA recommendations reviewed)",
+    "Memory-hogs separated from latency-sensitive pods via taints/affinity",
+  ]}
+/>

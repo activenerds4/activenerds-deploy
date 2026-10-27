@@ -1,0 +1,107 @@
+---
+title: "LLM Inference Optimization Techniques"
+slug: llm-inference-optimization
+description: "From KV caching to quantization and speculative decoding — practical techniques to make LLM inference faster and cheaper."
+date: "2025-06-10"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["llms", "mlops"]
+featured: true
+relatedArticles: ["model-quantization-techniques", "ml-training-cost-calculator", "rag-pipeline-architecture", "ai-ml-news-roundup-weekly", "cicd-pipeline-optimization"]
+image: https://cdn.activenerds.com/images/posts/llm-inference-optimization.png
+imageAlt: "Flow diagram showing optimized inference pipeline with caching layers and quantization blocks in slate and teal"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: From KV caching to quantization and speculative decoding.
+- **Key Capabilities**: practical techniques to make LLM inference faster and cheaper.
+- **The Inference Bottleneck**: Apply structured configurations and validated production patterns.
+- **KV Caching**: Apply structured configurations and validated production patterns.
+</Callout>
+
+LLM inference is fundamentally different from training. During training, you process large batches of data in parallel. During inference, you generate tokens one at a time — autoregressively — which means each token depends on all previous tokens. This sequential nature creates a unique set of bottlenecks.
+
+The cost of LLM inference scales with two factors: the number of parameters (memory bandwidth for weight loading) and the sequence length (KV cache memory and attention computation). Optimizing inference means attacking both.
+
+## The Inference Bottleneck
+
+The key insight is that LLM inference is **memory-bandwidth bound**, not compute-bound. For each token generated, the model loads all its weights from GPU HBM to compute a single forward pass. The actual matrix multiplications are fast — the bottleneck is moving the weights.
+
+This is why a 7B model generates tokens at roughly the same speed on an A100 and a much smaller GPU — the computation is trivial compared to the memory transfer. Understanding this changes your optimization strategy entirely: you're not trying to reduce FLOPs, you're trying to reduce memory transfers.
+
+## KV Caching
+
+The most impactful optimization for autoregressive generation. During generation, each new token's attention mechanism needs to attend to all previous tokens. Without caching, you'd recompute the keys and values for all previous tokens at every step — an O(n²) cost.
+
+KV caching stores the keys and values for all previous positions so they're only computed once:
+
+```python
+# Pseudocode: KV cache in attention
+if past_kv is None:
+    # First token: compute all K, V
+    keys = W_k(x)
+    values = W_v(x)
+else:
+    # Subsequent tokens: only compute new K, V
+    new_keys = W_k(new_token)
+    new_values = W_v(new_token)
+    keys = torch.cat([past_kv[0], new_keys], dim=1)
+    values = torch.cat([past_kv[1], new_values], dim=1)
+
+past_kv = (keys, values)
+```
+
+The trade-off: KV cache grows linearly with sequence length, consuming significant memory. For a 70B model with 64 layers and a 4096-dim per-head KV, a 2048-token sequence uses ~8GB just for the cache.
+
+## Quantization Strategies
+
+Quantization reduces the precision of model weights, cutting memory usage and transfer time:
+
+| Method | Precision | Memory Reduction | Quality Loss | Best For |
+|--------|-----------|-----------------|--------------|----------|
+| FP16 | 16-bit | 50% vs FP32 | Negligible | Default |
+| INT8 | 8-bit | 75% vs FP32 | Minimal | Production |
+| INT4 | 4-bit | 87.5% vs FP32 | Noticeable | Memory-constrained |
+| FP8 | 8-bit | 75% vs FP32 | Minimal | Ampere+ GPUs |
+
+**[Post-training quantization](/articles/model-quantization-techniques) (PTQ)**: Apply quantization after training without retraining. Tools like bitsandbytes, GPTQ, and AWQ make this straightforward.
+
+**Quantization-aware training (QAT)**: Train with quantization in the loop for better accuracy. More effort but preserves quality better.
+
+<Callout type="tip">
+For most production deployments, INT8 PTQ with bitsandbytes is the sweet spot — minimal quality loss, 4x memory reduction, and trivial implementation.
+</Callout>
+
+## Speculative Decoding
+
+A clever technique that uses a small "draft" model to predict multiple tokens, then verifies them in a single forward pass with the large model:
+
+1. Draft model generates N candidate tokens (fast, cheap)
+2. Large model verifies all N tokens in parallel (one forward pass)
+3. Accept tokens that match, reject and resample from the first mismatch
+
+This can give 2-3x speedup when the draft model is good enough to predict ~50% of tokens correctly. The key is that the large model's verification pass processes N tokens in parallel, which is nearly free since inference is memory-bound.
+
+## Batching and Serving
+
+For production deployments, how you serve matters as much as the model itself:
+
+- **Continuous batching**: Instead of waiting for a batch to fill, process requests as they arrive. vLLM and TGI implement this with significant throughput improvements.
+- **vLLM**: Uses PagedAttention to manage KV cache memory efficiently, achieving near-theoretical maximum throughput.
+- **TGI (Text Generation Inference)**: Hugging Face's serving solution, good for multi-model setups.
+
+The throughput vs latency trade-off: larger batches improve throughput (tokens/second) but increase per-request latency. For interactive applications, keep batch sizes small. For batch processing, maximize batch size.
+
+<Note>
+vLLM's PagedAttention is one of the most important LLM serving innovations. It manages KV cache like virtual memory — allocating and freeing pages as needed, eliminating the fragmentation that plagues naive implementations.
+</Note>
+
+## Movement Break
+
+While waiting for inference results, give your eyes a break:
+
+- **20-20-20 rule**: Every 20 minutes, look at something 20 feet away for 20 seconds. Reduces eye strain from screen focus.
+- **Wrist circles**: Slowly rotate your wrists 5 times clockwise, 5 times counterclockwise. Counteracts the tension from keyboard work during long debugging sessions.
+
+

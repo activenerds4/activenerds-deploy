@@ -1,0 +1,80 @@
+---
+title: "Data Preprocessing Pipeline Best Practices"
+slug: data-preprocessing-pipeline-best-practices
+description: "Build robust ML data preprocessing pipelines — tokenization, normalization, caching, and avoiding leakage in PyTorch workflows."
+date: "2025-10-11"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["pytorch", "mlops"]
+featured: false
+relatedArticles: ["mlops-pipeline-best-practices", "data-augmentation-techniques-pytorch", "distributed-data-parallel-vs-model-parallel", "debugging-oom-pytorch", "diffusion-model-optimization-techniques"]
+image: https://cdn.activenerds.com/images/posts/data-preprocessing-pipeline-best-practices.png
+imageAlt: "Spring-green data flowing through connected preprocessing pipeline stages on a deep slate background"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Build robust ML data preprocessing pipelines.
+- **Key Capabilities**: tokenization, normalization, caching, and avoiding leakage in PyTorch workflows.
+- **Designing the Pipeline**: Apply structured configurations and validated production patterns.
+- **Efficient Data Loading**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Preprocessing is the part of an ML pipeline that feels mundane and causes the most subtle failures. A normalization statistic computed on the wrong split, a tokenizer that changes between training and serving, a DataLoader that silently drops samples — these are the bugs that don't crash but quietly degrade your model. This guide covers the practices that keep a PyTorch preprocessing pipeline correct, fast, and reproducible.
+
+## Designing the Pipeline
+
+A preprocessing pipeline transforms raw data into training-ready tensors. The goal is to make that transformation a deterministic, versioned function of the input — same raw data plus same code equals same tensors, every time.
+
+Separate the *transforms* (the code that converts raw → tensor) from the *data* (the raw inputs). Keep transforms in version control and data in a data store, referenced by hash or version. This separation is what makes experiments reproducible: you can pin a dataset version and vary the code, or pin the code and vary the data, and always know which is which.
+
+Define the stages explicitly: load raw → validate schema → clean/filter → transform (tokenize, normalize, augment) → batch. Each stage should be independently testable. Schema validation at the entry point catches upstream changes early — a column that silently disappears from your data source is a classic cause of training runs that "just look worse" with no obvious reason.
+
+## Efficient Data Loading
+
+The PyTorch `DataLoader` is where most preprocessing pipelines get slow. The default settings are rarely optimal for real workloads.
+
+Use multiple workers (`num_workers > 0`) so data loading overlaps with GPU compute. The right count depends on your CPU cores and how CPU-bound each transform is — a common starting point is 2–4 workers per GPU. Enable `pin_memory=True` so transfers to the GPU are faster, and use `persistent_workers=True` to avoid re-spawning workers each epoch, which matters for short epochs.
+
+For expensive transforms that don't change between epochs (tokenization of a fixed corpus, feature extraction), cache the result. Compute once, write to disk or memory, and load the cached tensors on subsequent epochs:
+
+```python
+from torch.utils.data import Dataset
+
+class CachedDataset(Dataset):
+    def __init__(self, raw_items, transform, cache_path):
+        self.cache_path = cache_path
+        if cache_path.exists():
+            self.cache = torch.load(cache_path)
+        else:
+            self.cache = [transform(item) for item in raw_items]
+            torch.save(self.cache, cache_path)
+
+    def __len__(self):
+        return len(self.cache)
+
+    def __getitem__(self, idx):
+        return self.cache[idx]
+```
+
+<Callout type="tip">
+If your GPU utilization is low during training, the bottleneck is almost always data loading, not the model. Profile the DataLoader before touching the model — adding workers or caching usually fixes it.
+</Callout>
+
+## Normalization and Augmentation
+
+Normalization statistics (mean, std) must be computed on the **training split only**, then applied identically to validation and test. Computing them on the full dataset leaks information from validation into training and inflates your metrics. Save the computed statistics as an artifact alongside the model so serving uses the exact same values.
+
+Apply augmentation only during training, never during validation or serving. A common bug is leaving a random-crop or random-flip transform enabled in eval mode; PyTorch's `model.eval()` does not disable `Dataset` transforms. Make augmentation conditional on a `training` flag explicitly.
+
+Watch for label leakage in transforms: if you normalize a target using statistics that include the sample being predicted, or if a windowing function lets future context bleed into a "past" feature, the model looks great in training and fails in production. Time-based splits and careful window construction are the fix.
+
+## Validation and Versioning
+
+Validate data on the way in. Assert expected shapes, dtypes, and non-null rates. A pipeline that silently drops 5% of samples because of a malformed row will train a model on a subtly different distribution than you intended, and you won't know until it's deployed.
+
+Version your data with a tool like DVC so each experiment references a specific dataset snapshot. When a model regresses, you can immediately answer "did the data change or the code?" — and with both versioned, the answer is a diff away.
+
+Pair these practices with the training-side optimizations in our [PyTorch training speed guide](/blog/optimize-pytorch-training-speed) — a fast, correct preprocessing pipeline feeding an efficient training loop is what makes iteration possible, and iteration is what makes models better.
+
+

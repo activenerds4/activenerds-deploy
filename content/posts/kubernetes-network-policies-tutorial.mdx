@@ -1,0 +1,237 @@
+---
+title: "Kubernetes Network Policies Tutorial"
+slug: kubernetes-network-policies-tutorial
+description: "A hands-on tutorial for implementing Kubernetes network policies — from default deny to L7 rules and debugging."
+date: "2025-10-11"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes", "devsecops"]
+featured: false
+relatedArticles: ["kubernetes-rbac-configuration", "devsecops-hardening-checklist", "kubernetes-network-security-policies", "cloud-native-security-best-practices", "kubernetes-admission-controllers-guide"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-network-policies-tutorial.png
+imageAlt: "Kubernetes network policies tutorial — CNI network rules for pod isolation and traffic control in clusters"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Frontend to backend**: Allow the frontend pods to talk to backend pods on a specific port:.
+- **Database access**: Only backend pods can reach the database:.
+- **DNS egress**: Even with default-deny egress, pods need DNS resolution.
+- **Check which policies apply to a pod**: .
+</Callout>
+
+[Kubernetes network](/articles/kubernetes-network-security-policies) policies are the firewall rules of your cluster — and by default, Kubernetes allows all pod-to-pod communication. That's convenient for development but a security nightmare in production. Every pod can talk to every other pod, which means a compromised pod has access to your entire cluster.
+
+This tutorial walks through implementing network policies from zero to a secure default-deny posture, including debugging when things break.
+
+## Network Policy Fundamentals
+
+A network policy is a set of rules that control traffic to and from pods. By default, pods are non-isolated — they accept traffic from any source. When you apply a network policy that selects a pod, that pod becomes isolated for the direction (ingress, egress, or both) specified in the policy.
+
+Key concepts:
+- **Pods are selected by labels** — the policy applies to pods matching the selector
+- **Default behavior**: no policy = allow all; any policy selecting a pod = deny all except what the policy allows
+- **CNI requirement**: your cluster must use a CNI that supports network policies (Cilium, Calico, Weave, Antrea)
+
+<Note>
+Not all CNIs support network policies. If you're using Flannel or the default cloud provider CNI without a policy layer, your policies will be silently ignored. Check with `kubectl get pods -n kube-system` to verify your CNI.
+</Note>
+
+## Default Deny Strategy
+
+The safest starting point is a default-deny posture: block all traffic by default, then add allow policies for specific flows. Here's how:
+
+```yaml
+# Default deny all ingress in a namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: production
+spec:
+  podSelector: {}  # Selects all pods in the namespace
+  policyTypes:
+  - Ingress
+```
+
+```yaml
+# Default deny all egress in a namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+```
+
+After applying these, no pod in the `production` namespace can send or receive traffic. Now you add allow policies for each required flow.
+
+<Callout type="tip">
+Start with deny-all, then add allow policies one at a time. This is the opposite of the "allow all, then deny" approach — it's safer because you explicitly allow each flow rather than trying to anticipate and block every unwanted one.
+</Callout>
+
+## Common Policy Patterns
+
+**Frontend to backend**: Allow the frontend pods to talk to backend pods on a specific port:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-to-backend
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: frontend
+    ports:
+    - protocol: TCP
+      port: 8080
+```
+
+**Database access**: Only backend pods can reach the database:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-to-database
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend
+    ports:
+    - protocol: TCP
+      port: 5432
+```
+
+**DNS egress**: Even with default-deny egress, pods need DNS resolution. Allow egress to kube-dns:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+```
+
+<Warning>
+Forgetting to allow DNS egress is the #1 mistake when implementing egress policies. Your pods will fail to resolve any service name, and you'll spend hours debugging "connection refused" errors.
+</Warning>
+
+## Advanced: L7 Policies
+
+Standard K8s network policies operate at L3/L4 (IP and port). If you need HTTP-level control (allow GET but not POST, or restrict by path), you need a CNI that supports L7 policies — Cilium is the most popular:
+
+```yaml
+# Cilium L7 policy: allow GET requests only
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: api-l7-rules
+  namespace: production
+spec:
+  endpointSelector:
+    matchLabels:
+      app: api-server
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        app: frontend
+    toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP
+      rules:
+        http:
+        - method: GET
+          path: "/api/v1/.*"
+```
+
+This policy allows the frontend to make GET requests to `/api/v1/*` paths on the API server, but blocks POST, PUT, DELETE, and other paths. This is powerful for implementing least-privilege access at the HTTP layer.
+
+Cilium also supports **DNS-aware egress policies** — you can allow egress to `api.stripe.com` instead of hardcoding IP addresses:
+
+```yaml
+egress:
+- toFQDNs:
+  - matchPattern: "*.stripe.com"
+  toPorts:
+  - ports:
+    - port: "443"
+      protocol: TCP
+```
+
+## Debugging Network Policies
+
+When network policies break connectivity, debugging is essential. Here's the toolkit:
+
+**Check which policies apply to a pod**:
+```bash
+kubectl get networkpolicy -n production -o wide
+# See which policies select specific pods
+```
+
+**Test connectivity between pods**:
+```bash
+# Quick connectivity test using a debug pod
+kubectl run debug --rm -it --image=nicolaka/netshoot -n production -- \
+  curl -v http://backend:8080/health
+```
+
+**With Cilium, use policy verdict logging**:
+```bash
+# Enable policy logging on a specific node
+cilium monitor --type=drop
+
+# Or check policy enforcement status
+cilium policy get
+```
+
+**Common misconfigurations**:
+- Policy selects pods via `podSelector` but the pod labels don't match — verify with `kubectl get pods --show-labels`
+- Egress policy allows traffic to a pod but not the return traffic — K8s policies are stateful, so return traffic is automatically allowed
+- Namespace selector doesn't match — `namespaceSelector` uses labels, not names (unless the `kubernetes.io/metadata.name` label is available)
+
+<Callout type="tip">
+Implement network policies gradually. Start with ingress policies (safer — they don't break outbound traffic), then add egress. Test each policy in a staging environment before applying to production. A single wrong egress policy can take down an entire namespace.
+</Callout>
+
+Network policies are one of the highest-impact security measures you can implement in Kubernetes. They transform your cluster from "every pod can talk to every pod" to "each pod can only talk to what it explicitly needs." Start with default-deny, add allow policies methodically, and always test in staging first.
+
+

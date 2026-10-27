@@ -1,0 +1,98 @@
+---
+title: "GPU vs TPU for Model Training"
+slug: gpu-vs-tpu-model-training
+description: "A practical comparison of GPU and TPU for ML training — performance, cost, ecosystem, and when to choose each."
+date: "2025-09-08"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["pytorch", "mlops"]
+featured: false
+relatedArticles: ["ml-training-cost-calculator", "pytorch-lightning-vs-vanilla-pytorch", "diffusion-model-optimization-techniques", "distributed-data-parallel-vs-model-parallel", "distributed-training-torchrun-ddp"]
+image: https://cdn.activenerds.com/images/posts/gpu-vs-tpu-model-training.png
+imageAlt: "Side-by-side spring-green GPU chip and TPU tensor core with performance bars on a deep slate background"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: A practical comparison of GPU and TPU for ML training.
+- **Key Capabilities**: performance, cost, ecosystem, and when to choose each.
+- **Architecture Differences**: Apply structured configurations and validated production patterns.
+- **Performance Benchmarks**: Apply structured configurations and validated production patterns.
+</Callout>
+
+The GPU vs TPU debate isn't academic — it directly affects your training budget, iteration speed, and which frameworks you can use. If you're deciding between spinning up A100 GPUs on AWS or TPUs on Google Cloud, the answer depends heavily on your model architecture, framework, and team expertise.
+
+This guide cuts through the marketing to give you a practical, workload-specific comparison.
+
+## Architecture Differences
+
+GPUs (Graphics Processing Units) were originally designed for rendering graphics but have become general-purpose parallel compute engines. Modern GPUs like the NVIDIA H100 feature thousands of CUDA cores, tensor cores optimized for matrix multiplication, and high-bandwidth memory (HBM). They excel at the kinds of dense matrix operations that dominate neural network training.
+
+TPUs (Tensor Processing Units) are Google's custom ASICs designed specifically for tensor operations. The core innovation is the **systolic array** — a grid of multiply-accumulate units that pipeline data through the chip in a wave-like pattern. This architecture is extremely efficient for the matrix multiplications that dominate transformer and CNN workloads.
+
+```python
+# PyTorch on GPU — the default path
+model = model.cuda()
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
+
+# PyTorch on TPU via XLA
+import torch_xla
+import torch_xla.core.xla_model as xm
+device = xm.xla_device()
+model = model.to(device)
+```
+
+The key architectural difference: GPUs are general-purpose parallel processors that happen to be great at ML, while TPUs are purpose-built for ML tensor operations. This specialization means TPUs can achieve higher throughput on compatible workloads but are less flexible.
+
+## Performance Benchmarks
+
+For transformer-based models (LLMs, BERT-family, ViT), TPUs generally achieve higher raw FLOPS per dollar. Google's published benchmarks show TPU v5e delivering up to 2x the throughput-per-dollar of A100 GPUs for transformer training. However, this advantage narrows or disappears for non-standard architectures.
+
+For CNNs and custom architectures, GPUs often maintain an edge due to their flexibility. The CUDA ecosystem allows fine-grained control over kernel optimization that's harder to achieve on TPU's more rigid architecture.
+
+Memory bandwidth is another factor: H100's HBM3 delivers 3.35 TB/s, while TPU v5e's bandwidth is competitive but architecture-dependent. For memory-bound workloads (large model inference, attention-heavy transformers), raw bandwidth matters more than peak FLOPS.
+
+## Cost Analysis
+
+[Cloud pricing](/articles/ml-training-cost-calculator) tells a nuanced story:
+
+| Hardware | Provider | On-Demand Price | Spot Price |
+|----------|----------|-----------------|------------|
+| A100 80GB | AWS p4d.24xlarge | ~$32.77/hr | ~$10/hr |
+| H100 80GB | AWS p5.48xlarge | ~$98.32/hr | ~$35/hr |
+| TPU v5e | GCP | ~$1.20/hr/chip | ~$0.30/hr/chip |
+| TPU v5p | GCP | ~$4.20/hr/chip | ~$1.20/hr/chip |
+
+TPU pricing is per-chip, and you typically use 4-8 chips per pod. The spot pricing on TPUs is aggressively competitive, making them attractive for preemptible training workloads.
+
+<Callout type="tip">
+For budget-constrained teams, TPU spot instances offer the best price-to-performance for transformer training. Just make sure your training pipeline supports checkpoint recovery — spot instances can be preempted with 30 seconds notice.
+</Callout>
+
+## Ecosystem and Framework Support
+
+This is where GPUs have a decisive advantage. PyTorch's CUDA support is mature, well-documented, and ubiquitous. Nearly every ML library, from Hugging Face Transformers to DeepSpeed, works out-of-the-box on GPU.
+
+TPU support has improved significantly with PyTorch/XLA, but it still requires more setup and has edge cases. JAX, Google's framework, has first-class TPU support and is the most natural path for TPU-based training. If your team is already invested in PyTorch, the TPU transition cost is real.
+
+The framework gap matters less for standard transformer fine-tuning (both work well) and more for custom architectures, novel research code, and specialized libraries.
+
+## Decision Guide
+
+**Choose GPU when:**
+- Your team is deeply invested in PyTorch and the CUDA ecosystem
+- You're training non-standard architectures or custom layers
+- You need maximum framework and library compatibility
+- Your workloads include inference, not just training
+
+**Choose TPU when:**
+- You're training transformer-based models at scale
+- Cost optimization is critical (especially with spot instances)
+- Your team is comfortable with JAX or PyTorch/XLA
+- You're on Google Cloud and can leverage TPU pods for multi-chip training
+
+**Hybrid strategies** work well too: use GPUs for development and debugging, then switch to TPUs for large-scale production training runs. Just make sure your code is framework-agnostic enough to make the switch.
+
+The honest answer: for most teams, GPUs remain the safer default. TPUs are worth the switch when you're training large transformers at scale and the cost savings justify the ecosystem transition.
+
+

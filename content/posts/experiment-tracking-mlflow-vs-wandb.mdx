@@ -1,0 +1,147 @@
+---
+title: "Experiment Tracking: MLflow vs W&B"
+slug: experiment-tracking-mlflow-vs-wandb
+description: "MLflow or Weights & Biases? Compare features, pricing, UX, and integration for your ML experiment tracking needs."
+date: "2025-09-29"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["mlops", "pytorch"]
+featured: false
+relatedArticles: ["mlops-pipeline-best-practices", "model-versioning-registry-comparison", "debugging-oom-pytorch", "gpu-vs-tpu-model-training", "pytorch-lightning-vs-vanilla-pytorch"]
+image: https://cdn.activenerds.com/images/posts/experiment-tracking-mlflow-vs-wandb.png
+imageAlt: "Two experiment-tracking dashboards side by side with spring-green metric curves on deep slate panels"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Architecture**: MLflow runs a tracking server (Python Flask app) that stores metadata in a database (SQLite, PostgreSQL, or MySQL) and artifacts in a backend store (local filesystem, S3, GCS).
+- **Strengths**: .
+- **Limitations**: .
+- **Strengths**: .
+</Callout>
+
+Experiment tracking is the first MLOps tool every team adopts — and the choice between MLflow and Weights & Biases (W&B) is the most common decision point. Both are excellent, but they have different philosophies, different strengths, and very different pricing models. Picking the wrong one can mean migration pain later.
+
+This comparison is based on using both tools in production across multiple projects.
+
+## Why Track Experiments
+
+Without [experiment tracking](/articles/mlops-pipeline-best-practices), you're relying on memory and scattered notes to remember which hyperparameters produced your best model. This doesn't scale past a handful of experiments, and it makes collaboration nearly impossible. A good tracking tool gives you:
+
+- **Reproducibility**: every run is logged with its full configuration
+- **Comparison**: side-by-side metrics, parameters, and artifacts
+- **Collaboration**: shared visibility into who ran what and why
+- **Model selection**: data-driven decisions about which model to promote
+
+<Note>
+Start tracking from your first experiment, not your hundredth. Retrofitting tracking onto existing code is painful and you'll lose historical data that would have been valuable.
+</Note>
+
+## MLflow Deep Dive
+
+MLflow is an open-source project (originally from Databricks) with four components: Tracking, Models, [Model Registry](/articles/model-versioning-registry-comparison), and Projects. Most teams use it primarily for Tracking.
+
+**Architecture**: MLflow runs a tracking server (Python Flask app) that stores metadata in a database (SQLite, PostgreSQL, or MySQL) and artifacts in a backend store (local filesystem, S3, GCS). You can self-host or use Databricks' managed offering.
+
+```python
+import mlflow
+
+mlflow.set_experiment("my-experiment")
+
+with mlflow.start_run():
+    mlflow.log_param("learning_rate", 1e-4)
+    mlflow.log_param("batch_size", 32)
+    
+    # Train your model...
+    
+    mlflow.log_metric("val_loss", 0.234)
+    mlflow.log_metric("val_accuracy", 0.912)
+    mlflow.log_artifact("model_weights.pt")
+```
+
+**Strengths**:
+- Open-source and free to self-host
+- Language-agnostic (Python, R, Java, REST API)
+- Integrates with virtually every ML framework
+- Model Registry built in (no separate tool needed)
+- No vendor lock-in
+
+**Limitations**:
+- The UI is functional but not polished — comparing runs requires manual selection
+- Self-hosting requires infrastructure management (server, database, storage)
+- No built-in system monitoring (GPU utilization, etc.)
+- Collaboration features are minimal compared to W&B
+
+## W&B Deep Dive
+
+Weights & Biases is a commercial product with a generous free tier. It's built around rich visualization, collaboration, and a polished web UI.
+
+```python
+import wandb
+
+wandb.init(project="my-project", config={
+    "learning_rate": 1e-4,
+    "batch_size": 32,
+})
+
+# Train your model...
+
+wandb.log({
+    "val_loss": 0.234,
+    "val_accuracy": 0.912,
+})
+wandb.save("model_weights.pt")
+```
+
+**Strengths**:
+- Best-in-class UI — interactive [charts](/articles/helm-charts-best-practices), parallel coordinates, scatter plots
+- Rich collaboration — comments, shared dashboards, report builder
+- Sweeps for hyperparameter optimization (grid, random, Bayesian)
+- System metrics (GPU, CPU, memory, network) logged automatically
+- Artifact versioning with lineage tracking
+- Excellent documentation and community
+
+**Limitations**:
+- Pricing scales with usage — large teams can pay thousands per month
+- Vendor lock-in — your data lives in W&B's servers
+- Python-first (other languages have less mature SDKs)
+- Free tier has limits on runs and storage that teams outgrow quickly
+
+## Feature-by-Feature Comparison
+
+| Feature | MLflow | W&B |
+|---------|--------|-----|
+| **Self-hosting** | Yes (free) | Limited (enterprise only) |
+| **UI quality** | Functional | Excellent |
+| **Collaboration** | Basic | Best-in-class |
+| **HPO/Sweeps** | Manual or external | Built-in (grid, random, Bayesian) |
+| **System metrics** | No | Yes (automatic) |
+| **Model registry** | Built-in | Built-in (via Artifacts) |
+| **Lineage tracking** | Manual | Automatic |
+| **Pricing** | Free (self-hosted) | Free tier → $$$ |
+| **Language support** | Multi-language | Python-first |
+| **Artifact storage** | Pluggable backend | W&B cloud |
+
+<Callout type="tip">
+If you're a solo researcher or small team, W&B's free tier is hard to beat. If you're a large team concerned about cost or data sovereignty, MLflow's self-hosted model gives you control without per-seat pricing.
+</Callout>
+
+## Decision Matrix
+
+**Solo researcher**: W&B. The free tier is generous, the UI makes it easy to understand your experiments, and you don't need to manage infrastructure.
+
+**Small team (2-10 people)**: W&B if budget allows, MLflow if not. W&B's collaboration features (shared dashboards, comments, reports) are genuinely useful for team coordination. But if you're cost-conscious, MLflow's self-hosted model is viable with some operational overhead.
+
+**Large team / enterprise**: MLflow. The cost of W&B at scale can be significant, and MLflow's self-hosted model gives you data sovereignty and predictable costs. The operational overhead is manageable with dedicated infra support.
+
+**Regulated industries**: MLflow. If you need full control over your data and infrastructure, self-hosted MLflow is the safer choice. W&B's cloud-only model (outside of enterprise) may not meet compliance requirements.
+
+**Budget-constrained**: MLflow. The only cost is infrastructure, which you may already have. W&B's pricing can surprise you as your team grows.
+
+<Warning>
+Don't underestimate the cost of self-hosting MLflow at scale. You need a tracking server, a database, and artifact storage — all with backups, monitoring, and uptime. For teams without dedicated infra support, this is real work.
+</Warning>
+
+The good news: both tools have import/export capabilities, so migration is possible if you outgrow your initial choice. The bad news: migration is never as smooth as the docs suggest. Choose based on where you'll be in 12-18 months, not just where you are today.
+
+

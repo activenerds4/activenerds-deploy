@@ -1,0 +1,55 @@
+---
+title: "Kubernetes Pod Security Standards"
+slug: kubernetes-pod-security-standards
+description: "Replace PodSecurityPolicy with Pod Security Standards — privileged, baseline, and restricted profiles, plus enforcement modes."
+date: "2026-05-27"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes", "devsecops"]
+featured: false
+relatedArticles: ["cloud-native-security-best-practices", "devsecops-hardening-checklist", "kubernetes-rbac-configuration", "kubernetes-network-security-policies", "kubernetes-security-news-monthly"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-pod-security-standards.png
+imageAlt: "Kubernetes pod security standards — restricted baseline and privileged profiles for workload hardening"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Replace PodSecurityPolicy with Pod Security Standards.
+- **Key Capabilities**: privileged, baseline, and restricted profiles, plus enforcement modes.
+- **From PSP to PSS**: Apply structured configurations and validated production patterns.
+- **The Three Profiles**: Apply structured configurations and validated production patterns.
+</Callout>
+
+PodSecurityPolicy was Kubernetes' first attempt at pod-level hardening, and it was removed in 1.25 for good reason: it was confusing, inconsistent, and notoriously hard to roll out safely. Its replacement, Pod [Security Standards](/articles/cloud-native-security-best-practices) (PSS), is deliberately simpler — a set of named profiles enforced through built-in admission control rather than a sprawling custom API. If you're still operating without pod-level security policy because PSP was too painful, PSS is the reason to revisit it. This is a practical guide to the profiles, the enforcement modes, and how to roll them out without breaking everything.
+
+## From PSP to PSS
+
+PSP was a custom resource with dozens of independent fields, and the interaction between multiple PSPs and role bindings was genuinely hard to reason about. Teams either over-permissioned (one broad PSP for everyone) or spent weeks untangling why a pod was rejected. The Kubernetes community concluded the API was the problem, not the concept, and replaced it with something deliberately constrained.
+
+PSS is built into the pod admission pipeline rather than living as a separate API. You don't write policy objects; you label namespaces with the profile and mode you want, and the built-in Pod Security admission controller enforces it. There's no RBAC binding dance, no priority ordering of policies — just a namespace label that says "this namespace enforces the restricted profile." The operational change is significant: what used to be a sprawling policy-management problem is now a labeling and rollout problem.
+
+What changed operationally: existing PSPs don't migrate automatically, so the move to PSS is a fresh rollout. The profiles are opinionated and not configurable — if you need custom rules beyond the three profiles, you pair PSS with a policy engine like Kyverno or OPA Gatekeeper. PSS handles the common baseline; policy engines handle the exceptions.
+
+## The Three Profiles
+
+PSS defines three profiles of increasing strictness. **Privileged** is the unrestricted default — anything goes, including running as root, privileged containers, and host access. This is what you want only for system components that genuinely need it (network plugins, storage drivers), and it should be the exception, not the norm.
+
+**Baseline** is the middle tier. It blocks the most dangerous pod capabilities — privileged containers, hostPID/hostIPC, hostPath volumes, adding dangerous Linux capabilities — while staying permissive enough that most legacy workloads run unchanged. Baseline is the realistic starting point for a cluster that has never had pod security policy: it closes the worst holes without a mass of breakage.
+
+**Restricted** is the hardened profile. It requires running as non-root with a non-root user ID, drops all Linux capabilities, requires seccomp profiles, and forbids privilege escalation. This is the profile you want for production workloads in a security-conscious environment, and it's what the CIS benchmarks and regulated industries expect. The cost is that workloads need to be written to run non-root, which not all images do out of the box.
+
+## Enforcement Modes
+
+Each profile can be applied in three modes, and this is where the rollout story gets good. **enforce** blocks pods that violate the profile — they're rejected at admission. **audit** lets the pod run but logs a record of the violation, so you can see what would have been blocked without disrupting anything. **warn** returns a warning to the API client (visible in `kubectl` output) but still admits the pod.
+
+These modes are set independently via namespace labels: `pod-security.kubernetes.io/enforce=restricted`, `.../audit=restricted`, `.../warn=restricted`. The standard rollout pattern is to start with `audit` and `warn` across a namespace, watch the audit logs to see which workloads violate, fix them, then flip `enforce` on once the violations drop to zero. That's the safe path PSP never gave you — you can see the impact before you feel it.
+
+A common refinement is versioning: each label takes a version (`enforce=restricted:latest`), which pins the policy to a Kubernetes minor version's definition of the profile so an upstream tightening of "restricted" doesn't suddenly break your workloads on upgrade. Pin the version in production; use `latest` in dev where you want to catch upcoming changes early.
+
+## Common Compliance Gaps
+
+The most common gap when moving to restricted is the root-user requirement. Many images run as root by default, and the fix is either setting `runAsUser` and `runAsNonRoot` in the pod spec or, better, using an image that defines a non-root USER. The second is Linux capabilities — restricted drops all and requires you to add back only what you need (usually nothing). The third is seccomp, which restricted requires; the default `RuntimeDefault` profile covers most cases.
+
+Rolling out is a matter of identifying which namespaces hold which workloads, applying `audit` + `warn` first, and working through the violations namespace by namespace. Prioritize the restricted profile for new namespaces from day one — it's much easier to start strict than to tighten later. Pair PSS with a policy engine for anything beyond the three profiles (image registry restrictions, label requirements, resource limits), and you'll have a pod security posture that's both enforceable and maintainable, which is the thing PSP never quite managed to be.
+
+

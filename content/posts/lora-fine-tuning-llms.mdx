@@ -1,0 +1,98 @@
+---
+title: "LoRA Fine-Tuning Techniques for LLMs"
+slug: lora-fine-tuning-llms
+description: "Learn LoRA fine-tuning for large language models — rank selection, target modules, training configs, and when to choose LoRA over full fine-tuning."
+date: "2025-10-02"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["llms", "pytorch"]
+featured: true
+relatedArticles: ["fine-tuning-llms-guide", "attention-mechanism-explained", "model-quantization-techniques", "prompt-engineering-techniques-guide", "tensorrt-inference-acceleration"]
+image: https://cdn.activenerds.com/images/posts/lora-fine-tuning-llms.png
+imageAlt: "Two small spring-green rank-decomposition adapter matrices injecting into a frozen model weight on a deep slate background"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Learn LoRA fine-tuning for large language models.
+- **Key Capabilities**: rank selection, target modules, training configs, and when to choose LoRA over full fine-tuning.
+- **Why Parameter-Efficient Fine-Tuning**: Apply structured configurations and validated production patterns.
+- **How LoRA Works**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Fine-tuning a [large language](/articles/fine-tuning-llms-guide) model used to mean updating every parameter — a process that requires enough GPU memory to hold the model weights, gradients, optimizer states, and activations simultaneously. For a 7B parameter model that's tens of gigabytes; for 70B it's simply out of reach on consumer hardware. LoRA (Low-Rank Adaptation) changed the economics by freezing the base model and learning a tiny set of adapter weights instead.
+
+This guide covers what LoRA actually does, how to configure it well, and where it fits relative to full fine-tuning and other parameter-efficient methods. If you've read our broader [fine-tuning guide](/blog/fine-tuning-llms-guide), this is the deep dive on the adapter approach most teams end up using.
+
+## Why Parameter-Efficient Fine-Tuning
+
+The core problem with full fine-tuning is memory, not just compute. During training you store three copies of information per parameter: the weight itself, its gradient, and the optimizer state (Adam keeps two moments). For a 7B model in fp16 with an fp32 optimizer, that's roughly 7B × 16 bytes ≈ 112 GB just for the optimizer and weights — before you've allocated a single activation.
+
+Parameter-Efficient Fine-Tuning (PEFT) methods sidestep this by keeping the pretrained weights frozen and learning a small number of new parameters. The PEFT family includes prefix tuning, prompt tuning, adapters, and LoRA. LoRA has become the de facto choice because it introduces no inference latency when merged, trains fast, and produces quality close to full fine-tuning for most adaptation tasks.
+
+<Note>
+If your goal is teaching the model new factual knowledge, LoRA can underperform full fine-tuning. If your goal is style, format, or task adaptation, LoRA is almost always sufficient. Most production use cases are the latter.
+</Note>
+
+## How LoRA Works
+
+LoRA is built on a simple hypothesis: the weight updates needed to adapt a model to a new task have low "intrinsic rank." Instead of learning a full update matrix ΔW, LoRA approximates it as the product of two small matrices:
+
+```
+ΔW = B @ A   where A is (r × d) and B is (d × r), r << d
+```
+
+The original weight W stays frozen. The forward pass becomes `W·x + B·A·x`. With rank r = 8 on a 4096-dimensional layer, you go from 16.7M update parameters down to 65K — a 256× reduction.
+
+The adapter matrices A and B are the only things that receive gradients, so the optimizer state is tiny. You can fine-tune a 7B model on a single 24GB GPU with QLoRA (LoRA on top of 4-bit quantized weights).
+
+## Configuring LoRA
+
+Three settings dominate LoRA's behavior, and getting them wrong is the most common cause of poor results.
+
+**Rank (r)** controls the expressiveness of the adapter. r = 8 is a safe default for style/format adaptation. For tasks requiring more capacity (new domains, complex reasoning), try r = 16 or 32. Going above 64 rarely helps and starts to erase the memory savings.
+
+**Alpha (α)** scales the adapter contribution. The effective update is `(α/r) · B·A`, so alpha should scale with rank — a common heuristic is α = 2r. This keeps the effective magnitude stable as you change r.
+
+**Target modules** decide which layers get adapters. Applying LoRA only to attention projections (q, v) is the original recipe and works well. Extending to all linear layers (q, k, v, o, gate, up, down) gives better quality at modest extra cost and is now the recommended default:
+
+```python
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(
+    r=16,
+    lora_alpha=32,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"],
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+)
+model = get_peft_model(base_model, config)
+```
+
+<Callout type="tip">
+Start with r=16, alpha=32, all-linear targets, dropout=0.05. This single config beats most "tuned" setups people publish. Only deviate when you have a reason.
+</Callout>
+
+## Training Setup in Practice
+
+With the PEFT library the workflow is straightforward: load your base model, wrap it with `get_peft_model`, and train normally. The frozen weights don't need gradients, so memory drops dramatically.
+
+The key practical decision is whether to merge the adapter for inference. For a single deployed task, merging (`model.merge_and_unload()`) bakes the adapter into the base weights, producing a standard model with zero added latency. For multi-tenant serving where you swap adapters per request, keep them separate and load adapters on demand — this is how LoRA serves many fine-tunes from one base model.
+
+Memory savings are real and large. A 7B model fully fine-tuned needs ~112GB; the same model with LoRA (r=16, all-linear) needs ~10–14GB of trainable state on top of the frozen weights, which themselves can be 4-bit quantized with QLoRA.
+
+## When to Choose LoRA
+
+LoRA wins when your adaptation is about behavior — tone, output format, task framing, tool use. It's the right default for 90% of fine-tuning projects.
+
+Full fine-tuning still matters when you need the model to internalize substantial new knowledge that wasn't in pretraining, or when you need every last point of benchmark quality and have the GPUs to spend. Even then, QLoRA (4-bit base + LoRA adapters) closes most of the gap on a single GPU.
+
+<Warning>
+A common pitfall is training LoRA with too high a learning rate. Because the adapter is small, gradients can blow it up quickly. Use a learning rate around 1e-4 to 2e-4 for LoRA — roughly 10× higher than full fine-tuning, but not higher.
+</Warning>
+
+The pragmatic path: start with LoRA (or QLoRA if GPU-constrained), measure against your eval set, and only escalate to full fine-tuning if you have a specific failure mode that adapter-based tuning can't fix. Most teams never need to.
+
+

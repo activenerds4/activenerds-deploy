@@ -1,0 +1,62 @@
+{
+  "batch": "keywords-batch-05",
+  "createdAt": "2026-08-25T00:00:00.000Z",
+  "totalKeywords": 15,
+  "clusters": [
+    {
+      "category": "ai-machine-learning",
+      "keywords": [
+        { "id": "kw-166", "term": "data augmentation techniques pytorch", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "tutorial", "primaryTag": "pytorch", "targetPillar": "data", "status": "ready" },
+        { "id": "kw-167", "term": "distributed data parallel vs model parallel", "searchIntent": "informational", "targetAudience": "advanced", "suggestedContentType": "comparison", "primaryTag": "pytorch", "targetPillar": "training", "status": "ready" }
+      ]
+    },
+    {
+      "category": "containers-kubernetes",
+      "keywords": [
+        { "id": "kw-168", "term": "kubernetes custom controller development", "searchIntent": "informational", "targetAudience": "advanced", "suggestedContentType": "tutorial", "primaryTag": "kubernetes", "targetPillar": "operators", "status": "ready" },
+        { "id": "kw-169", "term": "containerd vs cri-o runtime comparison", "searchIntent": "commercial", "targetAudience": "intermediate", "suggestedContentType": "comparison", "primaryTag": "docker", "targetPillar": "runtime", "status": "ready" },
+        { "id": "kw-170", "term": "kubernetes resource quotas and limits", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "governance", "status": "ready" }
+      ]
+    },
+    {
+      "category": "fitness-wellness-tech",
+      "keywords": [
+        { "id": "kw-171", "term": "standing desk transition schedule", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "standing-desk", "targetPillar": "transition", "status": "ready" },
+        { "id": "kw-172", "term": "eye rest 20 20 20 rule", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "habit-building", "targetPillar": "eye-health", "status": "ready" },
+        { "id": "kw-173", "term": "mobility exercises for hip flexors", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "desk-stretches", "targetPillar": "mobility", "status": "ready" }
+      ]
+    },
+    {
+      "category": "devsecops-security",
+      "keywords": [
+        { "id": "kw-174", "term": "kubernetes network security policies", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "devsecops", "targetPillar": "networking", "status": "ready" },
+        { "id": "kw-175", "term": "cloud security best practices aws", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "checklist", "primaryTag": "devsecops", "targetPillar": "cloud-security", "status": "ready" }
+      ]
+    },
+    {
+      "category": "gear-gadgets",
+      "keywords": [
+        { "id": "kw-176", "term": "ergonomic footrest desk setup", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "ergonomics", "targetPillar": "accessories", "status": "ready" },
+        { "id": "kw-177", "term": "vertical mouse ergonomic review", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "ergonomics", "targetPillar": "peripherals", "status": "ready" }
+      ]
+    },
+    {
+      "category": "events-community",
+      "keywords": [
+        { "id": "kw-178", "term": "tech meetup speaker preparation", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "conferences", "targetPillar": "speaking", "status": "ready" }
+      ]
+    },
+    {
+      "category": "platform-engineering-devops",
+      "keywords": [
+        { "id": "kw-179", "term": "canary deployment strategies kubernetes", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "deployment", "status": "ready" }
+      ]
+    },
+    {
+      "category": "focus-productivity",
+      "keywords": [
+        { "id": "kw-180", "term": "single tasking vs multitasking", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "deep-work", "targetPillar": "focus", "status": "ready" }
+      ]
+    }
+  ]
+}

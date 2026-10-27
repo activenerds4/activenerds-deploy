@@ -1,0 +1,165 @@
+---
+title: "Supply Chain Security for Kubernetes"
+slug: supply-chain-security-k8s
+description: "How to secure your K8s supply chain — from image signing with Cosign to SBOMs, admission controllers, and policy enforcement."
+date: "2025-08-01"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "docker"]
+featured: false
+relatedArticles: ["container-image-signing-cosign", "devsecops-hardening-checklist", "container-image-security-scanning", "compliance-automation-kubernetes", "kubernetes-admission-controllers-guide"]
+image: https://cdn.activenerds.com/images/posts/supply-chain-security-k8s.png
+imageAlt: "Supply chain security for Kubernetes — dependency vulnerability SBOM and attack vector mitigation"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: How to secure your K8s supply chain.
+- **Key Capabilities**: from image signing with Cosign to SBOMs, admission controllers, and policy enforcement.
+- **The Supply Chain Problem**: Apply structured configurations and validated production patterns.
+- **Image Signing with Cosign**: Apply structured configurations and validated production patterns.
+</Callout>
+
+The software supply chain is the new attack surface. SolarWinds, Codecov, and numerous npm package compromises have shown that attackers are increasingly targeting the build and distribution pipeline rather than the application itself. For Kubernetes, the supply chain runs from your base images through CI/CD to the cluster — and every link needs protection.
+
+## The Supply Chain Problem
+
+In a Kubernetes environment, your supply chain includes:
+
+1. **Base images**: The container images you build from (alpine, ubuntu, distroless)
+2. **Dependencies**: npm packages, pip packages, Go modules
+3. **Build pipeline**: CI/CD tools, build agents, registries
+4. **Distribution**: Container registries and how images get pulled into clusters
+
+A compromise at any point can inject malicious code into every container built downstream.
+
+## Image Signing with Cosign
+
+Cosign (part of the Sigstore project) signs container images using cryptographic keys or [keyless signing](/articles/container-image-signing-cosign) with OIDC:
+
+### Keyless Signing
+
+```bash
+# Sign an image using your OIDC identity (GitHub, GitLab, etc.)
+cosign sign --keyless myregistry.com/myapp:v1.0.0
+
+# Verify the signature
+cosign verify --keyless \
+  --certificate-identity-regexp "https://github.com/myorg/*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  myregistry.com/myapp:v1.0.0
+```
+
+Keyless signing is easier to get started with — no key management. The signing identity is tied to the CI pipeline that built the image.
+
+### Verification Policies
+
+Use an admission controller to verify signatures before pods deploy:
+
+```yaml
+# Kyverno policy to verify Cosign signatures
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-images
+spec:
+  rules:
+    - name: verify-signature
+      match:
+        resources:
+          kinds: [Pod]
+      verifyImages:
+        - imageReferences:
+            - "myregistry.com/*"
+          attestors:
+            - entries:
+                - keyless:
+                    subject: "https://github.com/myorg/*"
+                    issuer: "https://token.actions.githubusercontent.com"
+```
+
+## SBOMs and Dependency Scanning
+
+A Software Bill of Materials (SBOM) is a manifest of all components in a software artifact — like an ingredients list for your container image.
+
+### Generating SBOMs
+
+```bash
+# Generate SBOM with Syft
+syft myregistry.com/myapp:v1.0.0 -o json > sbom.json
+
+# Scan SBOM for vulnerabilities with Grype
+grype sbom:./sbom.json
+```
+
+### Policy Enforcement
+
+Require SBOMs as part of your CI pipeline:
+
+1. **Build stage**: Generate SBOM after building the image
+2. **Scan stage**: Check SBOM for known vulnerabilities (CVEs)
+3. **Gate stage**: Fail the build if high/critical vulnerabilities are found
+4. **Store stage**: Attach SBOM to the image as an attestation
+
+```bash
+# Attach SBOM as attestation
+cosign attest --predicate sbom.json \
+  --type spdxjson \
+  myregistry.com/myapp:v1.0.0
+```
+
+## Admission Controllers
+
+Admission controllers intercept requests to the Kubernetes API server and can validate or mutate them before they're persisted.
+
+### Kyverno vs OPA Gatekeeper
+
+| Feature | Kyverno | OPA Gatekeeper |
+|---------|---------|----------------|
+| Policy language | YAML (native K8s) | Rego (custom DSL) |
+| Learning curve | Easier | Steeper |
+| Flexibility | Good | Excellent |
+| Community | Growing | Established |
+| Image verification | Built-in | Requires custom policies |
+
+### Image Policy Enforcement
+
+```yaml
+# Kyverno: Block unsigned images
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-unsigned-images
+spec:
+  validationFailureAction: enforce
+  rules:
+    - name: check-signature
+      match:
+        resources:
+          kinds: [Pod]
+      validate:
+        message: "Images must be signed with Cosign"
+        foreach:
+          - list: "request.object.spec.containers"
+            verifyImages:
+              - imageReferences:
+                  - "*"
+                attestors:
+                  - entries:
+                      - keyless:
+                          subject: "https://github.com/myorg/*"
+```
+
+## Continuous Verification
+
+Supply chain security isn't a one-time check — it's continuous:
+
+- **Periodic re-scanning**: Re-scan images for new CVEs weekly. New vulnerabilities are discovered in old dependencies all the time.
+- **Drift detection**: Alert if running images differ from what's in the registry (someone may have manually replaced an image).
+- **Automated remediation**: When a new CVE affects a running image, trigger a rebuild with the patched base image automatically.
+
+<Note>
+Supply chain security is about trust. Every image in your cluster should have a verifiable chain of custody — from the source code commit, through the CI pipeline, to the signed image in the registry. Without this, you're running code from unknown origins.
+</Note>
+
+

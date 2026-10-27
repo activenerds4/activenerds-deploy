@@ -1,0 +1,153 @@
+---
+title: "RAG Pipeline Hardening & Quality Audit Checklist"
+description: "Audit a retrieval-augmented generation pipeline — dedup, chunk overlap, similarity calibration, semantic cache hit rates, and re-ranking thresholds."
+category: ai-ml
+slug: rag-pipeline-hardening-checklist
+lastUpdated: "2026-08-28"
+tags: ["rag", "vector-database", "embeddings", "mlops"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# RAG Pipeline Hardening & Quality Audit Checklist
+
+**Because "it retrieves something" is not the same as "it retrieves the right thing."**
+
+A RAG pipeline has a dozen places to silently degrade: duplicate chunks, mismatched embedding dimensions, a similarity threshold that's too loose, a re-ranker that nobody calibrated. This checklist walks the full pipeline — ingest, embed, retrieve, re-rank, answer — and the quality gates that keep it honest.
+
+---
+
+## Table of Contents
+
+1. [Ingest & Chunking](#1-ingest--chunking)
+2. [Embeddings & Indexing](#2-embeddings--indexing)
+3. [Retrieval & Similarity](#3-retrieval--similarity)
+4. [Re-ranking & Context Assembly](#4-re-ranking--context-assembly)
+5. [Semantic Cache](#5-semantic-cache)
+6. [Evaluation & Drift](#6-evaluation--drift)
+
+---
+
+## 1. Ingest & Chunking
+
+<ChecklistBox
+  title="Ingest & Chunking"
+  items={[
+    "Source documents deduplicated before chunking (hash on normalized content)",
+    "Chunk size tuned for the domain (e.g. 512–1024 tokens) and documented with rationale",
+    "Chunk overlap configured (10–20% of chunk size) to preserve cross-boundary context",
+    "Semantic/recursive chunking used for structured docs (markdown headers, code blocks)",
+    "Chunk metadata attached (source, page, section, version, access-control tags)",
+    "Stale chunks purged on source update (no orphaned vectors pointing at deleted docs)",
+    "Incremental / delta ingest path exists so a doc edit doesn't re-embed the whole corpus",
+  ]}
+/>
+
+<Callout variant="warning" title="Deduplication is not optional">
+  Duplicate chunks inflate retrieval scores and waste vector storage. Hash-normalize (lowercase, strip whitespace) before comparing. Near-duplicates (e.g. minor revisions) need a similarity-based dedup pass, not just exact hashing.
+</Callout>
+
+---
+
+## 2. Embeddings & Indexing
+
+<ChecklistBox
+  title="Embeddings & Indexing"
+  items={[
+    "Embedding model version pinned and recorded against every vector",
+    "Query and document embeddings use the same model (cross-model mismatch breaks retrieval)",
+    "Embedding dimension matches the index dimension (mismatch silently truncates or errors)",
+    "Vector normalization consistent (cosine vs L2 — don't mix distance metrics per query)",
+    "Index type chosen and tuned (HNSW M/efConstruction, IVF nlist) for recall/latency tradeoff",
+    "ef_search / nprobe tuned so recall@k meets your target at acceptable latency",
+    "Index rebuilt / re-indexed when the embedding model changes (no mixed-version vectors)",
+  ]}
+/>
+
+---
+
+## 3. Retrieval & Similarity
+
+<ChecklistBox
+  title="Retrieval & Similarity"
+  items={[
+    "Similarity metric matches the embedding model's training (cosine for normalized, dot for some)",
+    "Top-k chosen for recall, not just speed (start at k=20–50 before re-ranking)",
+    "Similarity threshold calibrated against a labeled query set (precision/recall tradeoff)",
+    "Hybrid search (BM25 + vector) enabled if keyword-heavy queries exist in the domain",
+    "Metadata filters applied before vector search (access control, recency, source)",
+    "Empty-result and low-score (< threshold) paths handled gracefully, not silently passed to the LLM",
+    "Query embedding cached to avoid re-embedding repeated queries",
+  ]}
+/>
+
+---
+
+## 4. Re-ranking & Context Assembly
+
+<ChecklistBox
+  title="Re-ranking & Context Assembly"
+  items={[
+    "Cross-encoder / re-ranker applied to top-k retrieved chunks",
+    "Re-ranker threshold tuned so irrelevant chunks are dropped before context assembly",
+    "Final context window respects the LLM's token budget (sum of chunks + prompt < limit)",
+    "Chunks ordered by relevance, not by retrieval rank (re-ranking can reorder)",
+    "Source citations preserved into the final prompt so the LLM can attribute answers",
+    "Context diversity checked — not all chunks from the same document unless intended",
+    "Token budget headroom reserved for the answer (don't fill the whole window with context)",
+  ]}
+/>
+
+<Callout variant="tip" title="Calibrate the re-ranker">
+  A re-ranker with an uncalibrated threshold either drops good chunks or lets junk through. Build a small labeled set of (query, chunk, relevant?) pairs and sweep the threshold for the best F1. Re-run it whenever the embedding or re-ranker model changes.
+</Callout>
+
+---
+
+## 5. Semantic Cache
+
+<ChecklistBox
+  title="Semantic Cache"
+  items={[
+    "Semantic cache keyed on query embedding, not raw text (handles paraphrases)",
+    "Cache similarity threshold set high enough to avoid false-positive hits (e.g. > 0.95)",
+    "Cache TTL / invalidation tied to source-document updates (stale cache = stale answers)",
+    "Cache hit rate monitored — a near-zero rate means the threshold is too tight or queries are too varied",
+    "Cache misses fall through to full retrieval, not an error",
+    "Cached answers tagged so analytics can distinguish cache-served vs fresh-served",
+    "Cache warmed for known high-frequency query patterns after a corpus update",
+  ]}
+/>
+
+---
+
+## 6. Evaluation & Drift
+
+<ChecklistBox
+  title="Evaluation & Drift"
+  items={[
+    "Golden query set (50–200 labeled Q&A pairs) maintained and versioned",
+    "Retrieval recall@k and answer faithfulness measured on the golden set weekly",
+    "Source-attribution accuracy checked — does the answer match the cited chunk?",
+    "Hallucination rate tracked (answer unsupported by retrieved context)",
+    "Corpus drift monitored (new docs changing answer distribution for stable queries)",
+    "A/B test harness exists for embedding/re-ranker model swaps before production",
+    "Failure cases triaged and added back to the golden set as regression tests",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Audit Sign-off"
+  items={[
+    "Recall@10 ≥ target on golden set (document the number, don't hand-wave)",
+    "End-to-end answer accuracy ≥ target on golden set",
+    "p95 retrieval + re-rank latency within budget",
+    "Re-index / model-swap runbook tested in staging",
+  ]}
+/>

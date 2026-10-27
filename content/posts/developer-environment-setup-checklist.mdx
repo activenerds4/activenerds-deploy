@@ -1,0 +1,331 @@
+---
+title: "Developer Environment Setup Checklist"
+slug: developer-environment-setup-checklist
+description: "A comprehensive checklist for setting up a productive developer environment — tools, shell config, and ergonomics."
+date: "2025-11-07"
+author: activenerds-team
+category: platform-engineering-devops
+tags: ["docker", "deep-work"]
+featured: false
+relatedArticles: ["devops-tools-benchmark-comparison", "ergonomic-desk-setup-programmers", "container-image-security-scanning", "devcontainer-setup-consistent-environments", "infrastructure-as-code-terraform-pulumi"]
+image: https://cdn.activenerds.com/images/posts/developer-environment-setup-checklist.png
+imageAlt: "Developer environment setup checklist — organized guide to configuring a productive coding workspace from scratch"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: A comprehensive checklist for setting up a productive developer environment.
+- **Key Capabilities**: tools, shell config, and ergonomics.
+- **Core Tools**: Apply structured configurations and validated production patterns.
+- **Shell and Editor**: Apply structured configurations and validated production patterns.
+</Callout>
+
+A well-configured developer environment is an investment that pays dividends every single day. Every minute saved on navigation, every keystroke saved by a good alias, every posture correction from a well-placed monitor — these compound over a career. This checklist covers everything from core tools to ergonomic setup, designed for the developer who wants to optimize their daily workflow.
+
+## Core Tools
+
+### Package Managers
+
+- [ ] **Homebrew** (macOS/Linux) or **Scoop** (Windows) installed
+- [ ] **nvm** or **fnm** for Node.js version management
+- [ ] **pyenv** for Python version management
+- [ ] **gvm** or **go install** for Go version management
+- [ ] **SDKMAN** for JVM languages (Java, Kotlin, Scala)
+
+```bash
+# macOS setup
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install nvm pyenv go
+
+# Node version management
+nvm install 20 && nvm alias default 20
+
+# Python version management
+pyenv install 3.12 && pyenv global 3.12
+```
+
+### Language Runtimes
+
+- [ ] Node.js 20 LTS (or latest LTS)
+- [ ] Python 3.12+
+- [ ] Go 1.22+
+- [ ] Rust (via rustup) if applicable
+- [ ] Java 21 LTS if applicable
+
+### Container Runtime
+
+- [ ] **Docker Desktop** (macOS/Windows) or **Docker Engine** (Linux)
+- [ ] Allocate at least 8GB RAM and 4 CPUs to Docker
+- [ ] Enable BuildKit (`DOCKER_BUILDKIT=1`)
+- [ ] Install **kubectl**
+- [ ] Install **Helm** 3.x
+- [ ] Install **k9s** for terminal K8s navigation
+
+```bash
+brew install kubectl helm k9s
+# Verify
+kubectl version --client
+helm version
+```
+
+## Shell and Editor
+
+### Shell Configuration
+
+- [ ] Use **Zsh** (default on macOS) or **Fish**
+- [ ] Install **Oh My Zsh** or **Starship** prompt
+- [ ] Configure aliases for common commands
+- [ ] Set up command history with fzf integration
+
+```bash
+# ~/.zshrc essentials
+
+# Aliases
+alias k="kubectl"
+alias kgp="kubectl get pods"
+alias kgs="kubectl get svc"
+alias kdp="kubectl describe pod"
+alias kaf="kubectl apply -f"
+alias hl="helm list"
+alias dc="docker compose"
+alias d="docker"
+alias g="git"
+alias gs="git status"
+alias gd="git diff"
+alias lg="lazygit"
+
+# History settings
+HISTSIZE=10000
+SAVEHIST=10000
+setopt SHARE_HISTORY
+setopt HIST_IGNORE_DUPS
+
+# fzf integration
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+```
+
+### Editor Setup
+
+- [ ] **VS Code** or **Neovim** as primary editor
+- [ ] Configure settings sync for consistency across machines
+- [ ] Install essential extensions
+
+**VS Code Extensions:**
+- ESLint / Prettier (formatting)
+- GitLens (git integration)
+- Docker (container management)
+- Kubernetes (cluster navigation)
+- Remote - Containers (DevContainer support)
+- Error Lens (inline error display)
+- Tailwind CSS IntelliSense (if applicable)
+
+**VS Code Settings:**
+```jsonc
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.fontSize": 14,
+  "editor.fontFamily": "'JetBrains Mono', 'Fira Code', monospace",
+  "editor.fontLigatures": true,
+  "editor.minimap.enabled": false,
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "terminal.integrated.fontSize": 13,
+  "files.autoSave": "onFocusChange",
+  "workbench.colorTheme": "One Dark Pro",
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.next": true
+  }
+}
+```
+
+### Extension Curation
+
+<Warning>
+Extension bloat slows VS Code and increases memory usage. Audit your extensions quarterly. Remove anything you haven't used in 30 days. A lean editor is a fast editor.
+</Warning>
+
+## Git and SSH
+
+### Git Configuration
+
+- [ ] Set user name and email
+- [ ] Configure default branch name
+- [ ] Set up global gitignore
+- [ ] Configure commit signing (GPG or SSH)
+
+```bash
+# Core config
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+git config --global init.defaultBranch main
+git config --global pull.rebase true
+git config --global core.editor "code --wait"
+
+# Better diffs
+git config --global diff.algorithm histogram
+git config --global merge.conflictstyle zdiff3
+
+# Global gitignore
+cat > ~/.gitignore_global << 'EOF'
+.DS_Store
+node_modules/
+.env
+.env.local
+*.log
+dist/
+.next/
+.cache/
+EOF
+
+git config --global core.excludesfile ~/.gitignore_global
+```
+
+### SSH Key Management
+
+- [ ] Generate ED25519 SSH key
+- [ ] Add to GitHub/GitLab
+- [ ] Configure SSH config for multiple accounts
+
+```bash
+# Generate key
+ssh-keygen -t ed25519 -C "you@example.com"
+
+# SSH config for multiple accounts
+cat > ~/.ssh/config << 'EOF'
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519
+
+Host github-personal
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519_personal
+EOF
+```
+
+### Commit Templates
+
+- [ ] Set up commit message template for consistent conventions
+
+```bash
+cat > ~/.gitmessage << 'EOF'
+# <type>(<scope>): <subject>
+#
+# <body>
+#
+# Types: feat, fix, docs, style, refactor, test, chore, perf, ci
+EOF
+
+git config --global commit.template ~/.gitmessage
+```
+
+## Ergonomic Setup
+
+### Desk and Monitor Alignment
+
+- [ ] Monitor at eye level — top of screen at or slightly below eye height
+- [ ] Monitor arm distance: 20-30 inches from eyes
+- [ ] Dual monitors: primary directly ahead, secondary at 30-degree angle
+- [ ] Desk height: elbows at 90 degrees when typing
+- [ ] Chair height: feet flat on floor or footrest
+
+### Break Reminder Tools
+
+- [ ] Install **Stretchly** (cross-platform) or use **Apple Watch** stand reminders
+- [ ] Configure 25-minute work intervals with 5-minute breaks
+- [ ] Enable 20-20-20 rule reminders (look 20 feet away for 20 seconds every 20 minutes)
+
+### Lighting
+
+- [ ] Natural light from the side, not behind or in front of monitor
+- [ ] Task lighting for notes and reading
+- [ ] Monitor brightness matches ambient room brightness
+- [ ] Consider bias lighting (LED strip behind monitor) to reduce eye strain
+
+<Callout type="info">
+**Ergonomics is not optional for developers.** You spend 8+ hours at this desk. A $500 chair and a $100 monitor arm are investments that prevent medical bills and lost productivity. See our [ergonomic desk setup guide](/blog/ergonomic-desk-setup-programmers) for detailed product recommendations.
+</Callout>
+
+## Automation Scripts
+
+### Dotfiles Management
+
+- [ ] Use a dotfiles repo with a bootstrap script
+- [ ] Store configs for shell, editor, git, and tools
+
+```bash
+# Example dotfiles structure
+~/dotfiles/
+├── .zshrc
+├── .gitconfig
+├── .vimrc
+├── vscode-settings.json
+├── install.sh
+
+# install.sh
+#!/bin/bash
+ln -sf ~/dotfiles/.zshrc ~/.zshrc
+ln -sf ~/dotfiles/.gitconfig ~/.gitconfig
+ln -sf ~/dotfiles/vscode-settings.json ~/Library/Application\ Support/Code/User/settings.json
+```
+
+### Setup Scripts
+
+- [ ] Create a one-command setup script for new machines
+
+```bash
+#!/bin/bash
+# setup.sh — run on a fresh machine
+
+# Install Homebrew
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install tools
+brew install git node python go kubectl helm k9s fzf ripgrep lazygit
+
+# Link dotfiles
+~/dotfiles/install.sh
+
+# Install VS Code extensions
+code --install-extension dbaeumer.vscode-eslint
+code --install-extension esbenp.prettier-vscode
+code --install-extension ms-kubernetes-tools.vscode-kubernetes-tools
+
+echo "Setup complete! Restart your terminal."
+```
+
+### Provisioning with Ansible
+
+For teams, use Ansible to automate setup across machines:
+
+```yaml
+# playbook.yml
+- hosts: localhost
+  tasks:
+  - name: Install dev tools
+    homebrew:
+      name: "{{ item }}"
+      state: present
+    loop:
+      - git
+      - node
+      - python
+      - go
+      - kubectl
+      - helm
+      - k9s
+```
+
+<Callout type="tip">
+**Movement break:** You just went through a dense checklist. Before you start implementing it, stand up and do 10 wall push-ups. Your shoulders have been rounded forward reading this — wall push-ups open your chest and reset your posture. Then tackle the checklist one section at a time.
+</Callout>
+
+## Summary
+
+Work through this checklist section by section — don't try to do it all at once. Start with core tools and shell config, then move to Git and SSH, then ergonomics, then automation. Each section compounds on the last. The goal isn't a perfect environment; it's an environment that gets out of your way so you can focus on the actual work.
+
+

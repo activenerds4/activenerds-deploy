@@ -1,0 +1,273 @@
+---
+title: "RAG & Vector Search Essentials Cheat Sheet"
+description: "Build retrieval that actually returns the right chunks — semantic/recursive chunking, embedding dimensions, similarity metrics, and re-ranking pipelines."
+category: ai-llm-engineering
+slug: rag-vector-search-essentials
+lastUpdated: "2026-08-28"
+tags: ["rag", "vector-search", "embeddings", "llms"]
+published: true
+---
+
+import { TabsGroup, TabsList, TabsTrigger, TabsContent } from "@/components/mdx/TabsGroup";
+import { Callout } from "@/components/mdx/Callout";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# RAG & Vector Search Essentials Cheat Sheet
+
+**Retrieval is the bottleneck, not the model.**
+
+A RAG pipeline is only as good as the chunks it retrieves. This sheet covers chunking strategies, embedding choices, similarity math, and the re-ranking step that separates toy demos from production search.
+
+---
+
+## Table of Contents
+
+1. [The RAG Pipeline](#1-the-rag-pipeline)
+2. [Chunking Strategies](#2-chunking-strategies)
+3. [Embedding Models & Dimensions](#3-embedding-models--dimensions)
+4. [Similarity Metrics](#4-similarity-metrics)
+5. [Vector Index Types](#5-vector-index-types)
+6. [Re-Ranking Pipelines](#6-re-ranking-pipelines)
+7. [Production Tuning Checklist](#7-production-tuning-checklist)
+
+---
+
+## 1. The RAG Pipeline
+
+```text
+Documents → Chunking → Embedding → Vector Store
+                                        ↓
+Query → Embedding → Vector Search (top-k) → Re-rank → LLM context
+```
+
+<Callout variant="note" title="Where RAG fails">
+Most RAG problems are retrieval problems, not generation problems. If the right chunk isn't in the top-k retrieved, no prompt engineering will save you. Optimize chunking and retrieval first; tune the prompt last.
+</Callout>
+
+---
+
+## 2. Chunking Strategies
+
+<TabsGroup defaultValue="fixed">
+<TabsList>
+<TabsTrigger value="fixed">Fixed-Size</TabsTrigger>
+<TabsTrigger value="recursive">Recursive</TabsTrigger>
+<TabsTrigger value="semantic">Semantic</TabsTrigger>
+<TabsTrigger value="parent">Parent-Child</TabsTrigger>
+</TabsList>
+<TabsContent value="fixed">
+
+**Simplest.** Split on N tokens with M overlap. Good starting point.
+
+```python
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=512, chunk_overlap=64, separators=["\n\n", "\n", ". "]
+)
+chunks = splitter.split_text(doc)
+```
+
+</TabsContent>
+<TabsContent value="recursive">
+
+**Best default.** Split by hierarchy of separators (paragraph → sentence → word), keeping semantic units intact. Falls back to smaller separators only when needed.
+
+</TabsContent>
+<TabsContent value="semantic">
+
+**Quality-focused.** Split where embedding similarity drops — groups topically coherent sentences. Slower to build, better retrieval. Tools: `semantic-chunker`, LlamaIndex `SemanticSplitter`.
+
+</TabsContent>
+<TabsContent value="parent">
+
+**Best for citation.** Embed small child chunks for precise retrieval, but return the larger parent chunk to the LLM. Gets precise matching + full context.
+
+```text
+Parent chunk (1000 tok) → child chunks (200 tok each)
+Retrieve on children, return parent to LLM.
+```
+
+</TabsContent>
+</TabsGroup>
+
+### Chunk size guidance
+
+| Content type | Recommended size | Overlap |
+|--------------|------------------|---------|
+| Code / logs | 256–512 tokens | 32–64 |
+| Technical docs | 512–1024 tokens | 64–128 |
+| FAQs / short Q&A | 1 item per chunk | 0 |
+| Long-form articles | 800–1200 tokens | 100–200 |
+
+<Callout variant="tip" title="Overlap prevents split answers">
+Overlap (10–20% of chunk size) ensures a relevant passage split across a boundary is still fully captured in at least one chunk. Without it, you lose context at every split point.
+</Callout>
+
+---
+
+## 3. Embedding Models & Dimensions
+
+<ComparisonTable
+  title="Common embedding models"
+  columns={["Dimensions", "Best For", "Notes"]}
+  rows={[
+    { label: "text-embedding-3-small", values: ["1536", "General, cheap", "OpenAI; dim configurable via API"] },
+    { label: "text-embedding-3-large", values: ["3072", "Higher quality", "OpenAI; can truncate to 256/1024"] },
+    { label: "bge-large-en-v1.5", values: ["1024", "Open-source, strong", "Self-host; MTEP top-tier"] },
+    { label: "nomic-embed-text-v1", values: ["768", "Long context", "8K context; open weights"] },
+    { label: "e5-large-v2", values: ["1024", "Multilingual", "Good cross-lingual retrieval"] },
+    { label: "Cohere embed-v3", values: ["1024", "Production search", "Input-type prefix support"] },
+  ]}
+/>
+
+### Dimensionality reduction (Matryoshka)
+
+```python
+# OpenAI: request fewer dimensions to save storage
+resp = client.embeddings.create(
+    model="text-embedding-3-large",
+    input=text,
+    dimensions=256,   # truncates from 3072 → 256
+)
+```
+
+<Callout variant="warning" title="Shorter dims = less recall">
+Matryoshka truncation trades storage for quality. 256 dims is fine for broad recall; use 1024+ for precision-critical retrieval. Always re-benchmark recall@k after changing dimensions.
+</Callout>
+
+### Input-type prefixes (Cohere / E5)
+
+```python
+# These models expect a prefix to distinguish query vs document
+query = "search_query: how to debug OOMKilled"
+doc   = "search_document: pods killed for exceeding memory limits..."
+```
+
+Forgetting the prefix silently wrecks retrieval — the model was trained to treat them differently.
+
+---
+
+## 4. Similarity Metrics
+
+| Metric | When to use | Range |
+|--------|-------------|-------|
+| **Cosine** | Default; direction matters, not magnitude | 0–1 (normalized) |
+| **Dot product** | Fastest; only if embeddings are normalized | unbounded |
+| **Euclidean (L2)** | Magnitude matters; image/some embeddings | 0–∞ |
+
+```python
+import numpy as np
+
+def cosine_sim(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+# If embeddings are L2-normalized, dot product == cosine
+dot = np.dot(a, b)   # use this for speed in production
+```
+
+<Callout variant="tip" title="Normalize once, use dot product">
+L2-normalize embeddings at index time. Then cosine similarity collapses to a dot product — the fastest possible comparison. Most vector DBs do this automatically; verify it.
+</Callout>
+
+---
+
+## 5. Vector Index Types
+
+<ComparisonTable
+  title="Index types by scale"
+  columns={["Accuracy", "Speed", "Best For"]}
+  rows={[
+    { label: "Flat (brute force)", values: ["Exact", "Slow at scale", "<100K vectors"] },
+    { label: "HNSW", values: ["High", "Fast", "Default; <10M vectors"] },
+    { label: "IVF", values: ["Good", "Fast", "Medium scale; tunable nprobe"] },
+    { label: "IVF-PQ", values: ["Approx.", "Very fast", "Memory-constrained, huge scale"] },
+    { label: "DiskANN", values: ["High", "Fast", "100M+ vectors, disk-based"] },
+  ]}
+/>
+
+### HNSW parameters (the default for most DBs)
+
+| Param | Effect |
+|------|--------|
+| `M` | Max graph connections. Higher = better recall, more memory. (16–48) |
+| `ef_construction` | Build-time search width. Higher = better index, slower build. (200–500) |
+| `ef_search` | Query-time search width. Higher = better recall, slower query. (50–200) |
+
+<Callout variant="note" title="Tune ef_search at query time">
+`ef_search` can be set per-query, so you can offer a fast default and a "deep search" mode that raises it. This is the cheapest recall lever you have.
+</Callout>
+
+---
+
+## 6. Re-Ranking Pipelines
+
+The single biggest quality upgrade in RAG: retrieve a large candidate set with cheap embeddings, then re-rank with a cross-encoder.
+
+```text
+Query → embed → vector search top-50 → cross-encoder re-rank → top-5 to LLM
+```
+
+### Why re-ranking works
+
+- **Bi-encoder (embedding)**: query and doc encoded separately, compared by similarity. Fast, scalable, but shallow.
+- **Cross-encoder (re-ranker)**: query and doc encoded *together*. Slower, but captures fine-grained relevance.
+
+### Re-ranker options
+
+```python
+# Cohere re-rank (hosted)
+import cohere
+co = cohere.Client()
+results = co.rerank(
+    model="rerank-english-v3.0",
+    query="how to fix CrashLoopBackOff",
+    documents=chunks,
+    top_n=5,
+)
+
+# BGE re-ranker (self-hosted)
+from FlagEmbedding import FlagReranker
+reranker = FlagReranker("BAAI/bge-reranker-large")
+scores = reranker.compute_score([[query, doc] for doc in chunks])
+```
+
+<Callout variant="tip" title="Retrieve wide, re-rank narrow">
+Retrieve 50–100 candidates with vector search, then re-rank to 5–10 for the LLM. The cross-encoder is 100× more accurate but 100× slower — so you run it on 50 docs, not 1M. This pattern gives near-cross-encoder quality at near-bi-encoder cost.
+</Callout>
+
+### Hybrid search (keyword + vector)
+
+```python
+# BM25 (keyword) + vector, fused with Reciprocal Rank Fusion
+def rrf(bm25_ranked, vec_ranked, k=60):
+    scores = {}
+    for rank, doc in enumerate(bm25_ranked):
+        scores[doc] = scores.get(doc, 0) + 1 / (k + rank)
+    for rank, doc in enumerate(vec_ranked):
+        scores[doc] = scores.get(doc, 0) + 1 / (k + rank)
+    return sorted(scores, key=scores.get, reverse=True)
+```
+
+Hybrid beats pure vector on queries with exact terms (error codes, IDs, function names) that embeddings fuzzy away.
+
+---
+
+## 7. Production Tuning Checklist
+
+<ChecklistBox title="RAG quality checklist" items={[
+  "✅ **Chunk by structure** — split on headings/code boundaries, not just token count.",
+  "✅ **Add overlap** — 10–20% of chunk size to avoid split-context loss.",
+  "✅ **Pick the right embedding** — match model to language, domain, and context length.",
+  "✅ **Use input-type prefixes** if your model needs them (Cohere, E5).",
+  "✅ **Normalize embeddings** — enables fast dot-product similarity.",
+  "✅ **Retrieve wide** — top-50 to top-100 from vector search.",
+  "✅ **Re-rank with a cross-encoder** — the biggest single quality win.",
+  "✅ **Try hybrid search** — fuse BM25 + vector with RRF for exact-term queries.",
+  "✅ **Add metadata filters** — restrict by source, date, category before vector search.",
+  "✅ **Evaluate with recall@k** — measure retrieval, not just vibes. Fix retrieval before the prompt."
+]} />
+
+<Callout variant="warning" title="Don't skip evaluation">
+Build a small golden set (50–100 query→expected-doc pairs) and measure recall@5 before and after every change. Without numbers, every "improvement" is a guess. Recall@k is the metric that correlates with end-to-end RAG quality.
+</Callout>

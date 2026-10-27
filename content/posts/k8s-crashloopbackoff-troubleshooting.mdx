@@ -1,0 +1,132 @@
+---
+title: "Kubernetes Pod CrashLoopBackOff Troubleshooting"
+slug: k8s-crashloopbackoff-troubleshooting
+description: "A problem-first guide to diagnosing and fixing CrashLoopBackOff errors — from logs and events to common root causes."
+date: "2025-06-25"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: true
+relatedArticles: ["devsecops-hardening-checklist", "kubernetes-debugging-k9s-kubectl", "kubernetes-resource-quotas-limits", "kubernetes-autcaling-hpa-keda", "kubernetes-cluster-backup-disaster-recovery"]
+image: https://cdn.activenerds.com/images/posts/k8s-crashloopbackoff-troubleshooting.png
+imageAlt: "Terminal visualization showing kubectl logs output with error highlighting in slate and teal"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **ConfigMap/Secret mounting**: Verify the names match exactly.
+- **Liveness probe tuning**: Set `initialDelaySeconds` to longer than your app's startup time.
+- **RBAC troubleshooting**: Check the service account attached to the pod:.
+- **Resource quota adjustments**: Increase memory limits or optimize your app's memory usage.
+</Callout>
+
+CrashLoopBackOff is the Kubernetes error everyone loves to hate. Your pod starts, crashes, Kubernetes restarts it, it crashes again — and the cycle continues with increasing back-off delays. It's frustrating, but it's also one of the most diagnosable K8s errors once you know the pattern.
+
+## What CrashLoopBackOff Actually Means
+
+CrashLoopBackOff is not a root cause — it's a symptom. It means your container's main process is exiting non-zero, and Kubernetes is restarting it according to its restart policy. The back-off delays increase exponentially: 10s, 20s, 40s, 80s, up to a cap of 5 minutes.
+
+The key to debugging is understanding that the crash happens *before* the back-off. Your container starts, runs for some time (possibly milliseconds), exits, and *then* Kubernetes applies the back-off. The actual error is in the container's exit, not in the back-off itself.
+
+## Diagnostic Commands
+
+Work through these in order — each gives you progressively more information:
+
+### 1. Check previous container logs
+```bash
+kubectl logs <pod-name> --previous
+```
+The `--previous` flag is critical. Without it, you get logs from the *current* (restarting) container, which are often empty. `--previous` shows logs from the last crashed instance.
+
+### 2. Describe the pod
+```bash
+kubectl describe pod <pod-name>
+```
+Look at the Events section at the bottom. This shows the timeline of container creation, starts, and exits. The exit code is particularly important:
+- Exit 0: The process exited successfully (but K8s expected it to keep running)
+- Exit 1: General error
+- Exit 137: OOMKilled or SIGKILL
+- Exit 139: SIGSEGV (segfault)
+
+### 3. Check events
+```bash
+kubectl get events --field-selector involvedObject.name=<pod-name> --sort-by='.lastTimestamp'
+```
+
+### 4. Exec into the pod (if it stays up briefly)
+```bash
+kubectl exec -it <pod-name> -- /bin/sh
+```
+If the pod crashes too fast for exec, try adding a sleep command to the entrypoint temporarily.
+
+## Common Root Causes
+
+### Missing ConfigMaps or Secrets
+The most common cause. Your container expects environment variables or files that don't exist:
+
+```bash
+# Check if config exists
+kubectl get configmap <config-name>
+kubectl get secret <secret-name>
+
+# Check if it's mounted
+kubectl describe pod <pod-name> | grep -A5 Volumes
+```
+
+### Failed Health Checks
+If your liveness probe fails too quickly, K8s kills the container before it's ready. This looks like a crash but is actually K8s doing its job:
+
+```yaml
+# Fix: increase initialDelaySeconds
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30  # Give the app time to start
+  periodSeconds: 10
+```
+
+### Permission Issues
+The container's user doesn't have permission to read/write required files:
+
+```bash
+# Check the user
+kubectl exec <pod-name> -- id
+# Check file permissions
+kubectl exec <pod-name> -- ls -la /app
+```
+
+### Resource Limits
+The container exceeds its memory limit and gets OOMKilled (exit 137):
+
+```bash
+kubectl describe pod <pod-name> | grep -A5 "Last State"
+# Look for "Reason: OOMKilled"
+```
+
+## Fixing Each Cause
+
+**ConfigMap/Secret mounting**: Verify the names match exactly. K8s won't error on a missing configmap reference in some cases — the container just gets empty values.
+
+**Liveness probe tuning**: Set `initialDelaySeconds` to longer than your app's startup time. If startup takes 20 seconds, set it to 30.
+
+**RBAC troubleshooting**: Check the service account attached to the pod:
+```bash
+kubectl get pod <pod-name> -o jsonpath='{.spec.serviceAccountName}'
+```
+
+**Resource quota adjustments**: Increase memory limits or optimize your app's memory usage.
+
+<Callout type="warning">
+A common gotcha: if your container's command overrides the Dockerfile ENTRYPOINT (not just CMD), you might be skipping critical initialization. Check if your pod spec sets `command` when the image expects an entrypoint script to run.
+</Callout>
+
+## Preventing Future CrashLoops
+
+- **PreStop hooks**: Give your app time to shut down gracefully.
+- **Graceful shutdown**: Handle SIGTERM in your application and clean up within `terminationGracePeriodSeconds`.
+- **PodDisruptionBudgets**: Protect against voluntary disruptions during node maintenance.
+
+The pattern is always the same: check previous logs, look at the exit code, identify the root cause from the error message, and fix it. Once you've done this a few times, CrashLoopBackOff becomes a 5-minute fix instead of a 30-minute debugging session.
+
+

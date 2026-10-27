@@ -1,0 +1,245 @@
+---
+title: "Kubernetes Observability with Prometheus & Grafana"
+slug: kubernetes-observability-prometheus-grafana
+description: "Set up production-grade observability for K8s with Prometheus, Grafana, and AlertManager — metrics, dashboards, and alerts."
+date: "2025-10-29"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: true
+relatedArticles: ["kubernetes-autcaling-hpa-keda", "kubernetes-multi-cluster-management", "kubernetes-rbac-configuration", "secrets-management-kubernetes-vault", "devsecops-hardening-checklist"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-observability-prometheus-grafana.png
+imageAlt: "Kubernetes observability with Prometheus and Grafana — metrics collection dashboards and alerting for K8s clusters"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Set up production-grade observability for K8s with Prometheus, Grafana, and AlertManager.
+- **Key Capabilities**: metrics, dashboards, and alerts.
+- **Observability Pillars in K8s**: Apply structured configurations and validated production patterns.
+- **Prometheus Setup**: Apply structured configurations and validated production patterns.
+</Callout>
+
+You can't fix what you can't see. In [Kubernetes](/articles/kubernetes-autcaling-hpa-keda), where workloads are ephemeral and failures are distributed, observability isn't a luxury — it's the difference between a 5-minute fix and a 2-hour outage. The Prometheus + Grafana + AlertManager stack is the de facto standard for K8s observability, and this guide walks you through setting it up properly.
+
+## Observability Pillars in K8s
+
+### Metrics vs Logs vs Traces
+
+- **Metrics** — numeric time-series data (CPU, memory, request rate). Best for alerting and dashboards. Prometheus.
+- **Logs** — discrete events with text/JSON payloads. Best for debugging specific failures. Loki or Elasticsearch.
+- **Traces** — request-path spans across services. Best for understanding latency in distributed systems. Jaeger or Tempo.
+
+This guide focuses on metrics — the first pillar and the foundation of alerting.
+
+### USE and RED Methods
+
+Two frameworks for deciding what to collect:
+
+**USE Method** (for infrastructure — nodes, disks, networks):
+- **U**tilization — how busy is the resource?
+- **S**aturation — how much queuing?
+- **E**rrors — how many failed operations?
+
+**RED Method** (for services):
+- **R**ate — requests per second
+- **E**rrors — error rate
+- **D**uration — latency distribution
+
+<Callout type="info">
+Start with RED for every service and USE for every node. These two frameworks cover 80% of what you need to detect and diagnose incidents. Add custom business metrics later, not first.
+</Callout>
+
+## Prometheus Setup
+
+### kube-prometheus-stack
+
+The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, AlertManager, and node-exporter into a single install. It includes pre-built dashboards and alerting rules for Kubernetes itself.
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  --set prometheus.prometheusSpec.retention=30d \
+  --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName=gp3 \
+  --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage=50Gi
+```
+
+### ServiceMonitor CRDs
+
+ServiceMonitor CRDs tell Prometheus which services to scrape. The chart includes ServiceMonitors for K8s components (kubelet, kube-apiserver, kube-controller-manager). For your own services:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: my-app
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: my-app
+  endpoints:
+  - port: metrics
+    interval: 15s
+    path: /metrics
+```
+
+The `release: kube-prometheus-stack` label is how Prometheus discovers ServiceMonitors. Don't forget it — it's the #1 reason custom metrics don't show up.
+
+### Recording Rules
+
+Recording rules pre-compute expensive queries. If you have a dashboard panel that queries `rate(http_requests_total[5m])` for 100 services every 15 seconds, that's expensive. Pre-compute it:
+
+```yaml
+groups:
+- name: http_metrics
+  rules:
+  - record: job:http_request_rate5m
+    expr: sum by (job) (rate(http_requests_total[5m]))
+  - record: job:http_error_rate5m
+    expr: sum by (job, status) (rate(http_requests_total{status=~"5.."}[5m]))
+```
+
+## Grafana Dashboards
+
+### Cluster Overview Dashboard
+
+The kube-prometheus-stack includes a cluster overview dashboard out of the box. Key panels:
+
+- Cluster CPU/Memory utilization (USE)
+- Pod count and pending/failed pods
+- Node readiness
+- K8s API server request rate and latency (RED)
+
+### Namespace Drill-Down
+
+Create a dashboard with a namespace variable for drill-down:
+
+```promql
+# CPU usage by pod in selected namespace
+sum by(pod) (rate(container_cpu_usage_seconds_total{namespace="$namespace"}[5m]))
+
+# Memory usage by pod
+sum by(pod) (container_memory_working_set_bytes{namespace="$namespace"})
+
+# Pod restart count
+sum by(pod) (kube_pod_container_status_restarts_total{namespace="$namespace"})
+```
+
+### Pod-Level Panels
+
+For individual pod health:
+
+- CPU and memory limits vs usage (are you near throttling?)
+- Container restart count
+- Network I/O
+- Custom application metrics (RED signals)
+
+## AlertManager Configuration
+
+### Alerting Rules
+
+Start with the pre-built alerts from kube-prometheus-stack. Key alerts:
+
+- `KubePodCrashLoopBackOff` — pod restarting repeatedly
+- `KubeNodeNotReady` — node is down
+- `KubeAPIDown` — API server unreachable
+- `CPUThrottlingHigh` — pods being throttled
+
+Add custom alerts for your services:
+
+```yaml
+groups:
+- name: app_alerts
+  rules:
+  - alert: HighErrorRate
+    expr: |
+      sum(rate(http_requests_total{status=~"5.."}[5m])) /
+      sum(rate(http_requests_total[5m])) > 0.05
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Error rate above 5% for 5 minutes"
+      description: "{{ $labels.job }} is returning 5xx errors at {{ $value | humanizePercentage }}"
+```
+
+### Notification Routing
+
+Route alerts by severity:
+
+```yaml
+route:
+  receiver: default
+  group_by: ['alertname', 'namespace']
+  routes:
+  - matchers: ['severity="critical"']
+    receiver: pagerduty
+  - matchers: ['severity="warning"']
+    receiver: slack
+  - matchers: ['alertname=~"Watchdog|InfoInhibitor"']
+    receiver: null
+```
+
+<Warning>
+**Alert fatigue is the #1 killer of alerting systems.** If your team gets 50 alerts a day, they'll ignore all of them. Aim for fewer than 5 actionable alerts per day. If an alert doesn't require human action, it's a log, not an alert.
+</Warning>
+
+### Silencing and Inhibition
+
+During maintenance, silence alerts:
+
+```bash
+amtool silence add --comment "Planned maintenance" \
+  --duration 2h \
+  alertname=KubeNodeNotReady
+```
+
+Inhibition rules prevent alert storms — if a node is down, suppress all pod alerts on that node:
+
+```yaml
+inhibit_rules:
+- source_matchers: ['alertname="KubeNodeNotReady"']
+  target_matchers: ['alertname=~"KubePod.*"']
+  equal: ['node']
+```
+
+## Scaling and Long-Term Storage
+
+### Thanos vs Mimir
+
+Prometheus stores data locally. For long-term retention and global querying, you need a remote storage backend:
+
+- **Thanos** — sidecar uploads blocks to S3/GCS. Query store for global view. Most popular.
+- **Mimir** (Grafana) — horizontally scalable remote write backend. Better for very high cardinality.
+
+```yaml
+# Enable remote write in Prometheus
+prometheusSpec:
+  remoteWrite:
+  - url: http://thanos-receive:19291/api/v1/receive
+```
+
+### Cost Management
+
+Metrics storage is expensive. Reduce cost by:
+- Lowering scrape intervals for non-critical services (30s instead of 15s)
+- Using recording rules to pre-aggregate high-cardinality metrics
+- Setting retention policies (30 days hot, 1 year in object storage)
+
+<Callout type="tip">
+**Movement break:** Dashboard setup involves a lot of screen time. Every 25 minutes, do a "desk reset": stand up, do 5 shoulder rolls, look at something far away for 20 seconds, then sit back down. Your posture and eyes will thank you during those long incident investigations.
+</Callout>
+
+## Summary
+
+Start with kube-prometheus-stack for a working observability baseline in under an hour. Use RED for services and USE for infrastructure. Keep alerts to fewer than 5 per day — every alert should require human action. When you outgrow single-node Prometheus, add Thanos for long-term storage and global querying. The goal isn't to collect everything — it's to detect, diagnose, and resolve incidents fast.
+
+

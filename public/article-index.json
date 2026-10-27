@@ -1,0 +1,2166 @@
+[
+  {
+    "slug": "deep-work-environment-setup",
+    "title": "Deep Work Environment Setup",
+    "description": "Set up an environment for deep work — noise, lighting, notification isolation, and the physical cues that signal focus time.",
+    "date": "2026-08-13",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/deep-work-environment-setup"
+  },
+  {
+    "slug": "terraform-module-design-patterns",
+    "title": "Terraform Module Design Patterns",
+    "description": "Design reusable Terraform modules — composition, versioning, variables vs locals, and avoiding the module that wraps one resource.",
+    "date": "2026-08-10",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/terraform-module-design-patterns"
+  },
+  {
+    "slug": "blue-green-deployment-kubernetes",
+    "title": "Blue-Green Deployment on Kubernetes",
+    "description": "Implement blue-green deployments on Kubernetes — instant cutover, two environments, traffic switching, and when it beats canary.",
+    "date": "2026-08-07",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/blue-green-deployment-kubernetes"
+  },
+  {
+    "slug": "hackathon-team-formation-strategies",
+    "title": "Hackathon Team Formation Strategies",
+    "description": "Form a winning hackathon team — skill balance, team size, idea alignment, and avoiding the team that implodes by hour six.",
+    "date": "2026-08-04",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/hackathon-team-formation-strategies"
+  },
+  {
+    "slug": "production-rag-patterns-at-scale",
+    "title": "Production RAG Patterns at Scale: Keynotes from Ai4 2026",
+    "description": "Three production Retrieval-Augmented Generation (RAG) architectures from the Ai4 keynote — hybrid sparse/dense retrieval, cross-encoder reranking, and automated LLM-as-a-judge eval loops.",
+    "date": "2026-08-04",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/production-rag-patterns-at-scale"
+  },
+  {
+    "slug": "developer-conference-talk-templates",
+    "title": "Developer Conference Talk Templates",
+    "description": "Practical talk templates for developer conferences — the deep-dive, the war story, the intro, and how to structure a talk that lands.",
+    "date": "2026-08-01",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/developer-conference-talk-templates"
+  },
+  {
+    "slug": "fitness-smartwatch-for-developers",
+    "title": "Fitness Smartwatch for Developers",
+    "description": "A developer's guide to fitness smartwatches — stand reminders, move tracking, and which features actually change sedentary behavior.",
+    "date": "2026-07-29",
+    "category": "gear-gadgets",
+    "tags": [
+      "fitness-trackers",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/fitness-smartwatch-for-developers"
+  },
+  {
+    "slug": "ergonomic-monitor-stand-guide",
+    "title": "Ergonomic Monitor Stand Guide",
+    "description": "Choose an ergonomic monitor stand or arm — height, depth, dual-monitor setups, and avoiding the neck strain of a too-low screen.",
+    "date": "2026-07-26",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ergonomic-monitor-stand-guide"
+  },
+  {
+    "slug": "owasp-top-10-cloud-native",
+    "title": "OWASP Top 10 for Cloud-Native",
+    "description": "Map the OWASP Top 10 to cloud-native and Kubernetes risks — broken access control, misconfiguration, and injection in containerized workloads.",
+    "date": "2026-07-23",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/owasp-top-10-cloud-native"
+  },
+  {
+    "slug": "kubernetes-certificate-management-cert-manager",
+    "title": "Kubernetes Certificate Management with cert-manager",
+    "description": "Manage TLS certificates in Kubernetes with cert-manager — Let's Encrypt, self-signed CAs, automated renewal, and Ingress integration.",
+    "date": "2026-07-20",
+    "category": "devsecops-security",
+    "tags": [
+      "kubernetes",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-certificate-management-cert-manager"
+  },
+  {
+    "slug": "desk-cycling-machine-benefits",
+    "title": "Desk Cycling Machine Benefits",
+    "description": "Under-desk cycling machines for developers — real benefits, the focus tradeoff, and whether a pedaler actually helps you move more.",
+    "date": "2026-07-17",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/desk-cycling-machine-benefits"
+  },
+  {
+    "slug": "walking-pad-under-desk-review",
+    "title": "Walking Pad Under Desk Review",
+    "description": "An honest review of under-desk walking pads for developers — what they're good for, the noise and speed tradeoffs, and who should skip them.",
+    "date": "2026-07-14",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "standing-desk",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/walking-pad-under-desk-review"
+  },
+  {
+    "slug": "container-image-registry-comparison",
+    "title": "Container Image Registry Comparison",
+    "description": "Compare container image registries — Docker Hub, ECR, GCR, Harbor, and GHCR — on pricing, security, self-hosting, and CI integration.",
+    "date": "2026-07-11",
+    "category": "containers-kubernetes",
+    "tags": [
+      "docker",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/container-image-registry-comparison"
+  },
+  {
+    "slug": "ergonomic-keyboard-for-carpal-tunnel",
+    "title": "The Best Ergonomic Keyboards for Carpal Tunnel: A Programmer's Guide",
+    "description": "A clinical and engineering evaluation of split, tented, and concave keyboards for carpal tunnel syndrome — actuation forces, tenting angles, and firmware remapping.",
+    "date": "2026-07-08",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ergonomic-keyboard-for-carpal-tunnel"
+  },
+  {
+    "slug": "kubernetes-statefulset-patterns-guide",
+    "title": "Kubernetes StatefulSet Patterns Guide",
+    "description": "Master Kubernetes StatefulSets — stable identities, ordered rollout, persistent volume claims, and when StatefulSet beats Deployment.",
+    "date": "2026-07-08",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-statefulset-patterns-guide"
+  },
+  {
+    "slug": "prompt-engineering-techniques-guide",
+    "title": "Prompt Engineering Techniques Guide",
+    "description": "A practical guide to prompt engineering — few-shot, chain-of-thought, role prompting, and structured outputs for reliable LLM results.",
+    "date": "2026-07-05",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/prompt-engineering-techniques-guide"
+  },
+  {
+    "slug": "wireless-ergonomic-mouse-guide",
+    "title": "How to Choose a Wireless Ergonomic Mouse: The Developer's Field Guide",
+    "description": "Cutting through the marketing fluff: vertical mice, contoured palm grips, and trackballs evaluated for multi-monitor developer workflows, forearm pronation, and DPI precision.",
+    "date": "2026-07-05",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/wireless-ergonomic-mouse-guide"
+  },
+  {
+    "slug": "mixed-precision-training-pytorch",
+    "title": "Mixed Precision Training in PyTorch",
+    "description": "Speed up PyTorch training and cut GPU memory with mixed precision — AMP, autocast, GradScaler, and the pitfalls that break convergence.",
+    "date": "2026-07-02",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/mixed-precision-training-pytorch"
+  },
+  {
+    "slug": "feature-flags-implementation-guide",
+    "title": "Feature Flags Implementation Guide",
+    "description": "A practical guide to feature flags — rollout strategies, targeting, kill switches, and avoiding flag debt over time.",
+    "date": "2026-06-29",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/feature-flags-implementation-guide"
+  },
+  {
+    "slug": "progressive-delivery-argo-rollouts",
+    "title": "Progressive Delivery with Argo Rollouts",
+    "description": "Move beyond basic canary deploys with Argo Rollouts — blue-green, canary analysis, and automated promotion and rollback.",
+    "date": "2026-06-26",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/progressive-delivery-argo-rollouts"
+  },
+  {
+    "slug": "ergonomic-mechanical-keyboard-guide",
+    "title": "The Ultimate Guide to Ergonomic Mechanical Keyboards for Coders",
+    "description": "Bridging the gap between tactile mechanical typing and orthopedic ergonomics — hot-swap switches, columnar layouts, QMK/ZMK firmware, and thumb clusters.",
+    "date": "2026-06-25",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ergonomic-mechanical-keyboard-guide"
+  },
+  {
+    "slug": "hackathon-judging-criteria-guide",
+    "title": "Hackathon Judging Criteria Explained",
+    "description": "Understand hackathon judging criteria — what judges actually score, how to optimize your pitch, and what wins beyond the code.",
+    "date": "2026-06-23",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/hackathon-judging-criteria-guide"
+  },
+  {
+    "slug": "posture-corrector-device-review",
+    "title": "Posture Corrector Devices: Reviewed",
+    "description": "An honest review of posture corrector devices — do they work, who they help, and why they're a crutch, not a fix.",
+    "date": "2026-06-20",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/posture-corrector-device-review"
+  },
+  {
+    "slug": "wrist-rest-keyboard-guide",
+    "title": "Wrist Rests: A Buying Guide",
+    "description": "Do wrist rests actually help? A practical guide to choosing (or skipping) a wrist rest, materials, height, and the ergonomics that matter.",
+    "date": "2026-06-17",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/wrist-rest-keyboard-guide"
+  },
+  {
+    "slug": "secrets-scanning-ci-pipelines",
+    "title": "Secrets Scanning in CI Pipelines",
+    "description": "Catch leaked secrets before they ship — tools like Gitleaks and TruffleHog, pre-commit hooks, and fail-closed CI policy.",
+    "date": "2026-06-14",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/secrets-scanning-ci-pipelines"
+  },
+  {
+    "slug": "5-minute-desk-reset",
+    "title": "The 5-Minute Desk Reset: Postural Re-alignment Between Meetings",
+    "description": "A zero-equipment, 5-minute physical protocol engineered to reverse gluteal amnesia, hip flexor shortening, and blood pooling during back-to-back meeting blocks.",
+    "date": "2026-06-12",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/5-minute-desk-reset"
+  },
+  {
+    "slug": "cloud-security-posture-management",
+    "title": "Cloud Security Posture Management",
+    "description": "Cloud Security Posture Management (CSPM) explained — continuous misconfiguration detection, tools, and turning alerts into fixes.",
+    "date": "2026-06-11",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/cloud-security-posture-management"
+  },
+  {
+    "slug": "lunch-break-workouts-developers",
+    "title": "Lunch Break Workouts for Developers",
+    "description": "Short, effective lunch break workouts for developers — 15- and 30-minute options that leave you sharper, not wrecked, for the afternoon.",
+    "date": "2026-06-08",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/lunch-break-workouts-developers"
+  },
+  {
+    "slug": "stretching-wrist-pain-relief",
+    "title": "Stretching for Wrist Pain Relief",
+    "description": "Targeted wrist and forearm stretches for keyboard-heavy work — relieve strain, prevent RSI, and know when it's more than tightness.",
+    "date": "2026-06-05",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/stretching-wrist-pain-relief"
+  },
+  {
+    "slug": "desk-yoga-routines-programmers",
+    "title": "Desk Yoga Routines for Programmers",
+    "description": "A practical desk yoga routine for programmers — seated twists, spinal mobility, and breath work you can do without leaving your chair.",
+    "date": "2026-06-02",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/desk-yoga-routines-programmers"
+  },
+  {
+    "slug": "container-image-signing-cosign",
+    "title": "Container Image Signing with cosign",
+    "description": "Sign and verify container images with cosign and Sigstore — keyless signing, transparency logs, and CI integration for supply chain security.",
+    "date": "2026-05-30",
+    "category": "containers-kubernetes",
+    "tags": [
+      "docker",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/container-image-signing-cosign"
+  },
+  {
+    "slug": "single-tasking-vs-multitasking",
+    "title": "Single-Tasking vs Multitasking for Engineers",
+    "description": "The evidence on single-tasking vs multitasking for deep technical work — why context switching costs are real and how to structure your day.",
+    "date": "2026-05-30",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/single-tasking-vs-multitasking"
+  },
+  {
+    "slug": "standing-desk-vs-treadmill-desk",
+    "title": "Standing Desk vs. Treadmill Desk: Which Workstation Actually Fits a Software Career?",
+    "description": "Neither is a silver bullet. A head-to-head biomechanical and cognitive comparison between height-adjustable desks and under-desk walking pads for developers.",
+    "date": "2026-05-28",
+    "category": "gear-gadgets",
+    "tags": [
+      "standing-desk",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/standing-desk-vs-treadmill-desk"
+  },
+  {
+    "slug": "canary-deployment-strategies-kubernetes",
+    "title": "Canary Deployment Strategies on Kubernetes",
+    "description": "Roll out safely with canary deployments — traffic splitting, metrics gating, and tooling choices (Argo Rollouts, Flagger, service mesh) for K8s.",
+    "date": "2026-05-27",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/canary-deployment-strategies-kubernetes"
+  },
+  {
+    "slug": "kubernetes-pod-security-standards",
+    "title": "Kubernetes Pod Security Standards",
+    "description": "Replace PodSecurityPolicy with Pod Security Standards — privileged, baseline, and restricted profiles, plus enforcement modes.",
+    "date": "2026-05-27",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-pod-security-standards"
+  },
+  {
+    "slug": "kubernetes-multi-cluster-management",
+    "title": "Kubernetes Multi-Cluster Management",
+    "description": "Patterns for managing multiple Kubernetes clusters — fleet management, GitOps at scale, and tools like Cluster API and ArgoCD ApplicationSets.",
+    "date": "2026-05-24",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-multi-cluster-management"
+  },
+  {
+    "slug": "tech-meetup-speaker-preparation",
+    "title": "Preparing to Speak at a Tech Meetup",
+    "description": "A practical prep guide for your first tech meetup talk — topic selection, structure, rehearsal, and surviving the Q&A without imploding.",
+    "date": "2026-05-24",
+    "category": "events-community",
+    "tags": [
+      "conferences",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/tech-meetup-speaker-preparation"
+  },
+  {
+    "slug": "transformer-architecture-explained",
+    "title": "Transformer Architecture Explained",
+    "description": "A practical, no-math-heavy walkthrough of the transformer architecture — attention, positional encoding, and why it scales.",
+    "date": "2026-05-21",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/transformer-architecture-explained"
+  },
+  {
+    "slug": "vertical-mouse-ergonomic-review",
+    "title": "Vertical Mouse: Ergonomic Review",
+    "description": "An honest review of vertical mice for wrist pain — what they help, what they don't, and whether switching is worth it for developers.",
+    "date": "2026-05-21",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/vertical-mouse-ergonomic-review"
+  },
+  {
+    "slug": "walking-1-1",
+    "title": "How to Run a Walking 1:1: The Manager and Engineer's Field Guide",
+    "description": "Why walking side-by-side unlocks high-trust engineering 1:1 conversations — plus logistics, route planning, and how to capture action items without typing on your phone.",
+    "date": "2026-05-20",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/walking-1-1"
+  },
+  {
+    "slug": "diffusion-model-optimization-techniques",
+    "title": "Diffusion Model Optimization Techniques",
+    "description": "Practical techniques to optimize diffusion models — step reduction, latent diffusion, classifier-free guidance, and memory-efficient training.",
+    "date": "2026-05-18",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/diffusion-model-optimization-techniques"
+  },
+  {
+    "slug": "ergonomic-footrest-desk-setup",
+    "title": "Do You Need an Ergonomic Footrest?",
+    "description": "When a footrest helps your desk setup, when it's unnecessary, and how to choose one — a practical take for programmers and desk workers.",
+    "date": "2026-05-18",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ergonomic-footrest-desk-setup"
+  },
+  {
+    "slug": "cloud-security-best-practices-aws",
+    "title": "Cloud Security Best Practices for AWS",
+    "description": "A practical AWS security checklist for engineers — IAM, network, data, and monitoring controls that actually reduce risk without theater.",
+    "date": "2026-05-15",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/cloud-security-best-practices-aws"
+  },
+  {
+    "slug": "kubernetes-network-security-policies",
+    "title": "Kubernetes Network Security Policies",
+    "description": "Lock down pod-to-pod traffic with NetworkPolicies — default deny, allow-list patterns, and a zero-trust baseline for cluster networking.",
+    "date": "2026-05-12",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-network-security-policies"
+  },
+  {
+    "slug": "mobility-exercises-hip-flexors",
+    "title": "Mobility Exercises for Tight Hip Flexors",
+    "description": "Sitting shortens and weakens your hip flexors — targeted mobility work to restore range and counter the desk-bound posture.",
+    "date": "2026-05-09",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/mobility-exercises-hip-flexors"
+  },
+  {
+    "slug": "eye-rest-20-20-20-rule",
+    "title": "The 20-20-20 Rule for Eye Strain",
+    "description": "The 20-20-20 rule explained for screen workers — why it works, how to actually remember it, and what else reduces digital eye strain.",
+    "date": "2026-05-06",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/eye-rest-20-20-20-rule"
+  },
+  {
+    "slug": "15-minute-workouts-between-prs",
+    "title": "15-Minute Workouts You Can Do Between Pull Requests",
+    "description": "Three high-intensity strength templates — push, pull, legs — engineered for developers to train in the gap between submitting a PR and peer code review.",
+    "date": "2026-05-05",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/15-minute-workouts-between-prs"
+  },
+  {
+    "slug": "standing-desk-transition-schedule",
+    "title": "A Standing Desk Transition Schedule",
+    "description": "How to ease into a standing desk without wrecking your back or knees — a realistic ramp-up schedule for desk-bound engineers.",
+    "date": "2026-05-03",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "standing-desk",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/standing-desk-transition-schedule"
+  },
+  {
+    "slug": "kubernetes-resource-quotas-limits",
+    "title": "Kubernetes Resource Quotas & Limits",
+    "description": "Govern cluster resources with quotas and limits — namespace isolation, request/limit tuning, and avoiding noisy-neighbor and OOM headaches.",
+    "date": "2026-04-30",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-resource-quotas-limits"
+  },
+  {
+    "slug": "conferences-and-hackathons",
+    "title": "Staying Physically and Mentally Sharp at Tech Conferences and Hackathons",
+    "description": "Damage-control protocols for developers attending multi-day conferences and hackathons — surviving concrete expo floors, erratic sleep, and sensory overload.",
+    "date": "2026-04-28",
+    "category": "events-community",
+    "tags": [
+      "conferences",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/conferences-and-hackathons"
+  },
+  {
+    "slug": "containerd-vs-cri-o-runtime-comparison",
+    "title": "containerd vs CRI-O: Runtime Comparison",
+    "description": "A practical comparison of containerd and CRI-O container runtimes — architecture, performance, security, and which to pick for your K8s cluster.",
+    "date": "2026-04-27",
+    "category": "containers-kubernetes",
+    "tags": [
+      "docker",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/containerd-vs-cri-o-runtime-comparison"
+  },
+  {
+    "slug": "kubernetes-custom-controller-development",
+    "title": "Building a Kubernetes Custom Controller",
+    "description": "A practical guide to developing a Kubernetes custom controller with controller-runtime — CRDs, reconcile loops, and production patterns.",
+    "date": "2026-04-24",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-custom-controller-development"
+  },
+  {
+    "slug": "distributed-data-parallel-vs-model-parallel",
+    "title": "Distributed Data Parallel vs Model Parallel",
+    "description": "When to split data versus split the model — DDP, model parallelism, tensor parallelism, and choosing the right strategy for large model training.",
+    "date": "2026-04-21",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/distributed-data-parallel-vs-model-parallel"
+  },
+  {
+    "slug": "no-gym-strength-routine",
+    "title": "The Remote Developer's No-Gym Strength Routine",
+    "description": "A compact, progressive home strength protocol built with just adjustable dumbbells and a doorway pull-up bar — zero commute, minimal footprint, and real progressive overload.",
+    "date": "2026-04-20",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building",
+      "desk-stretches"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/no-gym-strength-routine"
+  },
+  {
+    "slug": "data-augmentation-techniques-pytorch",
+    "title": "Data Augmentation Techniques in PyTorch",
+    "description": "Practical data augmentation in PyTorch — transforms, Albumentations, and strategies that improve generalization without hurting training stability.",
+    "date": "2026-04-18",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/data-augmentation-techniques-pytorch"
+  },
+  {
+    "slug": "dopamine-detox-developers",
+    "title": "Dopamine Detox for Developers",
+    "description": "A practical, non-preachy take on dopamine detox for developers — reducing cheap stimulation to rebuild focus, without the usual wellness-influencer hype.",
+    "date": "2026-04-15",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/dopamine-detox-developers"
+  },
+  {
+    "slug": "slo-definition-reliability",
+    "title": "Defining Service Level Objectives",
+    "description": "Set meaningful SLOs for your services — error budgets, user-centric SLIs, and a practical process to avoid alerting fatigue and reduce engineer burnout.",
+    "date": "2026-04-12",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/slo-definition-reliability"
+  },
+  {
+    "slug": "gitops-argocd-flux-comparison",
+    "title": "GitOps with ArgoCD vs Flux",
+    "description": "Compare ArgoCD and Flux for GitOps on Kubernetes — architecture, multi-cluster, drift detection, and which fits your team delivery workflow best overall.",
+    "date": "2026-04-09",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/gitops-argocd-flux-comparison"
+  },
+  {
+    "slug": "virtual-hackathon-platform-comparison",
+    "title": "Virtual Hackathon Platform Comparison",
+    "description": "Compare the leading virtual hackathon platforms — judging, team formation, mentor channels, and which fits your event size, budget, and community goals.",
+    "date": "2026-04-06",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/virtual-hackathon-platform-comparison"
+  },
+  {
+    "slug": "noise-cancelling-headphones-focus",
+    "title": "Noise-Cancelling Headphones for Focus",
+    "description": "A practical guide to noise-cancelling headphones for deep work — ANC performance, comfort for long sessions, and what really matters most for engineers.",
+    "date": "2026-04-03",
+    "category": "gear-gadgets",
+    "tags": [
+      "affiliate",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/noise-cancelling-headphones-focus"
+  },
+  {
+    "slug": "rsi-prevention",
+    "title": "RSI Prevention for Programmers: What the Clinical Research Actually Says",
+    "description": "Why your new wrist brace isn't fixing your keyboard pain — evidence-based ergonomics, micro-break pacing protocols, and neutral joint mechanics for software engineers.",
+    "date": "2026-04-03",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "ergonomics",
+      "desk-stretches"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/rsi-prevention"
+  },
+  {
+    "slug": "standing-desk-mat-comparison",
+    "title": "Standing Desk Mat Comparison Guide",
+    "description": "The best standing desk mats compared — anti-fatigue, massage, and balance mats that keep you comfortable and subtly active while standing at your desk.",
+    "date": "2026-03-31",
+    "category": "gear-gadgets",
+    "tags": [
+      "standing-desk",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/standing-desk-mat-comparison"
+  },
+  {
+    "slug": "vulnerability-scanning-automation-ci",
+    "title": "Automating Vulnerability Scanning in CI",
+    "description": "Catch CVEs before they ship by automating vulnerability scanning in CI — image scanning, gating policies, and triage workflows that scale with your team.",
+    "date": "2026-03-28",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "docker"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/vulnerability-scanning-automation-ci"
+  },
+  {
+    "slug": "mtls-microservices-implementation",
+    "title": "Implementing mTLS Between Microservices",
+    "description": "Secure service-to-service traffic with mutual TLS — certificate management, service mesh options, and a practical rollout plan for Kubernetes clusters.",
+    "date": "2026-03-25",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/mtls-microservices-implementation"
+  },
+  {
+    "slug": "sleep-schedule-past-midnight",
+    "title": "Fixing Your Sleep Architecture When You Code Past Midnight",
+    "description": "You do not need to wake up at 5am to have restorative sleep. A circadian blueprint for night-owl engineers — blue light mechanics, cognitive wind-down, and social jetlag.",
+    "date": "2026-03-25",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/sleep-schedule-past-midnight"
+  },
+  {
+    "slug": "breathing-exercises-stress-engineers",
+    "title": "Breathing Exercises for Stressed Engineers",
+    "description": "Simple breathing exercises to calm an overstimulated nervous system during incidents and on-call — box breathing, physiological sighs, and more techniques.",
+    "date": "2026-03-22",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/breathing-exercises-stress-engineers"
+  },
+  {
+    "slug": "desk-stretching-neck-pain",
+    "title": "Desk Stretches for Neck Pain Relief",
+    "description": "Targeted desk stretches for neck pain — gentle movements you can do at your workstation to ease tension from hours of forward head posture at the screen.",
+    "date": "2026-03-19",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/desk-stretching-neck-pain"
+  },
+  {
+    "slug": "movement-and-debugging",
+    "title": "Why Movement Makes You a Better Debugger: The Neuroscience of Problem-Solving",
+    "description": "Why the solution to an intractable software bug appears when you step away for a walk — the cognitive mechanics between the Executive Control Network and the Default Mode Network.",
+    "date": "2026-03-18",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/movement-and-debugging"
+  },
+  {
+    "slug": "kubernetes-job-cronjob-patterns",
+    "title": "Kubernetes Job & CronJob Patterns",
+    "description": "Run batch workloads reliably in Kubernetes — Job patterns for parallelism, retries, and CronJob scheduling pitfalls every platform engineer should know.",
+    "date": "2026-03-16",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-job-cronjob-patterns"
+  },
+  {
+    "slug": "kubernetes-node-affinity-taints",
+    "title": "Kubernetes Node Affinity & Taints Guide",
+    "description": "Control pod placement in Kubernetes with node affinity and taints — scheduling rules for GPU nodes, dedicated workloads, and strict node isolation patterns.",
+    "date": "2026-03-13",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-node-affinity-taints"
+  },
+  {
+    "slug": "burnout-and-sitting",
+    "title": "Burnout, Prolonged Sitting, and the Neurobiological Feedback Loop",
+    "description": "The hidden biological connection between prolonged physical immobility, vagal nerve suppression, elevated cortisol, and developer burnout — plus how to break the cycle.",
+    "date": "2026-03-10",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/burnout-and-sitting"
+  },
+  {
+    "slug": "knowledge-distillation-model-compression",
+    "title": "Knowledge Distillation for Model Compression",
+    "description": "Shrink large models with knowledge distillation — teacher-student training, temperature scaling, and real deployment gains for faster, cheaper inference.",
+    "date": "2026-03-10",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/knowledge-distillation-model-compression"
+  },
+  {
+    "slug": "gradient-clipping-deep-learning",
+    "title": "Gradient Clipping for Stable Training",
+    "description": "Prevent exploding gradients with clipping — norm vs value clipping, when each helps, and PyTorch implementation patterns for stable training runs at scale.",
+    "date": "2026-03-07",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/gradient-clipping-deep-learning"
+  },
+  {
+    "slug": "attention-mechanism-explained",
+    "title": "The Attention Mechanism Explained Simply",
+    "description": "Understand the attention mechanism in transformers — queries, keys, values, and self-attention, explained without heavy math for ML practitioners to grasp.",
+    "date": "2026-03-04",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/attention-mechanism-explained"
+  },
+  {
+    "slug": "managing-context-switching-engineering",
+    "title": "Managing Context Switching in Engineering",
+    "description": "Strategies to reduce context-switching tax in engineering work — batching, async communication, and team norms.",
+    "date": "2026-03-01",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/managing-context-switching-engineering"
+  },
+  {
+    "slug": "time-blocking-software-engineers",
+    "title": "Time Blocking for Software Engineers",
+    "description": "A practical time-blocking system for engineers — calendar architecture, meeting protection, and deep work scheduling.",
+    "date": "2026-02-26",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/time-blocking-software-engineers"
+  },
+  {
+    "slug": "pomodoro-deep-work-engineering",
+    "title": "Pomodoro for Deep Work Engineering",
+    "description": "How to adapt the Pomodoro technique for software engineering — custom intervals, context switching, and flow protection.",
+    "date": "2026-02-23",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/pomodoro-deep-work-engineering"
+  },
+  {
+    "slug": "sustainable-pacing-oncall-rotations",
+    "title": "Sustainable Pacing for On-Call Rotations",
+    "description": "Evidence-based pacing strategies for on-call engineers — energy management, sleep protection, and recovery protocols.",
+    "date": "2026-02-20",
+    "category": "focus-productivity",
+    "tags": [
+      "habit-building",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/sustainable-pacing-oncall-rotations"
+  },
+  {
+    "slug": "focus-management-long-training-runs",
+    "title": "Focus Management During Long Training Runs",
+    "description": "How to maintain focus and energy during multi-hour ML training runs — monitoring strategies, movement, and cognitive load.",
+    "date": "2026-02-17",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/focus-management-long-training-runs"
+  },
+  {
+    "slug": "virtual-tech-events-online-meetups",
+    "title": "Virtual Tech Events and Online Meetups",
+    "description": "How to find, attend, and get value from virtual tech events — platforms, engagement tips, and building remote connections.",
+    "date": "2026-02-14",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/virtual-tech-events-online-meetups"
+  },
+  {
+    "slug": "tech-conference-networking-strategies",
+    "title": "Tech Conference Networking Strategies",
+    "description": "Practical networking strategies for introverted tech professionals at conferences — before, during, and after the event.",
+    "date": "2026-02-11",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/tech-conference-networking-strategies"
+  },
+  {
+    "slug": "hackathon-preparation-developers",
+    "title": "Hackathon Preparation Guide for Developers",
+    "description": "A complete hackathon prep guide for developers — team formation, idea selection, scope management, and survival tips.",
+    "date": "2026-02-08",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/hackathon-preparation-developers"
+  },
+  {
+    "slug": "local-tech-meetups-finding-guide",
+    "title": "Local Tech Meetups: Finding Guide",
+    "description": "How to find, join, and get value from local tech meetups — platforms, first-visit tips, and building your network.",
+    "date": "2026-02-05",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/local-tech-meetups-finding-guide"
+  },
+  {
+    "slug": "speak-at-tech-conferences",
+    "title": "How to Speak at Tech Conferences",
+    "description": "A step-by-step guide to landing your first tech conference talk — from CFP to slides to delivery and follow-up.",
+    "date": "2026-02-02",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/speak-at-tech-conferences"
+  },
+  {
+    "slug": "tech-hackathons-2026-calendar",
+    "title": "Tech Hackathons 2026 Calendar",
+    "description": "A curated calendar of the best tech hackathons in 2026 — AI/ML, Kubernetes, and DevSecOps events worldwide.",
+    "date": "2026-01-30",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/tech-hackathons-2026-calendar"
+  },
+  {
+    "slug": "standing-desk-converter-comparison",
+    "title": "Standing Desk Converter Comparison Review",
+    "description": "Can't afford a full standing desk? Compare the best standing desk converters — stability, height range, and value.",
+    "date": "2026-01-27",
+    "category": "gear-gadgets",
+    "tags": [
+      "standing-desk",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/standing-desk-converter-comparison"
+  },
+  {
+    "slug": "blue-light-glasses-effectiveness",
+    "title": "Blue Light Glasses: Effectiveness Review",
+    "description": "Do blue light glasses actually work? An evidence-based review of blue light blocking glasses for screen workers.",
+    "date": "2026-01-24",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/blue-light-glasses-effectiveness"
+  },
+  {
+    "slug": "monitor-arm-mount-standing-desk",
+    "title": "Monitor Arm Mount Review for Standing Desk",
+    "description": "Reviews of the best monitor arm mounts for standing desks — stability, cable management, and dual-monitor setups.",
+    "date": "2026-01-21",
+    "category": "gear-gadgets",
+    "tags": [
+      "standing-desk",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/monitor-arm-mount-standing-desk"
+  },
+  {
+    "slug": "ergonomic-mouse-wrist-pain-relief",
+    "title": "Ergonomic Mouse for Wrist Pain Relief",
+    "description": "The best ergonomic mice for programmers dealing with wrist pain — vertical, trackball, and roller bar options reviewed.",
+    "date": "2026-01-18",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ergonomic-mouse-wrist-pain-relief"
+  },
+  {
+    "slug": "fitness-tracker-standing-desk-users",
+    "title": "Fitness Tracker for Standing Desk Users",
+    "description": "Which fitness trackers work best with a standing desk setup — standing time tracking, posture reminders, and accuracy.",
+    "date": "2026-01-15",
+    "category": "gear-gadgets",
+    "tags": [
+      "fitness-trackers",
+      "standing-desk",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/fitness-tracker-standing-desk-users"
+  },
+  {
+    "slug": "ergonomic-chair-buying-guide-programmers",
+    "title": "Ergonomic Chair Buying Guide for Programmers",
+    "description": "Everything you need to know before buying an ergonomic office chair — adjustability, lumbar support, and long-session comfort.",
+    "date": "2026-01-12",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ergonomic-chair-buying-guide-programmers"
+  },
+  {
+    "slug": "best-ergonomic-gear-programmers",
+    "title": "Best Ergonomic Gear for Programmers",
+    "description": "A curated guide to the best ergonomic gear for developers — chairs, keyboards, mice, and monitor arms that prevent pain.",
+    "date": "2026-01-09",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/best-ergonomic-gear-programmers"
+  },
+  {
+    "slug": "ergonomic-keyboard-mouse-reviews",
+    "title": "Ergonomic Keyboard and Mouse Reviews",
+    "description": "Reviews of the best ergonomic keyboards and mice for programmers — split keyboards, trackballs, and vertical mice.",
+    "date": "2026-01-06",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ergonomic-keyboard-mouse-reviews"
+  },
+  {
+    "slug": "fitness-tracker-comparison-desk-workers",
+    "title": "Fitness Tracker Comparison for Desk Workers",
+    "description": "Compare the best fitness trackers and smartwatches for desk-bound professionals — step tracking, reminders, and value.",
+    "date": "2026-01-03",
+    "category": "gear-gadgets",
+    "tags": [
+      "fitness-trackers",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/fitness-tracker-comparison-desk-workers"
+  },
+  {
+    "slug": "kubernetes-security-news-monthly",
+    "title": "Kubernetes Security News Monthly",
+    "description": "Your monthly digest of Kubernetes security news — CVEs, tool releases, policy updates, and community highlights.",
+    "date": "2025-12-31",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-security-news-monthly"
+  },
+  {
+    "slug": "kubernetes-penetration-testing",
+    "title": "Kubernetes Penetration Testing Guide",
+    "description": "A practical guide to pentesting Kubernetes clusters — from reconnaissance to exploitation and remediation.",
+    "date": "2025-12-28",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-penetration-testing"
+  },
+  {
+    "slug": "runtime-security-falco-tetragon",
+    "title": "Runtime Security: Falco vs Tetragon",
+    "description": "Compare Falco and Tetragon for Kubernetes runtime security — detection capabilities, performance, and eBPF architecture.",
+    "date": "2025-12-25",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/runtime-security-falco-tetragon"
+  },
+  {
+    "slug": "compliance-automation-kubernetes",
+    "title": "Compliance Automation for Kubernetes",
+    "description": "Automate compliance checks in K8s with Kyverno, kube-bench, and OPA — continuous compliance without manual audits.",
+    "date": "2025-12-22",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/compliance-automation-kubernetes"
+  },
+  {
+    "slug": "devsecops-hardening-checklist",
+    "title": "DevSecOps Hardening Checklist Template",
+    "description": "A comprehensive hardening checklist for cloud-native workloads — from cluster config to runtime security and compliance.",
+    "date": "2025-12-19",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/devsecops-hardening-checklist"
+  },
+  {
+    "slug": "threat-modeling-cloud-workloads",
+    "title": "Threat Modeling for Cloud Workloads",
+    "description": "A practical approach to threat modeling cloud-native applications — STRIDE, attack trees, and K8s-specific risks.",
+    "date": "2025-12-16",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/threat-modeling-cloud-workloads"
+  },
+  {
+    "slug": "secrets-management-kubernetes-vault",
+    "title": "Secrets Management in Kubernetes with Vault",
+    "description": "Implement production-grade secrets management in K8s using HashiCorp Vault and External Secrets Operator.",
+    "date": "2025-12-13",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/secrets-management-kubernetes-vault"
+  },
+  {
+    "slug": "kubernetes-rbac-configuration",
+    "title": "Kubernetes RBAC Configuration Guide",
+    "description": "Master Kubernetes RBAC — roles, cluster roles, bindings, and best practices for least-privilege access control.",
+    "date": "2025-12-10",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-rbac-configuration"
+  },
+  {
+    "slug": "resistance-band-desk-exercises",
+    "title": "Resistance Band Desk Exercises Guide",
+    "description": "A complete guide to using resistance bands at your desk — 15 exercises for upper body, core, and posture correction.",
+    "date": "2025-12-07",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/resistance-band-desk-exercises"
+  },
+  {
+    "slug": "micro-break-routines-coding-focus",
+    "title": "Micro-Break Routines for Coding Focus",
+    "description": "Structured micro-break routines that protect your focus while reducing physical strain — designed for deep coding sessions.",
+    "date": "2025-12-04",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/micro-break-routines-coding-focus"
+  },
+  {
+    "slug": "desk-workout-equipment-essentials",
+    "title": "Desk Workout Equipment Essentials",
+    "description": "The minimal desk workout gear that actually makes a difference — resistance bands, balance boards, and under-desk tools.",
+    "date": "2025-12-01",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/desk-workout-equipment-essentials"
+  },
+  {
+    "slug": "walking-meetings-remote-teams",
+    "title": "Walking Meetings for Remote Teams",
+    "description": "How to introduce walking meetings in a remote-first team — logistics, tools, and making them actually productive.",
+    "date": "2025-11-28",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building",
+      "desk-stretches"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/walking-meetings-remote-teams"
+  },
+  {
+    "slug": "eye-strain-reduction-screen-workers",
+    "title": "Eye Strain Reduction for Screen Workers",
+    "description": "Practical strategies to reduce digital eye strain — the 20-20-20 rule, display settings, and workspace lighting.",
+    "date": "2025-11-25",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "ergonomics",
+      "desk-stretches"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/eye-strain-reduction-screen-workers"
+  },
+  {
+    "slug": "movement-snack-checklist-desk-workers",
+    "title": "Movement Snack Checklist for Desk Workers",
+    "description": "A printable checklist of movement snacks you can do at your desk — categorized by time, intensity, and equipment.",
+    "date": "2025-11-22",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/movement-snack-checklist-desk-workers"
+  },
+  {
+    "slug": "desk-stretch-timer-app-comparison",
+    "title": "Desk Stretch Timer App Comparison",
+    "description": "Compare the best desk stretch and movement reminder apps — features, integrations, and which actually builds the habit.",
+    "date": "2025-11-19",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/desk-stretch-timer-app-comparison"
+  },
+  {
+    "slug": "standing-desk-benefits-drawbacks",
+    "title": "Standing Desk Benefits and Drawbacks",
+    "description": "An honest look at standing desks — real health benefits, common mistakes, and how to transition without hurting yourself.",
+    "date": "2025-11-16",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "standing-desk",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/standing-desk-benefits-drawbacks"
+  },
+  {
+    "slug": "micro-exercise-routines-developers",
+    "title": "Micro-Exercise Routines for Developers",
+    "description": "Practical micro-exercise routines designed for developers — 2-minute movement snacks that fit between coding sessions.",
+    "date": "2025-11-13",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/micro-exercise-routines-developers"
+  },
+  {
+    "slug": "organizing-tech-meetup-guide",
+    "title": "Organizing a Tech Meetup: A Guide",
+    "description": "A practical guide to organizing a tech meetup — venue, speakers, sponsorship, and keeping a community consistent without burning out.",
+    "date": "2025-11-13",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/organizing-tech-meetup-guide"
+  },
+  {
+    "slug": "devops-tools-benchmark-comparison",
+    "title": "DevOps Tools Benchmark Comparison",
+    "description": "Benchmark popular DevOps tools — CI/CD runners, container registries, and IaC execution speed compared head-to-head.",
+    "date": "2025-11-10",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes",
+      "docker"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/devops-tools-benchmark-comparison"
+  },
+  {
+    "slug": "mechanical-keyboard-for-programmers",
+    "title": "Mechanical Keyboard for Programmers",
+    "description": "Choose a mechanical keyboard for programming — switches, ergonomics, and layouts that reduce strain during long coding sessions.",
+    "date": "2025-11-10",
+    "category": "gear-gadgets",
+    "tags": [
+      "ergonomics",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/mechanical-keyboard-for-programmers"
+  },
+  {
+    "slug": "developer-environment-setup-checklist",
+    "title": "Developer Environment Setup Checklist",
+    "description": "A comprehensive checklist for setting up a productive developer environment — tools, shell config, and ergonomics.",
+    "date": "2025-11-07",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "docker",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/developer-environment-setup-checklist"
+  },
+  {
+    "slug": "kubernetes-admission-controllers-guide",
+    "title": "Kubernetes Admission Controllers Guide",
+    "description": "A practical guide to Kubernetes admission controllers — mutating vs validating, OPA Gatekeeper, and enforcing policy at cluster entry.",
+    "date": "2025-11-07",
+    "category": "devsecops-security",
+    "tags": [
+      "kubernetes",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-admission-controllers-guide"
+  },
+  {
+    "slug": "devcontainer-setup-consistent-environments",
+    "title": "DevContainer Setup for Consistent Environments",
+    "description": "Eliminate 'works on my machine' with DevContainers — reproducible dev environments in Docker for VS Code and Codespaces.",
+    "date": "2025-11-04",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "docker",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/devcontainer-setup-consistent-environments"
+  },
+  {
+    "slug": "sbom-generation-tools-comparison",
+    "title": "SBOM Generation Tools Comparison",
+    "description": "Compare SBOM generation tools — Syft, Trivy, CycloneDX, and SPDX — formats, ecosystems, and CI integration for supply chain security.",
+    "date": "2025-11-04",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "docker"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/sbom-generation-tools-comparison"
+  },
+  {
+    "slug": "infrastructure-as-code-terraform-pulumi",
+    "title": "Terraform vs Pulumi for Infrastructure",
+    "description": "Compare Terraform and Pulumi for infrastructure as code — language, state management, and K8s integration.",
+    "date": "2025-11-01",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes",
+      "docker"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/infrastructure-as-code-terraform-pulumi"
+  },
+  {
+    "slug": "sleep-optimization-shift-workers",
+    "title": "Sleep Optimization for Shift Workers",
+    "description": "Sleep optimization for on-call and shift workers — anchor sleep, light management, and recovery routines that fit irregular tech schedules.",
+    "date": "2025-11-01",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/sleep-optimization-shift-workers"
+  },
+  {
+    "slug": "hydration-habits-developers",
+    "title": "Hydration Habits for Developers",
+    "description": "Practical hydration habits for developers — why focus dips when you're dehydrated, and simple cues to drink more without leaving your flow.",
+    "date": "2025-10-29",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/hydration-habits-developers"
+  },
+  {
+    "slug": "kubernetes-observability-prometheus-grafana",
+    "title": "Kubernetes Observability with Prometheus & Grafana",
+    "description": "Set up production-grade observability for K8s with Prometheus, Grafana, and AlertManager — metrics, dashboards, and alerts.",
+    "date": "2025-10-29",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-observability-prometheus-grafana"
+  },
+  {
+    "slug": "container-image-security-scanning",
+    "title": "Container Image Security Scanning Tools",
+    "description": "Compare Trivy, Grype, Snyk, and Aqua for container image scanning — features, accuracy, and CI integration.",
+    "date": "2025-10-26",
+    "category": "containers-kubernetes",
+    "tags": [
+      "docker",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/container-image-security-scanning"
+  },
+  {
+    "slug": "posture-correction-exercises-desk-workers",
+    "title": "Posture Correction Exercises for Desk Workers",
+    "description": "Simple posture correction exercises for desk workers — chin tucks, wall angels, and thoracic mobility to undo hours of sitting.",
+    "date": "2025-10-26",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/posture-correction-exercises-desk-workers"
+  },
+  {
+    "slug": "distroless-container-images-security",
+    "title": "Distroless Container Images for Security",
+    "description": "Reduce your attack surface with distroless container images — smaller footprint, fewer CVEs, and practical migration from fat images.",
+    "date": "2025-10-23",
+    "category": "containers-kubernetes",
+    "tags": [
+      "docker",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/distroless-container-images-security"
+  },
+  {
+    "slug": "docker-multistage-builds-best-practices",
+    "title": "Docker Multi-Stage Builds Best Practices",
+    "description": "Shrink Docker images and secure your supply chain with multi-stage builds — caching, distroless, and BuildKit.",
+    "date": "2025-10-23",
+    "category": "containers-kubernetes",
+    "tags": [
+      "docker",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/docker-multistage-builds-best-practices"
+  },
+  {
+    "slug": "kubernetes-cost-optimization-finops",
+    "title": "Kubernetes Cost Optimization & FinOps",
+    "description": "Cut Kubernetes spend with a practical FinOps checklist — right-sizing, autoscaling, spot instances, and request/limit tuning.",
+    "date": "2025-10-20",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-cost-optimization-finops"
+  },
+  {
+    "slug": "service-mesh-istio-linkerd",
+    "title": "Service Mesh Comparison: Istio vs Linkerd",
+    "description": "Istio or Linkerd? Compare features, performance, complexity, and operational overhead for your service mesh.",
+    "date": "2025-10-20",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/service-mesh-istio-linkerd"
+  },
+  {
+    "slug": "kubernetes-cluster-backup-disaster-recovery",
+    "title": "Kubernetes Cluster Backup & Disaster Recovery",
+    "description": "Build a Kubernetes backup and disaster recovery strategy — etcd backups, Velero, and tested restore procedures for production clusters.",
+    "date": "2025-10-17",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-cluster-backup-disaster-recovery"
+  },
+  {
+    "slug": "kubernetes-debugging-k9s-kubectl",
+    "title": "Kubernetes Debugging with k9s and kubectl",
+    "description": "Level up your K8s debugging workflow with k9s and advanced kubectl commands — fast triage for production incidents.",
+    "date": "2025-10-17",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-debugging-k9s-kubectl"
+  },
+  {
+    "slug": "helm-charts-best-practices",
+    "title": "Helm Charts Best Practices Guide",
+    "description": "Write maintainable, secure Helm charts — templating, values structure, library charts, and CI validation.",
+    "date": "2025-10-14",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes",
+      "docker"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/helm-charts-best-practices"
+  },
+  {
+    "slug": "hyperparameter-tuning-strategies",
+    "title": "Hyperparameter Tuning Strategies",
+    "description": "Practical hyperparameter tuning strategies for ML — grid, random, Bayesian search, and scaling sweeps across GPUs without wasting budget.",
+    "date": "2025-10-14",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/hyperparameter-tuning-strategies"
+  },
+  {
+    "slug": "data-preprocessing-pipeline-best-practices",
+    "title": "Data Preprocessing Pipeline Best Practices",
+    "description": "Build robust ML data preprocessing pipelines — tokenization, normalization, caching, and avoiding leakage in PyTorch workflows.",
+    "date": "2025-10-11",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/data-preprocessing-pipeline-best-practices"
+  },
+  {
+    "slug": "kubernetes-network-policies-tutorial",
+    "title": "Kubernetes Network Policies Tutorial",
+    "description": "A hands-on tutorial for implementing Kubernetes network policies — from default deny to L7 rules and debugging.",
+    "date": "2025-10-11",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-network-policies-tutorial"
+  },
+  {
+    "slug": "feature-store-machine-learning",
+    "title": "Feature Store for Machine Learning",
+    "description": "Understand feature stores for ML — online vs offline serving, consistency, and tools like Feast and Tecton for production pipelines.",
+    "date": "2025-10-08",
+    "category": "ai-machine-learning",
+    "tags": [
+      "mlops",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/feature-store-machine-learning"
+  },
+  {
+    "slug": "kubernetes-autcaling-hpa-keda",
+    "title": "Kubernetes Autoscaling: HPA and KEDA",
+    "description": "Master Kubernetes autoscaling with Horizontal Pod Autoscaler and KEDA — event-driven scaling for real workloads.",
+    "date": "2025-10-08",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-autcaling-hpa-keda"
+  },
+  {
+    "slug": "ai-ml-news-roundup-weekly",
+    "title": "Weekly AI & ML News Roundup",
+    "description": "Your weekly digest of the most important AI/ML developments — model releases, research breakthroughs, and industry moves.",
+    "date": "2025-10-05",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ai-ml-news-roundup-weekly"
+  },
+  {
+    "slug": "vector-database-comparison",
+    "title": "Vector Database Comparison: Pinecone vs Weaviate",
+    "description": "Compare Pinecone and Weaviate vector databases — performance, pricing, hybrid search, self-hosting, and which fits your RAG pipeline.",
+    "date": "2025-10-05",
+    "category": "ai-machine-learning",
+    "tags": [
+      "mlops",
+      "llms"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/vector-database-comparison"
+  },
+  {
+    "slug": "lora-fine-tuning-llms",
+    "title": "LoRA Fine-Tuning Techniques for LLMs",
+    "description": "Learn LoRA fine-tuning for large language models — rank selection, target modules, training configs, and when to choose LoRA over full fine-tuning.",
+    "date": "2025-10-02",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/lora-fine-tuning-llms"
+  },
+  {
+    "slug": "ml-model-deployment-workflow",
+    "title": "ML Model Deployment Workflow Template",
+    "description": "A step-by-step deployment workflow template for ML models — from packaging to serving, monitoring, and rollback.",
+    "date": "2025-10-02",
+    "category": "ai-machine-learning",
+    "tags": [
+      "mlops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ml-model-deployment-workflow"
+  },
+  {
+    "slug": "experiment-tracking-mlflow-vs-wandb",
+    "title": "Experiment Tracking: MLflow vs W&B",
+    "description": "MLflow or Weights & Biases? Compare features, pricing, UX, and integration for your ML experiment tracking needs.",
+    "date": "2025-09-29",
+    "category": "ai-machine-learning",
+    "tags": [
+      "mlops",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/experiment-tracking-mlflow-vs-wandb"
+  },
+  {
+    "slug": "pytorch-lightning-vs-vanilla-pytorch",
+    "title": "PyTorch Lightning vs Vanilla PyTorch",
+    "description": "Should you use PyTorch Lightning or stick with vanilla PyTorch? A practical comparison for real ML projects.",
+    "date": "2025-09-26",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/pytorch-lightning-vs-vanilla-pytorch"
+  },
+  {
+    "slug": "model-quantization-techniques",
+    "title": "Model Quantization Techniques Comparison",
+    "description": "Compare INT8, INT4, GPTQ, AWQ, and bitsandbytes quantization — accuracy, speed, and memory trade-offs.",
+    "date": "2025-09-23",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/model-quantization-techniques"
+  },
+  {
+    "slug": "rag-pipeline-architecture",
+    "title": "RAG Pipeline Architecture Best Practices",
+    "description": "Build production-grade retrieval-augmented generation pipelines — chunking, embedding, vector stores, and evaluation.",
+    "date": "2025-09-20",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/rag-pipeline-architecture"
+  },
+  {
+    "slug": "tensorrt-inference-acceleration",
+    "title": "TensorRT Inference Acceleration Guide",
+    "description": "Speed up model inference with NVIDIA TensorRT — from model conversion to optimization profiles and deployment.",
+    "date": "2025-09-17",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/tensorrt-inference-acceleration"
+  },
+  {
+    "slug": "distributed-training-torchrun-ddp",
+    "title": "Distributed Training with Torchrun and DDP",
+    "description": "A hands-on guide to multi-GPU distributed training in PyTorch using torchrun and DistributedDataParallel.",
+    "date": "2025-09-14",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/distributed-training-torchrun-ddp"
+  },
+  {
+    "slug": "ml-training-cost-calculator",
+    "title": "ML Training Cost Calculator & Template",
+    "description": "Estimate GPU training costs before you run — a practical calculator template with real cloud pricing examples.",
+    "date": "2025-09-11",
+    "category": "ai-machine-learning",
+    "tags": [
+      "mlops",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ml-training-cost-calculator"
+  },
+  {
+    "slug": "gpu-vs-tpu-model-training",
+    "title": "GPU vs TPU for Model Training",
+    "description": "A practical comparison of GPU and TPU for ML training — performance, cost, ecosystem, and when to choose each.",
+    "date": "2025-09-08",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/gpu-vs-tpu-model-training"
+  },
+  {
+    "slug": "model-versioning-registry-comparison",
+    "title": "Model Versioning & Registry Comparison",
+    "description": "Compare MLflow, W&B, and DVC model registries — features, versioning, staging, and which fits your MLOps workflow.",
+    "date": "2025-09-05",
+    "category": "ai-machine-learning",
+    "tags": [
+      "mlops",
+      "llms"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/model-versioning-registry-comparison"
+  },
+  {
+    "slug": "burnout-prevention-on-call",
+    "title": "Burnout Prevention for On-Call Engineers",
+    "description": "Evidence-based strategies to prevent burnout during on-call rotations — from schedule design to recovery rituals and team culture.",
+    "date": "2025-09-01",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/burnout-prevention-on-call"
+  },
+  {
+    "slug": "deep-work-techniques-engineers",
+    "title": "Deep Work Techniques for Engineers",
+    "description": "Practical deep work strategies adapted for software engineers — context switching costs, focus blocks, and protecting your flow state.",
+    "date": "2025-08-30",
+    "category": "focus-productivity",
+    "tags": [
+      "deep-work",
+      "habit-building"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/deep-work-techniques-engineers"
+  },
+  {
+    "slug": "cicd-pipeline-optimization",
+    "title": "CI/CD Pipeline Optimization for Speed",
+    "description": "Practical techniques to make your CI/CD pipelines faster — from caching strategies to parallel execution and conditional builds.",
+    "date": "2025-08-25",
+    "category": "platform-engineering-devops",
+    "tags": [
+      "kubernetes",
+      "docker"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/cicd-pipeline-optimization"
+  },
+  {
+    "slug": "kubecon-attendance-guide",
+    "title": "KubeCon Attendance Guide: Maximize Your Conference",
+    "description": "A practical guide to attending KubeCon — from session selection and networking to budget tips and staying active during the event.",
+    "date": "2025-08-20",
+    "category": "events-community",
+    "tags": [
+      "conferences"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubecon-attendance-guide"
+  },
+  {
+    "slug": "under-desk-treadmill-review",
+    "title": "Under-Desk Treadmill Review: Walking While You Code",
+    "description": "Can you actually code while walking? A long-term review of under-desk treadmills for developers, with pros, cons, and a verdict.",
+    "date": "2025-08-15",
+    "category": "gear-gadgets",
+    "tags": [
+      "standing-desk",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/under-desk-treadmill-review"
+  },
+  {
+    "slug": "best-standing-desks-developers",
+    "title": "Best Standing Desks for Developers in 2026",
+    "description": "Hands-on reviews of the top standing desks for tech professionals — covering stability, height range, programmable presets, and value.",
+    "date": "2025-08-10",
+    "category": "gear-gadgets",
+    "tags": [
+      "standing-desk",
+      "affiliate"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/best-standing-desks-developers"
+  },
+  {
+    "slug": "policy-as-code-opa-kyverno",
+    "title": "Policy as Code: OPA vs Kyverno Comparison",
+    "description": "A detailed comparison of Open Policy Agent and Kyverno for Kubernetes policy-as-code — features, performance, and when to choose each.",
+    "date": "2025-08-05",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/policy-as-code-opa-kyverno"
+  },
+  {
+    "slug": "supply-chain-security-k8s",
+    "title": "Supply Chain Security for Kubernetes",
+    "description": "How to secure your K8s supply chain — from image signing with Cosign to SBOMs, admission controllers, and policy enforcement.",
+    "date": "2025-08-01",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "docker"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/supply-chain-security-k8s"
+  },
+  {
+    "slug": "cloud-native-security-best-practices",
+    "title": "Cloud-Native Security Best Practices Guide",
+    "description": "A comprehensive guide to securing cloud-native workloads — from pod security to network policies, secrets management, and runtime protection.",
+    "date": "2025-07-25",
+    "category": "devsecops-security",
+    "tags": [
+      "devsecops",
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/cloud-native-security-best-practices"
+  },
+  {
+    "slug": "habit-building-irregular-schedules",
+    "title": "Habit Building for Irregular Work Schedules",
+    "description": "Evidence-based habit-building strategies for engineers with unpredictable on-call rotations and irregular deep-work blocks.",
+    "date": "2025-07-20",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "habit-building",
+      "deep-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/habit-building-irregular-schedules"
+  },
+  {
+    "slug": "ergonomic-desk-setup-programmers",
+    "title": "Ergonomic Desk Setup for Programmers",
+    "description": "An illustrated guide to optimal desk height, monitor placement, and peripheral choices for developers who spend 8+ hours at a screen.",
+    "date": "2025-07-15",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "ergonomics",
+      "standing-desk"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ergonomic-desk-setup-programmers"
+  },
+  {
+    "slug": "desk-stretches-coding-sessions",
+    "title": "5 Desk Stretches During Long Coding Sessions",
+    "description": "Quick, effective desk stretches you can do without leaving your chair — designed for developers deep in a coding flow state.",
+    "date": "2025-07-10",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "desk-stretches",
+      "ergonomics"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/desk-stretches-coding-sessions"
+  },
+  {
+    "slug": "k8s-operators-explained",
+    "title": "Kubernetes Operators Explained Simply",
+    "description": "A beginner-friendly explanation of Kubernetes operators — what they are, how they work, and when you actually need one.",
+    "date": "2025-07-05",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/k8s-operators-explained"
+  },
+  {
+    "slug": "deploy-secure-k8s-cilium",
+    "title": "Deploying a Secure K8s Cluster with Cilium",
+    "description": "Step-by-step tutorial for deploying a production-grade Kubernetes cluster with Cilium CNI for network security and observability.",
+    "date": "2025-07-01",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/deploy-secure-k8s-cilium"
+  },
+  {
+    "slug": "k8s-crashloopbackoff-troubleshooting",
+    "title": "Kubernetes Pod CrashLoopBackOff Troubleshooting",
+    "description": "A problem-first guide to diagnosing and fixing CrashLoopBackOff errors — from logs and events to common root causes.",
+    "date": "2025-06-25",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/k8s-crashloopbackoff-troubleshooting"
+  },
+  {
+    "slug": "mlops-pipeline-best-practices",
+    "title": "MLOps Pipeline Best Practices",
+    "description": "Build reproducible, observable ML pipelines — from data versioning to model registry, CI/CD for ML, and experiment tracking.",
+    "date": "2025-06-20",
+    "category": "ai-machine-learning",
+    "tags": [
+      "mlops",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/mlops-pipeline-best-practices"
+  },
+  {
+    "slug": "fine-tuning-llms-guide",
+    "title": "Fine-Tuning Large Language Models: A Practical Guide",
+    "description": "Step-by-step guide to fine-tuning LLMs — covering LoRA, QLoRA, dataset preparation, and avoiding common pitfalls.",
+    "date": "2025-06-15",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "pytorch"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/fine-tuning-llms-guide"
+  },
+  {
+    "slug": "llm-inference-optimization",
+    "title": "LLM Inference Optimization Techniques",
+    "description": "From KV caching to quantization and speculative decoding — practical techniques to make LLM inference faster and cheaper.",
+    "date": "2025-06-10",
+    "category": "ai-machine-learning",
+    "tags": [
+      "llms",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/llm-inference-optimization"
+  },
+  {
+    "slug": "debugging-oom-pytorch",
+    "title": "Debugging OOM Errors in PyTorch",
+    "description": "A systematic approach to diagnosing and fixing out-of-memory errors during PyTorch training — from gradient checkpointing to memory profiling.",
+    "date": "2025-06-05",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/debugging-oom-pytorch"
+  },
+  {
+    "slug": "optimize-pytorch-training-speed",
+    "title": "How to Optimize PyTorch Training Speed",
+    "description": "Practical techniques to speed up PyTorch training runs — from mixed precision to data loading, gradient accumulation, and distributed strategies.",
+    "date": "2025-06-01",
+    "category": "ai-machine-learning",
+    "tags": [
+      "pytorch",
+      "mlops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/optimize-pytorch-training-speed"
+  }
+]

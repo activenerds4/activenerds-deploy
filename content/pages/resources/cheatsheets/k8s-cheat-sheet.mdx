@@ -1,0 +1,963 @@
+---
+title: "Kubernetes Cheat Sheet"
+description: "Comprehensive quick-reference for Kubernetes — kubectl commands, YAML patterns, troubleshooting, networking, security, and day-to-day ops. Print it, bookmark it, live by it."
+category: kubernetes-containers
+slug: k8s-cheat-sheet
+lastUpdated: "2026-08-28"
+tags: ["kubernetes", "docker", "kubectl"]
+type: cheat-sheet
+published: true
+image: https://vibe.filesafe.space/1787597093106655632/assets/90945639-d48f-4e01-bb96-b4db9421934f.png
+imageAlt: "Kubernetes cheat sheet — comprehensive quick reference for kubectl commands, YAML patterns, and troubleshooting in deep slate with spring-green accents"
+---
+
+import { TabsGroup } from "@/components/mdx/TabsGroup";
+import { Callout } from "@/components/mdx/Callout";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Kubernetes Cheat Sheet
+
+**Everything you forget between `kubectl` sessions — in one place.**
+
+This is the reference we built for ourselves. It covers daily operations, YAML patterns you copy-paste constantly, debugging when things break, and the stuff that always sends you to Google at 2 AM. Bookmark this tab. You'll be back.
+
+---
+
+## Table of Contents
+
+1. [Cluster Diagnostics](#1-cluster-diagnostics)
+2. [Pod Operations](#2-pod-operations)
+3. [Workload Resources](#3-workload-resources)
+4. [Services & Networking](#4-services--networking)
+5. [Configuration & Secrets](#5-configuration--secrets)
+6. [Troubleshooting](#6-troubleshooting)
+7. [YAML Reference Patterns](#7-yaml-reference-patterns)
+8. [Probes & Health Checks](#8-probes--health-checks)
+9. [Resource Management](#9-resource-management)
+10. [Security & RBAC](#10-security--rbac)
+11. [Context & Namespace](#11-context--namespace-management)
+12. [Helm Essentials](#12-helm-essentials)
+
+---
+
+## 1. Cluster Diagnostics
+
+Start here when you join a new cluster or something feels wrong.
+
+### Basic Info
+
+```bash
+kubectl cluster-info                    # API server + DNS endpoints
+kubectl version                        # Client + server versions (check skew!)
+kubectl api-resources                  # Every resource type the cluster knows
+kubectl api-resources --verbs=list     # Resources you can list
+kubectl get nodes                      # All nodes
+kubectl get nodes -o wide              # With IPs, OS, kernel, kubelet version
+kubectl top nodes                      # CPU/memory per node (metrics-server needed)
+```
+
+### Node Deep-Dive
+
+```bash
+kubectl describe node <node-name>      # Conditions, capacity, allocatable, pods
+kubectl get node <name> -o yaml        # Full spec (huge output, grep it)
+kubectl get nodes --sort-by='.metadata.creationTimestamp'  # Newest first
+kubectl cordon <node-name>             # Mark unschedulable (drain prep)
+kubectl uncordon <node-name>           # Mark schedulable again
+kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data  # Evict all pods
+```
+
+<Callout type="tip">
+**Pro move:** Run `kubectl get events -A --sort-by='.lastTimestamp' | tail -20` before diagnosing anything. The event stream usually tells you what broke before you start digging.
+</Callout>
+
+---
+
+## 2. Pod Operations
+
+Pods are the unit of execution. These are the commands you'll use most.
+
+### Lifecycle
+
+```bash
+# List & inspect
+kubectl get pods                       # Current namespace
+kubectl get pods -A                    # All namespaces
+kubectl get pods -o wide               # With node IP, pod IP
+kubectl get pods --watch               # Live-updating view
+kubectl describe pod <name>            # Everything about one pod
+
+# Create & delete
+kubectl run tmp --image=busybox:1.36   # Quick ad-hoc pod
+kubectl delete pod <name>
+kubectl delete pod --all               # Delete all pods in namespace
+
+# Logs (the most important debugging tool)
+kubectl logs <pod-name>                # All container logs
+kubectl logs <pod-name> -c <container> # Multi-container pod
+kubectl logs <pod-name> --previous      # Crashed container (the --previous flag is gold)
+kubectl logs <pod-name> -f --tail=50    # Follow last 50 lines
+kubectl logs -l app=nginx              # Logs for all matching pods
+```
+
+### Exec & Debug
+
+```bash
+# Shell access
+kubectl exec -it <pod> -- /bin/sh
+kubectl exec -it <pod> -c <container> -- /bin/bash
+
+# Copy files
+kubectl cp <pod>:/path/to/file ./local-file
+kubectl cp ./local-file <pod>:/path/to/file
+
+# Port forwarding (bypasses network policies, great for local dev)
+kubectl port-forward <pod> 8080:80
+kubectl port-forward svc/<service> 8080:80
+```
+
+### Common Pod States & What They Mean
+
+| State | Meaning | First Check |
+|-------|---------|-------------|
+| `Running` | Container(s) running | `kubectl logs` |
+| `Pending` | Not yet scheduled | `describe pod` → Events (resource limits? taints?) |
+| `Failed` | Container exited non-zero | `logs --previous` |
+| `CrashLoopBackOff` | Keeps crashing, backing off | `logs --previous`, check liveness probe |
+| `ImagePullBackOff` | Can't pull image | Image name? registry auth? pull policy? |
+| `Evicted` | Kicked off for resources | Node pressure? requests/limits set? |
+| `Completed` | Ran to finish (Job) | Exit code, logs |
+| `Unknown` | Node communication lost | Node health |
+
+---
+
+## 3. Workload Resources
+
+### Deployments
+
+```bash
+kubectl get deployments
+kubectl rollout status deployment/<name>
+kubectl rollout history deployment/<name>
+kubectl rollout undo deployment/<name>            # Roll back to previous
+kubectl rollout undo deployment/<name> --to-revision=2
+kubectl scale deployment <name> --replicas=5
+kubectl autoscale deployment <name> --min=2 --max=10 --cpu-percent=80
+```
+
+### StatefulSets
+
+```bash
+kubectl get statefulsets
+kubectl scale statefulset <name> --replicas=3       # Ordered scaling!
+kubectl rollout status statefulset/<name>
+```
+
+### DaemonSets
+
+```bash
+kubectl get daemonsets
+kubectl rollout restart daemonset/<name>             # Rolling restart across all nodes
+```
+
+### Jobs & CronJobs
+
+```bash
+kubectl get jobs
+kubectl delete job <name>                            # Clean up completed jobs
+kubectl create job --from=cronjob/<cronjob-name> <job-name>  # Manual trigger
+```
+
+---
+
+## 4. Services & Networking
+
+### Services
+
+```bash
+kubectl get services                               # All services
+kubectl get endpoints                              # Where services point
+kubectl describe service <name>                    # Selector, ports, endpoints
+```
+
+<TabsGroup tabs={["ClusterIP", "NodePort", "LoadBalancer", "Headless"]}>
+#### ClusterIP (default)
+
+Internal-only. Good for internal microservices.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+spec:
+  selector:
+    app: my-app
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+#### NodePort
+
+Exposes a port on each node (30000-32767). Good for dev, not production.
+
+```yaml
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: 30080
+```
+
+#### LoadBalancer
+
+Provisions cloud LB. The standard for external traffic.
+
+```yaml
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+#### Headless
+
+No cluster IP. DNS returns pod IPs directly. For StatefulSets, databases.
+
+```yaml
+spec:
+  clusterIP: None
+  selector:
+    app: my-db
+```
+</TabsGroup>
+
+### Ingress
+
+```bash
+kubectl get ingress
+kubectl describe ingress <ingress-name>
+```
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: app.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: my-app
+            port:
+              number: 80
+```
+
+### Network Policies
+
+```bash
+kubectl get networkpolicies
+```
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-ingress
+spec:
+  podSelector: {}           # All pods
+  policyTypes:
+  - Ingress
+  ingress: []               # Allow nothing (default-deny pattern)
+```
+
+<Callout type="info">
+**Default-deny pattern:** Start with a NetworkPolicy that allows nothing (`ingress: []`), then write explicit allow policies for legitimate traffic. This is how you actually secure pod-to-pod communication.
+</Callout>
+
+---
+
+## 5. Configuration & Secrets
+
+### ConfigMaps
+
+```bash
+# Create from literals
+kubectl create configmap app-config --from-literal=APP_ENV=prod --from-literal=LOG_LEVEL=info
+
+# Create from file
+kubectl create configmap app-config --from-file=config.properties
+
+# Create from all files in directory
+kubectl create configmap app-config --from-dir=./config/
+
+# Use in pod as env vars
+envFrom:
+  - configMapRef:
+      name: app-config
+
+# Use in pod as volume mount
+volumes:
+  - name: config
+    configMap:
+      name: app-config
+volumeMounts:
+  - name: config
+    mountPath: /etc/config
+```
+
+### Secrets (Base64 Encoded — Not Encryption!)
+
+```bash
+# Create from literals
+kubectl create secret generic db-creds \
+  --from-literal=DB_HOST=postgres.example.com \
+  --from-literal=DB_PASS='supersecret'
+
+# Create from file
+kubectl create secret generic tls-cert --from-file=tls.crt --from-file=tls.key
+
+# Decode (base64 is encoding, not encryption!)
+kubectl get secret db-creds -o jsonpath='{.data.DB_PASS}' | base64 -d
+```
+
+```yaml
+# Mount as env var (automatic base64 decode)
+env:
+  - name: DB_PASS
+    valueFrom:
+      secretKeyRef:
+        name: db-creds
+        key: DB_PASS
+
+# Mount as file
+volumes:
+  - name: secrets
+    secret:
+      secretName: db-crets
+volumeMounts:
+  - name: secrets
+    mountPath: /etc/secrets
+    readOnly: true
+```
+
+<Callout type="warning">
+**Secrets are only base64-encoded in etcd.** Anyone with cluster read access can decode them. Use an external secrets manager (Vault, AWS Secrets Manager) or enable encryption-at-rest for serious workloads.
+</Callout>
+
+---
+
+## 6. Troubleshooting
+
+This is the section you'll open most. When something's broken, follow this order.
+
+### The Diagnostic Hierarchy
+
+<ChecklistBox title="Debugging Order" items={[
+  "1️⃣ **Events**: `kubectl get events -A --sort-by='.lastTimestamp'` — What does the cluster think happened?",
+  "2️⃣ **Describe**: `kubectl describe pod <name>` — Look at the Events section at the bottom",
+  "3️⃣ **Logs**: `kubectl logs <pod>` then `--previous` if it crashed",
+  "4️⃣ **Spec**: `kubectl get pod <name> -o yaml` — Is the actual spec what you expect?",
+  "5️⃣ **Node**: If everything looks OK, check `kubectl describe node <node>`"
+]} />
+
+### CrashLoopBackOff Checklist
+
+When a pod keeps crashing:
+
+```bash
+# 1. Get the crash reason
+kubectl describe pod <name> | grep -A 20 "Events:"
+
+# 2. Get the crashed container's exit log
+kubectl logs <name> --previous
+
+# 3. Shell into a running sibling (same image, different pod) to test
+kubectl run debug --image=<same-image> -it --rm -- /bin/sh
+
+# 4. Check resource limits (OOMKill?)
+kubectl describe pod <name> | grep -i oom
+
+# 5. Check if it's a liveness probe killing a slow-starting container
+kubectl get pod <name> -o jsonpath='{.spec.containers[*].livenessProbe}'
+```
+
+### Pending Pod Checklist
+
+When a pod won't schedule:
+
+```bash
+# 1. Why isn't it scheduling?
+kubectl describe pod <name> | grep -A 10 "Events:"
+
+# 2. Any taints on nodes?
+kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
+
+# 3. Does the pod have tolerations?
+kubectl get pod <name> -o jsonpath='{.spec.tolerations}'
+
+# 4. Resource requests vs available?
+kubectl describe node <target-node> | grep -A 5 "Allocated resources:"
+
+# 5. Node selectors or affinity blocking it?
+kubectl get pod <name> -o jsonpath='{.spec.nodeSelector}'
+kubectl get pod <name> -o jsonpath='{.spec.affinity}'
+```
+
+### ImagePullBackOff Fixes
+
+| Cause | Fix |
+|-------|-----|
+| Wrong image name/tag | Fix `spec.containers[0].image` |
+| Private registry, no credentials | Create `imagePullSecrets` |
+| Registry unreachable from node | Check CNI, DNS, network policy |
+| Tag changed (latest pulled cached) | Set `imagePullPolicy: Always` or use digest SHA |
+
+### Quick-Fix Commands
+
+```bash
+# Restart all pods in a deployment (rollout restart)
+kubectl rollout restart deployment/<name>
+
+# Force immediate pod deletion (bypass graceful termination)
+kubectl delete pod <name> --force --grace-period=0
+
+# Edit live (opens editor — use carefully!)
+kubectl edit deployment/<name>
+kubectl edit configmap/<name>
+kubectl edit secret/<name>
+
+# Dry-run to see what would happen without applying
+kubectl apply -f manifest.yaml --dry-run=client
+kubectl apply -f manifest.yaml --dry-run=server    # Hits the API server
+
+# Diff your local file against what's running
+kubectl diff -f manifest.yaml
+
+# Export current resource as YAML
+kubectl get deployment <name> -o yaml > deployment-backup.yaml
+# Note: Add --export removed in K8s 1.24; just use -o yaml
+```
+
+---
+
+## 7. YAML Reference Patterns
+
+Copy-paste these. Modify. Ship. These are the shapes you use 90% of the time.
+
+### Minimal Pod
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: minimal-pod
+  labels:
+    app: demo
+spec:
+  containers:
+  - name: app
+    image: nginx:1.25-alpine
+    ports:
+    - containerPort: 80
+```
+
+### Deployment with Probes
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  labels:
+    app: webapp
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+      - name: webapp
+        image: webapp:v1.2.0
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          failureThreshold: 30
+          periodSeconds: 10
+```
+
+### Multi-Container Pod (Sidecar Pattern)
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-sidecar
+spec:
+  containers:
+  - name: app
+    image: myapp:latest
+    ports:
+    - containerPort: 8080
+    volumeMounts:
+    - name: shared-logs
+      mountPath: /var/log/app
+
+  - name: log-collector
+    image: fluent-bit:latest
+    volumeMounts:
+    - name: shared-logs
+      mountPath: /var/log/app
+      readOnly: true
+
+  volumes:
+  - name: shared-logs
+    emptyDir: {}
+```
+
+### Init Container Pattern
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-init
+spec:
+  initContainers:
+  - name: migrate-db
+    image: myapp:migrator
+    command: ["./migrate.sh"]
+
+  - name: wait-for-db
+    image: busybox:1.36
+    command: ["sh", "-c", "until nc -z db 5432; do echo waiting; sleep 2; done"]
+
+  containers:
+  - name: app
+    image: myapp:latest
+```
+
+---
+
+## 8. Probes & Health Checks
+
+Understanding probes prevents 90% of "my pod keeps restarting" incidents.
+
+| Probe Type | Purpose | Failure Action |
+|-----------|---------|----------------|
+| **startupProbe** | Slow-starting apps (JVM, model loading) | Restarts if fails after threshold |
+| **livenessProbe** | Is the app alive/hung? | **Restarts** the container |
+| **readinessProbe** | Can it receive traffic? | Removes from Service endpoints |
+
+### Probe Types
+
+<TabsGroup tabs={["HTTP", "TCP", "gRPC", "Exec"]}>
+#### HTTP GET
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: 8080
+    httpHeaders:
+    - name: X-Custom
+      value: ping
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 3
+```
+
+#### TCP Socket
+
+```yaml
+readinessProbe:
+  tcpSocket:
+    port: 5432
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+#### gRPC (requires v1.24+)
+
+```yaml
+livenessProbe:
+  grpc:
+    port: 9000
+    service: HealthCheckService  # optional
+  initialDelaySeconds: 10
+```
+
+#### Exec Command
+
+```yaml
+livenessProbe:
+  exec:
+    command:
+    - cat
+    - /tmp/healthy
+  periodSeconds: 5
+```
+</TabsGroup>
+
+<Callout type="tip">
+**Rule of thumb:** If your app takes >30s to start, use a `startupProbe`. Without it, the liveness probe will kill your container during normal startup. Set `failureThreshold * periodSeconds` > your max startup time.
+</Callout>
+
+---
+
+## 9. Resource Management
+
+### Requests vs Limits
+
+| Concept | Guarantees | Effect |
+|---------|-----------|--------|
+| **Request** (minimum) | Kubernetes reserves this amount on the node | Scheduling decision; pod gets at least this |
+| **Limit** (maximum) | Container never exceeds this | OOMKilled if exceeded (for memory); throttled (CPU) |
+
+### Quality of Service Tiers
+
+| QoS Class | How to get it | Guaranteed behavior |
+|-----------|--------------|---------------------|
+| **Guaranteed** | Requests == Limits for CPU AND memory | Never evicted unless node fails |
+| **Burstable** | Requests set, but < Limits (or no limits) | Evicted under memory pressure before BestEffort |
+| **BestEffort** | No requests or limits set | **First to be evicted** under any pressure |
+
+```bash
+# Check QoS class
+kubectl get pod <name> -o jsonpath='{.status.qosClass}'
+
+# Find BestEffort pods (eviction targets)
+kubectl get pods -A -o jsonpath='{range .items[?(@.status.qosClass=="BestEffort")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}'
+```
+
+### Resource Quotas
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-a-quota
+  namespace: team-a
+spec:
+  hard:
+    requests.cpu: "10"
+    requests.memory: 20Gi
+    limits.cpu: "20"
+    limits.memory: 40Gi
+    persistentvolumeclaims: "5"
+    pods: "20"
+```
+
+### Limit Ranges (Default Limits)
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-limits
+  namespace: default
+spec:
+  limits:
+  - default:          # Default limit if unspecified
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:    # Default request if unspecified
+      cpu: "100m"
+      memory: "128Mi"
+    type: Container
+```
+
+---
+
+## 10. Security & RBAC
+
+### Quick RBAC Setup
+
+```yaml
+# ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deployer-sa
+---
+# Role (namespace-scoped)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployer-role
+rules:
+- apiGroups: ["", "apps"]
+  resources: ["deployments", "pods", "services"]
+  verbs: ["get", "list", "create", "update", "delete"]
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deployer-binding
+subjects:
+- kind: ServiceAccount
+  name: deployer-sa
+roleRef:
+  kind: Role
+  name: deployer-role
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### Cluster-Scoped (ClusterRole)
+
+Use `ClusterRole` + `ClusterRoleBinding` for cluster-wide permissions. Same structure, different scope.
+
+### Common RBAC Verbs
+
+| Verb | Meaning |
+|------|---------|
+| `get` | Read one resource |
+| `list` | List all resources of a type |
+| `create` | Make new resource |
+| `update` | Update existing |
+| `patch` | Partial update |
+| `delete` | Remove resource |
+| `*` | All of the above |
+
+### Pod Security Standards (v1.25+)
+
+```bash
+# Check which enforcement level a namespace uses
+kubectl get ns <name> -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}'
+
+# Label a namespace
+kubectl label ns production pod-security.kubernetes.io/enforce=restricted
+```
+
+| Level | Restrictions |
+|-------|-------------|
+| **Privileged** | Unrestricted (permissive, avoid in prod) |
+| **Baseline** | No root, no host namespaces, read-only root fs recommended |
+| **Restricted** | No root ever, no privilege escalation, drop ALL capabilities, read-only root fs, Seccomp profile required |
+
+---
+
+## 11. Context & Namespace Management
+
+### Daily Context Switching
+
+```bash
+# View current context
+kubectl config current-context
+
+# Switch context
+kubectl config use-context prod-cluster
+
+# Rename a context to something memorable
+kubectl config rename-context 'arn:aws:eks:us-east-1:123:cluster/prod' 'prod'
+
+# View all contexts
+kubectl config get-contexts
+```
+
+### Namespace Shortcuts
+
+```bash
+# Set default namespace for current context
+kubectl config set-context --current --namespace=monitoring
+
+# Or use kubectx/kubens (install separately):
+# kubens monitoring        # Faster than typing the full command
+
+# Run a single command in a different namespace
+kubectl get pods -n kube-system
+kubectl get pods -A                                # All namespaces
+kubectl get pods --all-namespaces                   # Same thing
+```
+
+### Aliases to Add to Your Shell
+
+```bash
+# Add these to ~/.bashrc or ~/.zshrc
+alias k=kubectl
+alias kgp='kubectl get pods'
+alias kgpa='kubectl get pods --all-namespaces'
+alias kd='kubectl describe pod'
+alias kl='kubectl logs'
+alias klf='kubectl logs -f'
+alias ke='kubectl exec -it'
+alias ka='kubectl apply -f'
+alias kdel='kubectl delete'
+
+# Autocomplete (if not already enabled)
+source <(kubectl completion bash)   # or zsh
+complete -F __start_kubectl k       # Enable autocomplete for alias 'k'
+```
+
+---
+
+## 12. Helm Essentials
+
+### Chart Operations
+
+```bash
+# Add a repository
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
+# Search
+helm search hub prometheus
+helm search repo postgresql
+
+# Install
+helm install my-postgres bitnami/postgresql --version 12.1.0
+
+# Upgrade (this is how you change configs)
+helm upgrade my-postgres bitnami/postgresql --set persistence.size=10Gi
+
+# Rollback
+helm rollback my-postgres 1
+
+# Status & history
+helm status my-postgres
+helm history my-postgres
+
+# Uninstall
+helm uninstall my-postgres
+```
+
+### Template & Debug
+
+```bash
+# Render templates without installing (great for CI/CD validation)
+helm template my-release ./chart-path
+
+# Lint your chart
+helm lint ./chart-path
+
+# Show values
+helm get values my-postgres
+
+# Show notes printed by the chart
+helm get notes my-postgres
+```
+
+### Value Management
+
+```bash
+# Override values inline
+helm install my-app ./chart --set replicaCount=3 --set image.tag=v2.0
+
+# Override with file
+helm install my-app ./chart -f values-prod.yaml
+
+# Generate default values file
+helm show values bitnami/postgresql > values-default.yaml
+```
+
+---
+
+## Quick Reference Card
+
+### Output Formats
+
+```bash
+-o wide         # Extra columns (node IP, pod IP, etc.)
+-o yaml         # Full YAML spec
+-o json         # Full JSON
+-o name         # Only resource names (great for piping: kubectl get pods -o name | xargs ...)
+-o jsonpath='{...}'  # Extract specific fields
+-o custom-columns=NAME:.metadata.name,STATUS:.status.phase  # Custom table
+```
+
+### Labels & Selectors
+
+```bash
+# Filter by label
+kubectl get pods -l environment=production,tier=frontend
+
+# Show labels on objects
+kubectl get pods --show-labels
+
+# Add/update label
+kubectl label pod <name> key=value
+
+# Remove label (trailing dash)
+kubectl label pod <name> key-
+
+# Selector syntax in YAML (matches all three conditions)
+selector:
+  matchLabels:
+    app: my-app
+  matchExpressions:
+    - key: environment
+      operator: In
+      values: [production, staging]
+    - key: tier
+      operator: NotIn
+      values: [frontend]
+```
+
+### Field Selectors (Different From Label Selectors!)
+
+```bash
+kubectl get pods --field-selector=status.phase=Running
+kubectl get pods --field-selector=spec.nodeName=node-1
+kubectl get events --field-selector involvedObject.name=my-pod
+```
+
+### Wait Commands (CI/CD Friendly)
+
+```bash
+kubectl wait --for=condition=ready pod/<name> --timeout=120s
+kubectl wait --for=condition=available deployment/<name> --timeout=180s
+kubectl wait --for=condition=complete job/<name> --timeout=300s
+kubectl wait --for=condition=deleted pod/<name> --timeout=60s
+```
+
+---
+
+<Note>
+**One more thing:** The best cheat sheet is the one you customize. Fork this page, add your team's common patterns, your custom alerts, your org's naming conventions. A living document beats a static one every time.
+</Note>
+
+---
+
+*Last updated: August 2026 · Compatible with Kubernetes v1.28–v1.31*

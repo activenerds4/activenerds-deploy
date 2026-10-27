@@ -1,0 +1,57 @@
+---
+title: "Terraform Module Design Patterns"
+slug: terraform-module-design-patterns
+description: "Design reusable Terraform modules — composition, versioning, variables vs locals, and avoiding the module that wraps one resource."
+date: "2026-08-10"
+author: activenerds-team
+category: platform-engineering-devops
+tags: ["kubernetes"]
+featured: false
+relatedArticles: ["docker-multistage-builds-best-practices", "infrastructure-as-code-terraform-pulumi", "devops-tools-benchmark-comparison", "feature-flags-implementation-guide", "kubernetes-autcaling-hpa-keda"]
+image: https://cdn.activenerds.com/images/posts/terraform-module-design-patterns.png
+imageAlt: "Terraform module design patterns — reusable composable infrastructure code architecture best practices"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Design reusable Terraform modules.
+- **Key Capabilities**: composition, versioning, variables vs locals, and avoiding the module that wraps one resource.
+- **What Makes a Good Module**: Apply structured configurations and validated production patterns.
+- **Composition Patterns**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Most Terraform modules are bad, and the reason is almost always the same: they wrap a single resource and call it abstraction. A module that creates one S3 bucket with the arguments passed through adds a layer of indirection without adding any value — you've hidden the resource behind a module interface that's just as complex as the resource itself, and now every change has to go through two files. Good modules earn their abstraction by encoding decisions (a bucket that's private by default, with logging and versioning on, named by convention) that you'd otherwise repeat everywhere. This is a guide to designing Terraform modules that are actually worth reusing.
+
+## What Makes a Good Module
+
+**Abstraction level.** The test of a module's abstraction level is whether it encodes a decision or just passes arguments through. A module that exposes every argument of the underlying resource, with no defaults set, is a wrapper — it adds indirection without value. A module that exposes a small number of meaningful inputs and sets sensible defaults for the rest is an abstraction — it encodes the decisions your organization has made (this is how we do buckets) so they're applied consistently. Good modules have fewer variables than the resources they wrap, because they've made decisions on your behalf.
+
+**Single responsibility.** A module should do one thing at a useful level of granularity. "A VPC with subnets, route tables, NAT gateways, and flow logs" is a useful module — it's the unit at which you actually provision networking. "A VPC" alone is too small (you always need the subnets too), and "the entire platform" is too big (it couples unrelated concerns). The right granularity is the unit your team reasons about as a thing — a database, a cluster, a network — not an arbitrary slice of one.
+
+**Avoiding the wrapper anti-pattern.** The wrapper is the module that exists only to rename a resource's arguments. The signature that gives it away is a variable for every argument of the underlying resource, passed straight through with no transformation. The fix is to either delete the module (use the resource directly) or add value (set defaults, compose multiple resources, enforce naming). The question to ask of every module: if I deleted it and used the resources directly, what would I lose? If the answer is "nothing," delete it; if it's "the conventions and the composed setup," it's earning its keep.
+
+## Composition Patterns
+
+**Root vs child modules.** A Terraform setup has two layers: child modules (reusable, in a registry or a modules/ dir) that create resources, and root modules (environment-specific, in a environments/ dir) that call child modules with concrete values. The separation is what makes modules reusable: child modules have no environment-specific values, root modules have no resource definitions. A child module that hardcodes a project ID or a region isn't reusable; a root module that defines resources isn't portable. Keeping the layers clean is the single most important composition discipline.
+
+**for_each over count.** When you need multiple instances of a resource or module, prefer `for_each` over `count`. The reason is that `count` indexes resources by position, so inserting one in the middle re-creates all the ones after it; `for_each` keys by a string, so adding one doesn't touch the others. For modules, this matters more — re-creating a module re-creates everything in it, which for stateful resources is destructive. Use `for_each` with a map keyed by a stable identifier, and reserve `count` for the case where you genuinely want a positional resource (usually a 0/1 toggle).
+
+**Module composition over inheritance.** Terraform has no inheritance, which is a feature — it forces composition. A module that needs a database doesn't define the database; it takes the database's outputs as inputs, and the caller composes the database module and the app module together in the root. This keeps modules decoupled and replaceable. The anti-pattern is the "mega-module" that creates everything an app needs (network, database, app, monitoring) — it's convenient for the first use and unmaintainable for the tenth, because every app wants a slightly different combination. Compose small modules in the root instead.
+
+## Variables and Outputs
+
+**Variables vs locals.** The distinction is that a variable is something the caller must be able to control, and a local is a derived value the caller shouldn't see. The mistake is making everything a variable "for flexibility" — you end up with a module that has 30 variables, most of which every caller sets to the default, and the conventions the module was supposed to encode are gone. Make a variable only when callers genuinely need different values; derive everything else as locals. A module with 5 variables and 15 locals is better than one with 20 variables, because the 5 variables are the decisions that actually vary, and the locals are the conventions applied consistently.
+
+**Sensible defaults.** Every variable that has a defensible default should have one. The default is where the module's opinion lives — "buckets are private by default," "databases have backups on by default." A module with no defaults forces the caller to make every decision, which is the opposite of why you wrote the module. The exception is variables where a wrong default is dangerous (a variable that deletes resources, a variable that disables encryption) — those should have no default, forcing the caller to decide explicitly.
+
+**Output design for consumers.** Outputs are the module's contract with its callers, and they're underspecified in most modules. The rule: output everything a caller would plausibly need to compose this module with others — IDs, ARNs, names, endpoints. Don't output things callers shouldn't use (internal resource names that might change). Use the `sensitive` flag for outputs that contain secrets, and `description` fields for all of them — the outputs are the part of the module a caller reads first, and undocumented outputs are the part that causes the most integration friction.
+
+## Versioning and Consumption
+
+**Semantic versioning modules.** Reusable modules change, and the changes break callers unless versioned. Tag modules with semantic versions and have callers pin to a version (or a version constraint like `~> 2.0`). The discipline is that breaking changes (renamed variables, removed outputs, changed defaults) bump the major version, and callers opt in by updating their pin. Without versioning, a module change is a game of roulette for every environment using it; with it, updates are deliberate. This is the same discipline as application dependency management, applied to infrastructure — see our [infrastructure as code comparison](/blog/infrastructure-as-code-terraform-pulumi) for how this fits the broader IaC practice.
+
+**Registry vs git sources.** Modules can be sourced from the Terraform Registry, a git repo, or a local path. The Registry is best for public, broadly-useful modules (the AWS VPC module) — it handles versioning and discovery. Git sources are right for private organizational modules — pin to a tag, not a branch, so updates are deliberate. Local paths are right for modules in the same repo as the root that uses them, which is a good pattern for a monorepo: the module and its consumers change together in one PR. The wrong choice is sourcing from a git branch — you get unversioned, unreviewed changes to your infrastructure, which defeats the point of IaC.
+
+**Testing with Terratest.** A reusable module deserves tests, and Terratest is the standard tool: it applies the module in a real account, asserts on the outputs, and destroys. The tests are slow (real infrastructure) but they catch the regressions that `terraform validate` can't — a variable rename that breaks callers, an output that changed shape, a default that no longer works. Run them in CI on module PRs. A module without tests is a module you can't safely change, and a module you can't safely change is a module that rots until someone rewrites it. The investment in tests is what separates a module that's still useful in two years from one that's been forked into five incompatible copies — pair this with the GitOps discipline in our [ArgoCD vs Flux comparison](/blog/gitops-argocd-flux-comparison) and you have a module library that's both reusable and reliably correct.
+
+

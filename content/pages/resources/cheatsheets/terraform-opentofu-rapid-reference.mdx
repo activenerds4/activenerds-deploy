@@ -1,0 +1,332 @@
+---
+title: "Terraform & OpenTofu Rapid Reference Cheat Sheet"
+description: "State manipulation (import/mv/rm), target flags, dynamic blocks, and lifecycle hooks — the day-to-day IaC operations that aren't in the beginner tutorials."
+category: cloud-devsecops
+slug: terraform-opentofu-rapid-reference
+lastUpdated: "2026-08-28"
+tags: ["devsecops", "terraform", "iac", "cloud"]
+published: true
+---
+
+import { TabsGroup, TabsList, TabsTrigger, TabsContent } from "@/components/mdx/TabsGroup";
+import { Callout } from "@/components/mdx/Callout";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Terraform & OpenTofu Rapid Reference Cheat Sheet
+
+**The commands you need when state and reality drift apart.**
+
+`plan` and `apply` are easy. The hard parts are importing existing resources, refactoring without destroying, and targeting changes safely. This sheet covers state manipulation, dynamic blocks, and lifecycle hooks — the operations that bite you in production.
+
+> **OpenTofu note:** OpenTofu is a drop-in fork of Terraform. Every command below works identically — swap `terraform` for `tofu`. The `tofu` binary accepts the same flags and state files.
+
+---
+
+## Table of Contents
+
+1. [Core Workflow](#1-core-workflow)
+2. [State Manipulation](#2-state-manipulation)
+3. [Target Flags](#3-target-flags)
+4. [Dynamic Blocks](#4-dynamic-blocks)
+5. [Lifecycle Hooks](#5-lifecycle-hooks)
+6. [Workspaces & State Isolation](#6-workspaces--state-isolation)
+7. [Safe Operations Checklist](#7-safe-operations-checklist)
+
+---
+
+## 1. Core Workflow
+
+```bash
+terraform init          # download providers, init backend
+terraform fmt          # format code
+terraform validate     # static checks
+terraform plan         # show the diff (review carefully!)
+terraform apply        # execute the plan
+terraform destroy      # tear down everything (dangerous)
+```
+
+### The safe apply pattern
+
+```bash
+# Always plan to a file, then apply that exact plan
+terraform plan -out=tfplan
+terraform apply tfplan      # applies the exact plan, no surprises
+```
+
+<Callout variant="warning" title="Never apply without reviewing the plan">
+In production, always `plan -out` to a file and `apply` that file. A bare `terraform apply` re-plans and can include drift you didn't review. Applying a saved plan guarantees you get exactly what you reviewed.
+</Callout>
+
+---
+
+## 2. State Manipulation
+
+State is the source of truth for what Terraform *thinks* exists. When reality and state disagree, these commands fix it.
+
+### Import existing resources into state
+
+```bash
+# Import an AWS security group that exists but isn't in state
+terraform import aws_security_group.my_sg sg-0123456789abcdef
+
+# Import a GCP bucket
+terraform import google_storage_bucket.my_bucket projects/myproj/buckets/my-bucket
+
+# Import a Kubernetes namespace
+terraform import kubernetes_namespace.my_ns my-namespace
+```
+
+The import address must match a resource block in your config. After import, run `plan` — it should show no changes (meaning your config matches reality).
+
+<Callout variant="tip" title="Import then plan to verify">
+After `terraform import`, immediately run `terraform plan`. If it shows changes, your config doesn't match the real resource — fix the config until plan is clean. Otherwise the next apply will "fix" the resource to match your (wrong) config.
+</Callout>
+
+### Move resources in state (refactor without destroying)
+
+```bash
+# Rename a resource in state (and config) without recreating it
+terraform state mv aws_instance.web aws_instance.frontend
+
+# Move a resource between modules
+terraform state mv aws_instance.web module.web.aws_instance.main
+
+# Move between states (different backends)
+terraform state mv -state=old.tfstate -state-out=new.tfstate aws_instance.web aws_instance.web
+```
+
+### Remove from state (keep the real resource)
+
+```bash
+# Remove from state but DON'T destroy the cloud resource
+terraform state rm aws_instance.old_web
+# The instance keeps running; Terraform forgets about it
+```
+
+### Replace a resource on next apply
+
+```bash
+# Mark a resource for taint (deprecated in favor of -replace)
+terraform taint aws_instance.web
+
+# Modern way: force replacement on apply
+terraform apply -replace=aws_instance.web
+```
+
+### Inspect state
+
+```bash
+terraform state list                    # all resources in state
+terraform state show aws_instance.web   # details of one resource
+terraform state pull                    # dump state to stdout
+terraform state push pulled.tfstate     # push a modified state (dangerous)
+```
+
+<Callout variant="warning" title="state push is a footgun">
+`terraform state push` overwrites remote state with a local file. Only use it for recovery from corruption, and always back up the remote state first. Most "I'll just push this" stories end in tears.
+</Callout>
+
+---
+
+## 3. Target Flags
+
+Apply only specific resources — essential for partial deploys and debugging.
+
+```bash
+# Plan/apply only one resource
+terraform apply -target=aws_instance.web
+
+# Target a whole module
+terraform apply -target=module.web
+
+# Target multiple resources
+terraform apply -target=aws_instance.web -target=aws_lb.main
+
+# Destroy only specific resources
+terraform destroy -target=aws_instance.web
+```
+
+<Callout variant="warning" title="-target is for emergencies, not routine">
+`-target` breaks dependency tracking — it can leave your state inconsistent if you apply a resource whose dependencies aren't applied. Use it for debugging or a single broken resource, then run a full `apply` to reconcile. Never use it as your normal workflow.
+</Callout>
+
+### Refresh-only mode
+
+```bash
+# Update state to match reality WITHOUT applying changes
+terraform apply -refresh-only
+
+# Or the newer refresh command
+terraform refresh   # deprecated, prefer apply -refresh-only
+```
+
+Use `-refresh-only` when you suspect drift and want to see what changed before deciding to act.
+
+---
+
+## 4. Dynamic Blocks
+
+Generate repeated nested blocks from a list/map — avoids copy-pasting identical blocks.
+
+```hcl
+resource "aws_security_group" "web" {
+  name = "web"
+
+  # Generate one ingress block per port in the list
+  dynamic "ingress" {
+    for_each = var.allowed_ports
+    content {
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+}
+```
+
+### With an iterator and index
+
+```hcl
+dynamic "ingress" {
+  for_each = var.rules
+  iterator = rule             # name the iterator (default = block name)
+  content {
+    from_port = rule.value.port
+    protocol   = rule.value.protocol
+    cidr_blocks = [rule.value.cidr]
+  }
+}
+```
+
+### Conditional dynamic blocks
+
+```hcl
+dynamic "ingress" {
+  for_each = var.enable_ssh ? [1] : []   # empty list = no block
+  content {
+    from_port = 22
+    to_port   = 22
+    protocol  = "tcp"
+  }
+}
+```
+
+<Callout variant="tip" title="Empty for_each = no block">
+A `for_each` over an empty collection produces zero blocks. This makes dynamic blocks a clean way to conditionally include a nested block — `for_each = var.enabled ? [1] : []` includes the block only when enabled.
+</Callout>
+
+---
+
+## 5. Lifecycle Hooks
+
+Control how Terraform creates, updates, and destroys resources.
+
+```hcl
+resource "aws_instance" "web" {
+  ami           = var.ami
+  instance_type = var.size
+
+  lifecycle {
+    create_before_destroy = true     # make new before destroying old
+    prevent_destroy        = false   # if true, blocks destroy entirely
+    ignore_changes = [
+      tags["LastUpdated"],            # ignore drift on these attrs
+      instance_type,                  # allow manual resize, don't revert
+    ]
+  }
+}
+```
+
+### When to use each
+
+| Hook | Use case |
+|------|----------|
+| `create_before_destroy` | Resources that can't be updated in place (e.g., changing an SG rule that requires replacement) — avoids downtime |
+| `prevent_destroy` | Critical resources that should never be destroyed (prod DBs) — blocks `terraform destroy` |
+| `ignore_changes` | Attributes managed outside Terraform (autoscaler, manual tags, external systems) |
+
+<Callout variant="warning" title="create_before_destroy has a catch">
+`create_before_destroy` requires the resource and its dependencies to also support it, or the new resource can't be created while the old one exists. Read the provider docs — some resources need careful design to use this safely (e.g., unique-name constraints).
+</Callout>
+
+### Provisioners (last resort)
+
+```hcl
+resource "aws_instance" "web" {
+  # ...
+
+  provisioner "remote-exec" {
+    inline = ["sudo apt update && sudo apt install -y nginx"]
+  }
+
+  lifecycle {
+    # Only run provisioner on create, not every apply
+    # (provisioners only run on create/destroy by default)
+  }
+}
+```
+
+<Callout variant="tip" title="Avoid provisioners">
+Provisioners run only on create/destroy, not on update — so they don't converge. Prefer `user_data` with cloud-init, or configuration management (Ansible/Packer). Use provisioners only when nothing else works, and mark them `when = destroy` if needed for cleanup.
+</Callout>
+
+---
+
+## 6. Workspaces & State Isolation
+
+### Workspaces (same config, separate state)
+
+```bash
+terraform workspace new staging
+terraform workspace select prod
+terraform workspace list
+terraform workspace delete staging   # must be empty
+```
+
+```hcl
+# Use the workspace name to vary config
+resource "aws_instance" "web" {
+  count = terraform.workspace == "prod" ? 3 : 1
+  tags  = { Environment = terraform.workspace }
+}
+```
+
+### Workspaces vs separate directories
+
+<ComparisonTable
+  title="State isolation strategies"
+  columns={["Workspaces", "Separate dirs"]}
+  rows={[
+    { label: "Same config", values: ["Yes (one set of files)", "No (duplicated or shared via modules)"] },
+    { label: "Isolation", values: ["Separate state, same backend", "Fully separate (different backends OK)"] },
+    { label: "Risk", values: ["Easy to target wrong workspace", "Harder to accidentally cross-env"] },
+    { label: "Best for", values: ["Dev/staging of same app", "Prod vs non-prod, different teams"] },
+  ]}
+/>
+
+<Callout variant="warning" title="Don't use workspaces for prod isolation">
+Workspaces share the same config and backend — a typo in `workspace select` can target production. For real prod/non-prod isolation, use separate directories with separate state backends. Workspaces are fine for ephemeral dev environments, not for protecting prod.
+</Callout>
+
+---
+
+## 7. Safe Operations Checklist
+
+<ChecklistBox title="Before applying in production" items={[
+  "✅ **Plan to a file**: `terraform plan -out=tfplan`, then `terraform apply tfplan`.",
+  "✅ **Review the plan**: read every `+`, `~`, and `-`. Especially `-` (destroy).",
+  "✅ **Check for destroys**: `terraform plan | grep -i destroy` — any unexpected destroys?",
+  "✅ **Use -replace, not taint**: `terraform apply -replace=aws_instance.web`.",
+  "✅ **Import then verify**: after `import`, run `plan` until it's clean.",
+  "✅ **State lock check**: ensure no stale locks (`terraform force-unlock` only if certain).",
+  "✅ **Backend backup**: remote state with versioning + locking (S3 + DynamoDB, etc.).",
+  "✅ **No -target in routine**: use it only for a single broken resource, then full apply.",
+  "✅ **prevent_destroy on prod DBs**: stop accidental `terraform destroy`.",
+  "✅ **Run in CI for non-prod**: humans apply prod from reviewed plans only."
+]} />
+
+<Callout variant="tip" title="Grep the plan for destroys">
+`terraform plan -out=tfplan && terraform show -json tfplan | jq '.resource_changes[] | select(.change.actions[] | contains("delete"))'` lists every resource that will be destroyed. Review that list before any prod apply. Destroys are the irreversible actions.
+</Callout>

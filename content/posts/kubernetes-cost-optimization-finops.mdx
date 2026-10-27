@@ -1,0 +1,61 @@
+---
+title: "Kubernetes Cost Optimization & FinOps"
+slug: kubernetes-cost-optimization-finops
+description: "Cut Kubernetes spend with a practical FinOps checklist — right-sizing, autoscaling, spot instances, and request/limit tuning."
+date: "2025-10-20"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: false
+relatedArticles: ["kubernetes-autcaling-hpa-keda", "kubernetes-observability-prometheus-grafana", "blue-green-deployment-kubernetes", "canary-deployment-strategies-kubernetes", "cicd-pipeline-optimization"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-cost-optimization-finops.png
+imageAlt: "Kubernetes cost optimization with FinOps — reducing cloud spend through right-sizing resource requests and limits"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Cut Kubernetes spend with a practical FinOps checklist.
+- **Key Capabilities**: right-sizing, autoscaling, spot instances, and request/limit tuning.
+- **Where Kubernetes Spend Leaks**: Apply structured configurations and validated production patterns.
+- **Right-Sizing Workloads**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Kubernetes has a reputation for being expensive, and most of that reputation is earned — not because the platform is wasteful, but because it makes waste easy. Over-provisioned requests, idle nodes, and forgotten dev clusters quietly consume budget while everything "works fine." This is a practical FinOps checklist for finding and cutting that waste without destabilizing production.
+
+## Where Kubernetes Spend Leaks
+
+The three most common leak categories are predictable. **Over-provisioned requests** — teams set CPU/memory requests conservatively and never revisit them; the cluster provisions nodes to fit requests, so inflated requests mean inflated node count. **Idle nodes** — autoscaler scale-up is responsive but scale-down is slow and conservative, so clusters sit at 40% utilization for hours. **Forgotten environments** — a dev or staging cluster left running 24/7 for workloads that run only during business hours.
+
+The first step is visibility. Tools like Kubecost or OpenCost attribute spend to namespaces and workloads so you know where the money goes. You can't optimize what you can't see, and the surprise is usually how much goes to a small number of workloads with oversized requests.
+
+## Right-Sizing Workloads
+
+Requests and limits are the levers. **Requests** determine scheduling — the cluster needs enough capacity to fit all requests, so they directly drive node count. **Limits** cap usage. The most common mistake is setting requests equal to limits "to be safe," which over-provisions and causes throttling under burst.
+
+Profile before you cut. Use the metrics server or a monitoring stack to observe actual CPU and memory percentiles over a representative window (include peak traffic periods). Set requests around the p95–p99 of observed usage with a modest buffer, and set limits higher to allow bursts. The Vertical Pod Autoscaler (VPA) in recommendation mode will suggest right-sized requests based on history — review its recommendations, don't apply blindly.
+
+<Callout type="tip">
+Don't right-size based on averages. A workload averaging 200m CPU that spikes to 2000m during deploys will get throttled if you set its request to the average. Use percentiles and include your burstiest traffic in the measurement window.
+</Callout>
+
+## Autoscaling and Spot
+
+The Horizontal Pod Autoscaler (HPA) scales Pod count to demand, which keeps you from running 20 replicas at 2am when 3 would do. Pair it with the cluster autoscaler so node count follows Pod count. For finer-grained, event-driven scaling (scale to zero, scale on a queue depth), KEDA is the upgrade path — see our [HPA and KEDA guide](/blog/kubernetes-autcaling-hpa-keda).
+
+**Spot instances** cut node cost by 60–90% for interruptible workloads. Run a spot node pool with a tolerant taint, and schedule stateless, bursty workloads there. Keep a small on-demand buffer for anything that can't tolerate eviction. Use Pod Disruption Budgets to limit how many replicas a spot eviction can take at once, and set the cluster autoscaler's `--balance-similar-node-groups` so a spot interruption triggers replacement before traffic suffers.
+
+The combination — right-sized requests, HPA + cluster autoscaler, and spot for the tolerant tail — typically cuts cluster cost by 30–50% without touching application architecture.
+
+## FinOps Practices
+
+Technical changes only stick if the organization can see and act on them. **Cost attribution** by team or namespace makes spend visible to the people who can change it. **Showback dashboards** (not chargeback, which creates political friction) let teams see their own usage trends and self-correct.
+
+Set a **review cadence** — monthly is usually right. Walk through the top spenders, check for new over-provisioning, and verify autoscaling is actually scaling down. Cost optimization isn't a one-time project; it's a hygiene practice that decays without attention.
+
+<Warning>
+Aggressive cost cutting without a safety margin is how you cause incidents. Always leave headroom for bursts and node failures. The goal is removing waste, not running so lean that a traffic spike or a node loss cascades into an outage — that costs far more than the savings.
+</Warning>
+
+The teams that keep Kubernetes cost-efficient aren't the ones with the cleverest tooling; they're the ones who made right-sizing and review a recurring habit. Visibility, right-sizing, autoscaling, and a monthly cadence — in that order — is the playbook that works.
+
+

@@ -1,0 +1,312 @@
+---
+title: "Runtime Security: Falco vs Tetragon"
+slug: runtime-security-falco-tetragon
+description: "Compare Falco and Tetragon for Kubernetes runtime security — detection capabilities, performance, and eBPF architecture."
+date: "2025-12-25"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: false
+relatedArticles: ["container-image-security-scanning", "cloud-native-security-best-practices", "infrastructure-as-code-terraform-pulumi", "kubernetes-rbac-configuration", "service-mesh-istio-linkerd"]
+image: https://cdn.activenerds.com/images/posts/runtime-security-falco-tetragon.png
+imageAlt: "Runtime security with Falco and Tetragon — eBPF-based threat detection for Kubernetes workloads"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Runtime security is essential**: static security can't catch everything
+- **eBPF makes it practical**: low overhead, kernel-level visibility
+- **Falco for detection**: rich rules, flexible alerting, mature ecosystem
+- **Tetragon for enforcement**: block threats in real time, Cilium-native
+- **Start with detection**: move to enforcement once you've tuned your rules
+</Callout>
+
+Static security — image scanning, RBAC, network policies — stops known threats at the gate. But what about threats that get through? A zero-day exploit, a misconfigured pod that someone manually deployed, or a supply chain attack that bypasses your CI pipeline. Runtime security catches these by monitoring system behavior in real time. Both Falco and Tetragon use eBPF to do this, but they take fundamentally different approaches.
+
+## Runtime Security Fundamentals
+
+### Why Static Security Isn't Enough
+
+Static security tools operate before workloads run:
+
+- **[Image scanning](/articles/container-image-security-scanning)** finds known vulnerabilities in images
+- **Admission controllers** block non-compliant deployments
+- **RBAC** limits what authenticated users can do
+- **Network policies** control traffic flow
+
+But once a workload is running, static tools are blind. A compromised pod that starts a reverse shell, connects to a C2 server, or tries to read `/etc/shadow` won't be caught by image scanning or network policies. Runtime security fills this gap.
+
+### eBPF Advantages
+
+eBPF (Extended Berkeley Packet Filter) is the technology that makes runtime security practical:
+
+- **Kernel-level visibility** — sees every system call, network packet, and process execution
+- **Low overhead** — typically &lt;1% CPU, no application code changes needed
+- **No sidecars** — runs as a kernel program, not a per-pod proxy
+- **Real-time** — events are captured and analyzed as they happen
+
+<Callout type="info">
+eBPF programs run in a sandboxed environment within the Linux kernel. They're verified for safety before execution, so they can't crash the kernel. This makes eBPF safe for production use — it's the same technology behind Cilium's networking.
+</Callout>
+
+### Detection vs Prevention
+
+- **Detection** (Falco): Observe and alert on suspicious behavior. The workload continues running; you get an alert to investigate.
+- **Prevention** (Tetragon): Observe and block suspicious behavior. The syscall is killed before it completes.
+
+Detection is safer (no risk of blocking legitimate behavior) but slower to respond. Prevention is immediate but risks false positives that could break your application.
+
+## Falco Deep Dive
+
+### Rule-Based Detection
+
+Falco uses YAML rules to define suspicious behavior:
+
+```yaml
+# Detect shell opened in a container
+- rule: Terminal shell in container
+  desc: A shell was opened in a container
+  condition: >
+    evt.type = execve and
+    container.id != host and
+    proc.name in (bash, sh, zsh, dash)
+  output: >
+    Shell opened in container
+    (user=%user.name container=%container.name
+    image=%container.image.repository cmd=%proc.cmdline)
+  priority: WARNING
+  tags: [container, shell, mitre_execution]
+
+# Detect connection to cloud metadata service
+- rule: Contact cloud metadata service from container
+  desc: Container attempted to contact cloud metadata service
+  condition: >
+    fd.sip="169.254.169.254" and
+    container.id != host
+  output: >
+    Metadata service contact from container
+    (container=%container.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [network, metadata, mitre_discovery]
+```
+
+### Community Rules
+
+Falco ships with 100+ community rules covering:
+
+- Shell execution in containers
+- Unauthorized process execution
+- File system tampering (writing to /etc, /bin)
+- Network anomalies (outbound connections to suspicious IPs)
+- Privilege escalation attempts
+- Cryptocurrency mining activity
+
+You can enable/disable rules and adjust their severity:
+
+```yaml
+# falco.yaml
+rules_file:
+  - /etc/falco/falco_rules.yaml
+  - /etc/falco/falco_rules.local.yaml  # Your customizations
+
+# In falco_rules.local.yaml
+- rule: Terminal shell in container
+  enabled: false  # Disable if you use debug containers legitimately
+```
+
+### Performance Characteristics
+
+Falco's overhead depends on rule complexity and event volume:
+
+| Metric | Typical | Worst Case |
+|--------|---------|------------|
+| CPU overhead | 0.5-1% | 2-3% |
+| Memory | 50-100MB | 200MB |
+| Event latency | &lt;10ms | &lt;50ms |
+| Rules evaluated per event | 100+ | 500+ |
+
+The biggest performance factor is the number of events being processed. A busy node with thousands of syscalls per second will use more CPU than a quiet node.
+
+## Tetragon Deep Dive
+
+### Enforcement Capabilities
+
+Tetragon can not only detect but also kill suspicious processes:
+
+```yaml
+# Tetragon tracing policy: Kill shell execution in containers
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: block-shell-in-container
+spec:
+  kprobes:
+  - call: "sys_execve"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+    selectors:
+    - matchPIDs:
+      - operator: In
+        values: ["container"]  # Only in containers
+      matchArgs:
+      - index: 0
+        operator: "Prefix"
+        values:
+        - "/bin/sh"
+        - "/bin/bash"
+      matchActions:
+      - action: Kill  # Kill the process immediately
+```
+
+This policy kills any attempt to execute a shell inside a container — the process never starts.
+
+### Policy as Code
+
+Tetragon policies are Kubernetes CRDs, managed with standard tools:
+
+```yaml
+# Detect and log crypto mining pool connections
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: detect-crypto-mining
+spec:
+  kprobes:
+  - call: "tcp_connect"
+    syscall: true
+    args:
+    - index: 0
+      type: "sockaddr"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "DAddr"
+        values:
+        - "xmr.pool.minergate.com:443"
+        - "pool.supportxmr.com:3333"
+        - "stratum+tcp://"
+      matchActions:
+      - action: Post
+        rate: 1  # Log every occurrence
+```
+
+### Cilium Integration
+
+Tetragon is part of the Cilium ecosystem, which means:
+
+- **Shared eBPF programs** — Cilium's networking and Tetragon's security use the same eBPF infrastructure
+- **Identity-aware policies** — Tetragon can use Cilium's identity labels in security rules
+- **Unified observability** — Cilium's Hubble and Tetragon share the same event pipeline
+- **Single installation** — if you're already running Cilium, Tetragon is a minimal add-on
+
+## Feature Comparison
+
+| Feature | Falco | Tetragon |
+|---------|-------|----------|
+| Detection | Yes | Yes |
+| Prevention (kill) | No (via plugins) | Yes (native) |
+| Rule language | YAML conditions | CRD + eBPF selectors |
+| Community rules | 100+ built-in | Growing, fewer available |
+| Cilium integration | No | Native |
+| Sidecar required | No | No |
+| eBPF-based | Yes | Yes |
+| Kubernetes CRD | No (configmaps) | Yes |
+| Output format | JSON, syslog, falcosidekick | JSON, logs |
+| Alert routing | falcosidekick (many sinks) | Standard K8s logging |
+| Maturity | High (CNCF) | Growing (Cilium ecosystem) |
+
+## Choosing Your Tool
+
+### Detection-Only Needs
+
+Choose **Falco** if:
+
+- You want detection and alerting without blocking
+- You need rich community rules out of the box
+- You want flexible alert routing (Slack, PagerDuty, SIEM)
+- You're not using Cilium for networking
+- Your team prefers YAML rules over CRDs
+
+```bash
+# Quick Falco deployment
+helm repo add falcosecurity https://falcosecurity.github.io/charts
+helm install falco falcosecurity/falco \
+  --namespace falco \
+  --create-namespace \
+  --set driver.kind=ebpf \
+  --set falcosidekick.enabled=true \
+  --set falcosidekick.config.slack.webhookurl=https://hooks.slack.com/services/...
+```
+
+### Enforcement Requirements
+
+Choose **Tetragon** if:
+
+- You need to block (kill) suspicious processes, not just alert
+- You're already using Cilium for networking
+- You want policy as Kubernetes-native CRDs
+- You need identity-aware security rules
+- Your team is comfortable with eBPF-level configuration
+
+```bash
+# Install Tetragon with Cilium
+helm repo add cilium https://helm.cilium.io/
+helm install cilium cilium/cilium \
+  --namespace kube-system \
+  --set tetragon.enabled=true \
+  --set tetragon.grpc.enabled=true
+```
+
+### Combined Approach
+
+Many teams use both:
+
+- **Falco** for broad detection with community rules and alert routing
+- **Tetragon** for targeted enforcement of critical policies (block shell execution, block metadata access)
+
+This gives you the best of both worlds — Falco's rich rule ecosystem for visibility and Tetragon's enforcement for critical security controls.
+
+<Callout type="tip">
+**Movement break:** You just absorbed a detailed comparison of eBPF security tools. Stand up, roll your wrists 10 times each direction, and look 20 feet away for 20 seconds. Your eyes and wrists take the brunt of deep technical reading — give them a quick reset.
+</Callout>
+
+## Deployment Best Practices
+
+### Start with Detection
+
+Regardless of which tool you choose, start with detection-only mode:
+
+1. Deploy the tool with default rules
+2. Monitor alerts for 1-2 weeks
+3. Tune rules to reduce false positives
+4. Add custom rules for your specific environment
+5. Only then consider enforcement (Tetragon)
+
+### Alert Fatigue Prevention
+
+- Start with high-severity rules only (CRITICAL, WARNING)
+- Disable rules that don't apply to your environment
+- Set up aggregation to avoid alert storms
+- Use falcosidekick for intelligent routing (critical → PagerDuty, info → Slack)
+
+### Performance Monitoring
+
+Monitor the overhead of your runtime security tool:
+
+```bash
+# Check Falco resource usage
+kubectl top pod -n falco
+
+# Check Tetragon resource usage
+kubectl top pod -n kube-system -l app=tetragon
+
+# Monitor eBPF program overhead
+bpftool prog show
+```
+
+## Summary & Next Steps
+
+For the broader security context, see our [DevSecOps hardening checklist](/blog/devsecops-hardening-checklist) and [threat modeling guide](/blog/threat-modeling-cloud-workloads). Runtime security is the last line of defense — make sure your earlier layers are solid too.
+

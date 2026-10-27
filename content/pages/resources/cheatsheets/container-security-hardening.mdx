@@ -1,0 +1,350 @@
+---
+title: "Container Security & Hardening Cheat Sheet"
+description: "Ship containers attackers can't use — distroless multi-stage builds, rootless users, Trivy scan flags, and Linux capability drops."
+category: cloud-devsecops
+slug: container-security-hardening
+lastUpdated: "2026-08-28"
+tags: ["devsecops", "docker", "security", "containers"]
+published: true
+---
+
+import { TabsGroup, TabsList, TabsTrigger, TabsContent } from "@/components/mdx/TabsGroup";
+import { Callout } from "@/components/mdx/Callout";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Container Security & Hardening Cheat Sheet
+
+**Smaller images, fewer privileges, scanned before they ship.**
+
+A hardened container is a small container that runs as a non-root user with no capabilities and no shell. This sheet is the build patterns, the runtime flags, and the scan commands that get you there.
+
+---
+
+## Table of Contents
+
+1. [Multi-Stage Builds](#1-multi-stage-builds)
+2. [Distroless & Minimal Base Images](#2-distroless--minimal-base-images)
+3. [Run as Non-Root](#3-run-as-non-root)
+4. [Drop Linux Capabilities](#4-drop-linux-capabilities)
+5. [Trivy Scanning](#5-trivy-scanning)
+6. [Runtime Hardening Flags](#6-runtime-hardening-flags)
+7. [Hardening Checklist](#7-hardening-checklist)
+
+---
+
+## 1. Multi-Stage Builds
+
+Separate the build environment (compilers, deps) from the runtime image (only what runs). Smaller, fewer vulnerabilities, faster pulls.
+
+```dockerfile
+# ---- Build stage ----
+FROM golang:1.22 AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /app -ldflags="-s -w" ./cmd/server
+
+# ---- Runtime stage ----
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /app /app
+USER nonroot
+ENTRYPOINT ["/app"]
+```
+
+### Why it matters
+
+| Single-stage | Multi-stage |
+|--------------|-------------|
+| Includes compiler, source, build deps | Runtime image has only the binary |
+| ~800 MB | ~20 MB |
+| Hundreds of CVEs from build tools | Minimal attack surface |
+| Source code shipped in image | No source in image |
+
+<Callout variant="tip" title="Strip debug info">
+Build with `-ldflags="-s -w"` (Go) or `strip` (C/Rust) to drop debug symbols. Smaller binary, smaller image, and you're not shipping symbol tables that help reverse-engineering.
+</Callout>
+
+---
+
+## 2. Distroless & Minimal Base Images
+
+<ComparisonTable
+  title="Base image options"
+  columns={["Size", "Shell", "Best For"]}
+  rows={[
+    { label: "ubuntu:22.04", values: ["~78 MB", "Yes", "Compatibility (avoid if possible)"] },
+    { label: "debian:bookworm-slim", values: ["~74 MB", "Yes", "When you need apt + shell"] },
+    { label: "alpine:3.20", values: ["~7 MB", "Yes (busybox)", "Tiny images; musl libc caveat"] },
+    { label: "distroless/static", values: ["~2 MB", "No", "Static binaries (Go, Rust)"] },
+    { label: "distroless/nodejs", values: ["~50 MB", "No", "Node apps, no shell"] },
+    { label: "scratch", values: ["0 MB", "No", "Fully static, zero-base images"] },
+  ]}
+/>
+
+<TabsGroup defaultValue="distroless">
+<TabsList>
+<TabsTrigger value="distroless">Distroless</TabsTrigger>
+<TabsTrigger value="alpine">Alpine</TabsTrigger>
+<TabsTrigger value="scratch">Scratch</TabsTrigger>
+</TabsList>
+<TabsContent value="distroless">
+
+No shell, no package manager, no package manager means no `apk add` for attackers. Use the `:nonroot` variant to get a non-root user baked in.
+
+```dockerfile
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY app /app
+USER nonroot
+ENTRYPOINT ["/app"]
+```
+
+</TabsContent>
+<TabsContent value="alpine">
+
+Tiny, but uses **musl libc** — some binaries (prebuilt Go CGO, some Python wheels) break. Test thoroughly. Add a non-root user manually.
+
+```dockerfile
+FROM alpine:3.20
+RUN addgroup -S app && adduser -S app -G app
+COPY app /app
+USER app
+ENTRYPOINT ["/app"]
+```
+
+</TabsContent>
+<TabsContent value="scratch">
+
+Empty filesystem. You must copy in *everything* the binary needs (CA certs, /etc files). Best for fully static binaries.
+
+```dockerfile
+FROM scratch
+COPY app /app
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+USER 65532:65532
+ENTRYPOINT ["/app"]
+```
+
+</TabsContent>
+</TabsGroup>
+
+<Callout variant="warning" title="Alpine + musl gotchas">
+Alpine's musl libc causes subtle bugs with prebuilt binaries (DNS resolution, some Go CGO builds, glibc-linked Python wheels). If you hit "not found" or DNS errors on Alpine, switch to `distroless` or `debian-slim`. Don't fight musl in production.
+</Callout>
+
+---
+
+## 3. Run as Non-Root
+
+Running as root in a container is still root on the host kernel. Never do it.
+
+### In the Dockerfile
+
+```dockerfile
+# Create a dedicated user with a fixed UID/GID
+RUN groupadd -r app && useradd -r -g app -u 10001 app
+USER 10001:10001
+```
+
+### In Kubernetes (defense in depth)
+
+```yaml
+spec:
+  securityContext:
+    runAsNonRoot: true          # refuse to run as root (blocks start)
+    runAsUser: 10001
+    fsGroup: 10001
+  containers:
+    - name: app
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+```
+
+<Callout variant="tip" title="runAsNonRoot is a hard gate">
+`runAsNonRoot: true` makes the kubelet refuse to start a container that would run as UID 0. It's a safety net — even if the image defaults to root, the pod won't start. Always set it on production workloads.
+</Callout>
+
+### Read-only root filesystem
+
+```yaml
+securityContext:
+  readOnlyRootFilesystem: true
+# Then mount writable volumes only where the app needs to write
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: cache
+    mountPath: /var/cache/app
+volumes:
+  - name: tmp
+    emptyDir: {}
+```
+
+This stops attackers from dropping binaries into the image's filesystem at runtime.
+
+---
+
+## 4. Drop Linux Capabilities
+
+Containers get a default set of Linux capabilities. Drop all of them, add back only what's needed.
+
+```yaml
+securityContext:
+  capabilities:
+    drop:
+      - ALL              # drop everything first
+    add:
+      - NET_BIND_SERVICE  # only if binding ports <1024
+  allowPrivilegeEscalation: false
+```
+
+### Common capabilities (and when you need them)
+
+| Capability | Needed for |
+|------------|-----------|
+| `NET_BIND_SERVICE` | Binding ports < 1024 (or use `sysctl net.ipv4.ip_unprivileged_port_start`) |
+| `CHOWN` | Changing file ownership (rarely needed) |
+| `NET_RAW` | Raw sockets (ping) — often a security smell |
+| `SYS_PTRACE` | Debugging/tracing (debug containers only) |
+
+<Callout variant="warning" title="NET_RAW is a red flag">
+`NET_RAW` lets a container send raw packets — useful for attackers doing ARP spoofing or ping sweeps. Most apps don't need it. Drop `ALL` and don't add it back unless you have a specific reason.
+</Callout>
+
+### Privileged mode: never
+
+```yaml
+securityContext:
+  privileged: false   # the default; never set true in production
+```
+
+`privileged: true` gives the container near-host access. It's only for debugging tools (like `kubectl debug node`). Never in production workloads.
+
+---
+
+## 5. Trivy Scanning
+
+```bash
+# Scan a local image
+trivy image myapp:1.0
+
+# Scan and fail the build on HIGH/CRITICAL
+trivy image --severity HIGH,CRITICAL --exit-code 1 myapp:1.0
+
+# Scan a Dockerfile for bad practices
+trivy config Dockerfile
+
+# Scan IaC (Terraform, K8s manifests)
+trivy config ./k8s/
+
+# Scan a running cluster
+trivy kubectl --report summary
+
+# Scan a remote image without pulling
+trivy image --format json -o results.json ghcr.io/org/app:1.0
+```
+
+### Ignore known/accepted vulnerabilities
+
+```yaml
+# .trivyignore
+CVE-2023-1234   # accepted: no fix available, not exploitable in our config
+CVE-2024-5678   # false positive for our usage
+```
+
+```bash
+trivy image --ignorefile .trivyignore --exit-code 1 myapp:1.0
+```
+
+### SBOM generation
+
+```bash
+# Generate an SBOM (CycloneDX) for supply-chain tracking
+trivy image --format cyclonedx -o sbom.json myapp:1.0
+
+# Or SPDX
+trivy image --format spdx-json -o sbom.json myapp:1.0
+```
+
+<Callout variant="tip" title="Scan in CI, not just locally">
+Run `trivy image --exit-code 1 --severity HIGH,CRITICAL` in your CI pipeline so vulnerable images never reach the registry. Pair with image signing (cosign) so only scanned images are admitted to the cluster via admission control.
+</Callout>
+
+---
+
+## 6. Runtime Hardening Flags
+
+### Docker / Podman run flags
+
+```bash
+docker run \
+  --read-only \                          # read-only root fs
+  --user 10001:10001 \                   # non-root
+  --cap-drop ALL \                       # drop all caps
+  --cap-add NET_BIND_SERVICE \           # add back only what's needed
+  --security-opt no-new-privileges \     # block privilege escalation
+  --security-opt seccomp=default \       # seccomp profile
+  --tmpfs /tmp \                         # writable tmpfs where needed
+  --memory 512m --cpus 1 \               # resource limits
+  --network none \                       # no network (if not needed)
+  myapp:1.0
+```
+
+### Kubernetes equivalent (the full securityContext)
+
+```yaml
+apiVersion: v1
+kind: Pod
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: app
+      image: myapp:1.0
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        limits:
+          memory: 512Mi
+          cpu: 1000m
+```
+
+<Callout variant="note" title="no-new-privileges = allowPrivilegeEscalation:false">
+In Docker, `--security-opt no-new-privileges` prevents a process from gaining more privileges via setuid binaries. In Kubernetes, the equivalent is `allowPrivilegeEscalation: false`. Both stop the "escalate via suid binary" attack path. Always set it.
+</Callout>
+
+---
+
+## 7. Hardening Checklist
+
+<ChecklistBox title="Container hardening checklist" items={[
+  "✅ **Multi-stage build** — build tools never reach the runtime image.",
+  "✅ **Minimal/distroless base** — no shell, no package manager.",
+  "✅ **Run as non-root** — fixed UID, `runAsNonRoot: true` as a gate.",
+  "✅ **Read-only root filesystem** — mount writable volumes only where needed.",
+  "✅ **Drop ALL capabilities** — add back only the specific ones you need.",
+  "✅ **allowPrivilegeEscalation: false** — block setuid escalation.",
+  "✅ **Seccomp RuntimeDefault** — restrict syscalls to the common set.",
+  "✅ **Resource limits** — memory + CPU on every container.",
+  "✅ **Pin image digests** — `image@sha256:...`, not mutable tags.",
+  "✅ **Scan in CI** — Trivy `--exit-code 1 --severity HIGH,CRITICAL`.",
+  "✅ **Generate SBOM** — track your supply chain.",
+  "✅ **Sign images** — cosign + verify at admission."
+]} />
+
+<Callout variant="warning" title="Hardening breaks things — test it">
+`readOnlyRootFilesystem`, dropping caps, and distroless images all surface assumptions your app made (writing to /tmp, needing a shell, binding low ports). Apply hardening incrementally in staging and watch for failures. The goal is secure *and* running.
+</Callout>

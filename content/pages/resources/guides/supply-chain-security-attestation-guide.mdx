@@ -1,0 +1,338 @@
+---
+title: "Supply Chain Security & Attestation Pipeline Guide"
+description: "Build a SLSA Level 3 supply chain — Sigstore/Cosign image signing, SBOM generation automation, provenance attestation, and Kyverno admission control that verifies attestations before any pod runs."
+category: devsecops
+slug: supply-chain-security-attestation-guide
+lastUpdated: "2026-08-28"
+tags: ["devsecops", "supply-chain", "sigstore", "sbom"]
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Supply Chain Security & Attestation Pipeline Guide
+
+**Your container image is only as trustworthy as the chain that built it.** A signed image proves what was built; an attestation proves how it was built. Together, they let your cluster verify — before running a single pod — that an image came from your pipeline, was built from your source, and hasn't been tampered with. This guide covers the SLSA Level 3 architecture: Cosign signing, SBOM automation, provenance attestation, and Kyverno admission control that enforces it all.
+
+---
+
+## Table of Contents
+
+1. [The Supply Chain Threat Model](#1-the-supply-chain-threat-model)
+2. [SLSA: The Framework](#2-slsa-the-framework)
+3. [Image Signing with Cosign](#3-image-signing-with-cosign)
+4. [SBOM & Provenance Attestation](#4-sbom--provenance-attestation)
+5. [Admission Control with Kyverno](#5-admission-control-with-kyverno)
+6. [The Complete Attestation Pipeline](#6-the-complete-attestation-pipeline)
+
+---
+
+## 1. The Supply Chain Threat Model
+
+Supply chain attacks target the build and distribution pipeline, not the application code. Understanding the threat model clarifies what each control defends against.
+
+### The Attack Vectors
+
+| Vector | Example | Defense |
+|---|---|---|
+| Compromised base image | Malicious base image with backdoor | SBOM + provenance verification |
+| Build tampering | Attacker modifies the build to inject code | Provenance attestation (build was untampered) |
+| Registry compromise | Image replaced in the registry | Image signing (signature verification) |
+| Dependency confusion | Malicious package shadows internal one | Dependency pinning + SBOM |
+| Stolen build credentials | Attacker pushes images as you | Keyless signing (no credentials to steal) |
+| Runtime image swap | Pod pulls a different image than expected | Admission control (verify before run) |
+
+<Callout variant="warning" title="The image you run may not be the image you built">
+  Without signing, your cluster has no way to know whether the image it pulls is the one your pipeline built. A compromised registry, a misconfigured image reference, or a tag re-pointing can all cause a pod to run a different image than intended. Signing + admission control is what closes this gap — the cluster verifies the signature before allowing the pod to start.
+</Callout>
+
+### The Trust Boundary
+
+```text
+Source code (trusted)
+  → Build pipeline (must be trusted + attested)
+    → Image (signed)
+      → Registry (must be integrity-verified)
+        → Cluster admission (verifies signature + attestation)
+          → Pod runs (only if verified)
+```
+
+Each arrow is a trust transition. Supply chain security ensures each transition is verifiable, so a compromise at any stage is detectable downstream.
+
+---
+
+## 2. SLSA: The Framework
+
+SLSA (Supply-chain Levels for Software Artifacts) is the framework that defines supply chain security levels. SLSA Level 3 is the target for production supply chains.
+
+### The SLSA Levels
+
+| Level | Requirement | What it prevents |
+|---|---|---|
+| SLSA 1 | Build process documented | Basic provenance |
+| SLSA 2 | Hosted build service, tamper-resistant | Build tampering (partially) |
+| SLSA 3 | Hardened build platform, isolated builds | Build tampering (strongly) |
+| SLSA 4 | Reproducible builds, two-party review | Most sophisticated attacks |
+
+<Callout variant="note" title="SLSA 3 is the practical target">
+  SLSA 3 is the level most production teams should target. It requires a hardened, isolated build platform (which modern CI providers like GitHub Actions, GitLab CI provide), provenance attestation, and signing. SLSA 4 (reproducible builds) is aspirational for most teams. SLSA 3 is achievable with the tools in this guide and provides strong protection against the most common supply chain attacks.
+</Callout>
+
+### SLSA 3 Requirements
+
+- **Provenance** — every build generates a provenance attestation (what source, what builder, what parameters)
+- **Build service** — builds happen on a hosted, tamper-resistant service (not a developer laptop)
+- **Isolated builds** — each build is isolated from others (no cross-build interference)
+- **Non-falsifiable provenance** — the provenance can't be forged (signed by the builder)
+- **Signed artifacts** — the built image is signed
+
+---
+
+## 3. Image Signing with Cosign
+
+Cosign (part of the Sigstore project) is the standard tool for signing container images. It supports both key-based and keyless signing.
+
+### Keyless Signing (Recommended)
+
+Keyless signing uses OIDC federation (the same pattern as keyless CI/CD) — the CI pipeline proves its identity and gets a short-lived signing certificate. No signing key to manage, rotate, or protect.
+
+```text
+1. CI pipeline builds the image
+2. CI requests a signing certificate via OIDC (proves pipeline identity)
+3. Cosign signs the image using the short-lived certificate
+4. Signature stored in the registry (alongside the image)
+5. Certificate chain anchored in a transparency log (rekor)
+```
+
+The transparency log (rekor) is critical — it's an append-only, publicly-auditable record of all signatures. A signature not in the log is invalid; a signature in the log is permanently verifiable.
+
+### The Signing Step
+
+```yaml
+# CI pipeline (keyless Cosign signing)
+- name: Sign image
+  uses: sigstore/cosign-installer@v3
+
+- name: Sign
+  env:
+    COSIGN_EXPERIMENTAL: "1"
+  run: |
+    cosign sign --yes \
+      --identity-token \
+      $IMAGE_URI
+```
+
+### Key-Based Signing (Alternative)
+
+For environments where keyless isn't viable (air-gapped, strict key control requirements), key-based signing uses a stored key:
+
+```text
+1. Generate a signing key pair (private + public)
+2. Store the private key in a vault (KMS, HSM, or secret manager)
+3. CI signs using the private key (retrieved from vault)
+4. Verification uses the public key (widely distributed)
+```
+
+<Callout variant="tip" title="Keyless unless you can't">
+  Prefer keyless signing. It eliminates the signing key as an attack surface — there's no key to steal, leak, or rotate. The transparency log provides non-repudiation. Use key-based signing only when keyless is impossible (air-gapped environments, regulatory key-custody requirements). For 95% of teams, keyless is the right answer.
+</Callout>
+
+---
+
+## 4. SBOM & Provenance Attestation
+
+Signing proves the image is from you. Attestation proves things *about* the image — what's in it (SBOM) and how it was built (provenance).
+
+### SBOM (Software Bill of Materials)
+
+An SBOM is a manifest of every component in the image — every package, every dependency, every version. It's the ingredient list for your container.
+
+**Why SBOM matters:**
+- **Vulnerability response** — when a CVE is announced, the SBOM tells you instantly whether you're affected and where
+- **License compliance** — verify no GPL code in a proprietary product
+- **Dependency audit** — know what's actually in your images (often surprising)
+- **Drift detection** — compare SBOMs across builds to catch unexpected changes
+
+**Generating the SBOM:**
+
+```text
+Tools:
+  Syft   — generates SBOM from an image (CycloneDX or SPDX format)
+  Trivy  — scans SBOM for known vulnerabilities
+
+Pipeline:
+  1. Build image
+  2. syft generate -o cyclonedx-json $IMAGE > sbom.json
+  3. Attach SBOM as an attestation: cosign attest --predicate sbom.json
+  4. Scan for vulns: trivy image --input sbom.json
+```
+
+### Provenance Attestation
+
+Provenance attestation records *how* the image was built: the source repository, commit, build parameters, build service, and timestamp. It's the build's provenance — proof of origin.
+
+**The provenance predicate (SLSA format):**
+
+```json
+{
+  "_type": "https://in-toto.io/Statement/v0.1",
+  "subject": [{ "name": "image", "digest": { "sha256": "..." } }],
+  "predicateType": "https://slsa.dev/provenance/v0.2",
+  "predicate": {
+    "builder": { "id": "github-actions" },
+    "buildType": "github-actions-workflow",
+    "source": {
+      "uri": "git+github.com/org/app",
+      "digest": { "sha1": "abc123..." }
+    },
+    "parameters": { "ref": "refs/heads/main" },
+    "metadata": { "buildStartedOn": "...", "buildFinishedOn": "..." }
+  }
+}
+```
+
+This attestation, signed and stored with the image, lets the cluster verify: "this image was built from commit abc123 of org/app on the main branch by GitHub Actions." If any of those facts are wrong, the cluster rejects the image.
+
+<Callout variant="warning" title="Attestation without verification is theater">
+  Generating attestations is easy; verifying them is the hard part. An attestation stored with an image that no one checks is security theater. The value comes from admission control (section 5) that verifies the attestation before the pod runs. If you generate attestations but don't enforce them, you've added build time but no security. Always pair attestation generation with admission control verification.
+</Callout>
+
+---
+
+## 5. Admission Control with Kyverno
+
+Admission control is where the supply chain becomes enforceable. Kyverno is a policy engine that runs as an admission controller in Kubernetes, verifying signatures and attestations before any pod starts.
+
+### The Verification Policy
+
+A Kyverno policy that verifies image signatures and attestations:
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signature
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: verify-signature
+      match:
+        resources:
+          kinds: [Pod]
+      verifyImages:
+        - imageReferences: ["my-registry.com/*"]
+          attestors:
+            - entries:
+                - keyless:
+                    subject: "https://github.com/org/app/.github/workflows/deploy.yml@refs/heads/main"
+                    issuer: "https://token.actions.githubusercontent.com"
+```
+
+This policy requires that every image from `my-registry.com` be signed by the specified workflow on the main branch. Unsigned images, or images signed by a different workflow/branch, are rejected.
+
+### Attestation Verification
+
+Kyverno can also verify attestations — requiring an SBOM or provenance attestation to be present and valid:
+
+```yaml
+verifyImages:
+  - imageReferences: ["my-registry.com/*"]
+    attestors: [ ... ]   # signature verification
+    attestations:
+      - type: https://slsa.dev/provenance/v0.2
+        attestors: [ ... ]
+        conditions:
+          - all:
+              - key: "{{ predicate.buildType }}"
+                operator: Equals
+                value: "github-actions-workflow"
+```
+
+This requires a SLSA provenance attestation with the correct build type. An image without provenance, or with provenance from a different build type, is rejected.
+
+### The Enforcement Spectrum
+
+| Policy | What it enforces | Strictness |
+|---|---|---|
+| Signature only | Image is signed by trusted identity | Baseline |
+| Signature + provenance | Image is signed + has valid provenance | Strong |
+| Signature + provenance + SBOM | Above + SBOM present | Stronger |
+| All + vulnerability scan | Above + no critical CVEs | Strictest |
+
+<Callout variant="tip" title="Start with signature, add attestations incrementally">
+  Don't try to enforce everything on day one. Start with signature verification (the highest-value, simplest control). Once that's stable, add provenance attestation. Then SBOM. Then vulnerability scanning. Each layer adds protection and build complexity; adding them incrementally lets the team adapt. A signature-only policy that's enforced beats a full-attestation policy that's set to "warn" because it broke deploys.
+</Callout>
+
+---
+
+## 6. The Complete Attestation Pipeline
+
+Bringing it all together — the full SLSA Level 3 pipeline:
+
+```text
+[1] Source commit (signed, on main branch)
+       ↓
+[2] CI build (hardened, isolated, OIDC-authenticated)
+       ↓
+[3] Image built
+       ↓
+[4] SBOM generated (Syft)
+       ↓
+[5] Provenance attestation generated (SLSA format)
+       ↓
+[6] Image signed (Cosign, keyless)
+       ↓
+[7] SBOM + provenance attached as attestations (Cosign attest)
+       ↓
+[8] Vulnerability scan (Trivy, on SBOM)
+       ↓
+[9] Image + signatures + attestations pushed to registry
+       ↓
+[10] Cluster admission (Kyverno) verifies:
+       - Signature (signed by trusted workflow)
+       - Provenance (built from expected source/branch)
+       - SBOM (present)
+       - No critical CVEs
+       ↓
+[11] Pod starts (only if all verifications pass)
+```
+
+<ChecklistBox
+  title="SLSA Level 3 Pipeline"
+  items={[
+    "Builds happen on a hardened, isolated CI service (not local machines)",
+    "CI authenticates via OIDC (keyless, no static credentials)",
+    "Every image signed with Cosign (keyless preferred)",
+    "Signatures recorded in a transparency log (rekor)",
+    "SBOM generated for every image (Syft, CycloneDX or SPDX)",
+    "Provenance attestation generated (SLSA format, signed by builder)",
+    "SBOM and provenance attached as image attestations (Cosign attest)",
+    "Vulnerability scan runs on the SBOM before push (Trivy)",
+    "Kyverno admission policy enforces signature verification (Enforce, not warn)",
+    "Kyverno verifies provenance attestation (correct source, branch, build type)",
+    "Images without valid signature/attestation are rejected (pods won't start)",
+  ]}
+/>
+
+<Callout variant="note" title="The pipeline is the product">
+  In a SLSA 3 supply chain, the pipeline itself is a security product. It's not just building images — it's generating verifiable proof that the images are trustworthy. Every artifact (image, signature, SBOM, provenance) is a piece of evidence. The cluster's job is to verify the evidence before running anything. This is what "secure by default" means for supply chains: the system doesn't trust images; it verifies them.
+</Callout>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Supply Chain Attestation Sign-off"
+  items={[
+    "SLSA 3 requirements met: hardened builder, isolated builds, non-falsifiable provenance",
+    "All images signed with Cosign (keyless via OIDC, transparency-logged)",
+    "SBOM generated for every image and attached as an attestation",
+    "Provenance attestation generated (SLSA format) and attached",
+    "Vulnerability scan gates the push (no critical CVEs in production images)",
+    "Kyverno admission control enforces signature verification (Enforce mode)",
+    "Kyverno verifies provenance attestation (source, branch, build type)",
+    "Tested: unsigned/unattested images are rejected by the cluster",
+    "Pipeline documented as the supply chain's source of truth",
+  ]}
+/>

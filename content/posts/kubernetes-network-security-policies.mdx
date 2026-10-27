@@ -1,0 +1,90 @@
+---
+title: "Kubernetes Network Security Policies"
+slug: kubernetes-network-security-policies
+description: "Lock down pod-to-pod traffic with NetworkPolicies — default deny, allow-list patterns, and a zero-trust baseline for cluster networking."
+date: "2026-05-12"
+author: activenerds-team
+category: devsecops-security
+tags: ["devsecops", "kubernetes"]
+featured: false
+relatedArticles: ["kubernetes-network-policies-tutorial", "devsecops-hardening-checklist", "secrets-management-kubernetes-vault", "deploy-secure-k8s-cilium", "kubernetes-penetration-testing"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-network-security-policies.png
+imageAlt: "Kubernetes network security policies — zero-trust micro-segmentation and encrypted pod-to-pod communication"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Lock down pod-to-pod traffic with NetworkPolicies.
+- **Key Capabilities**: default deny, allow-list patterns, and a zero-trust baseline for cluster networking.
+- **The Default-Open Problem**: Apply structured configurations and validated production patterns.
+- **NetworkPolicy Basics**: Apply structured configurations and validated production patterns.
+</Callout>
+
+By default, every pod in a Kubernetes cluster can talk to every other pod. This is convenient for demos and catastrophic for security, because it means a compromise of one pod is a foothold into the entire cluster — lateral movement is unrestricted. The fix is NetworkPolicies, which let you declare which pods can talk to which, and the foundational pattern is default-deny: start by blocking everything, then allow-list what's actually needed. This is zero-trust networking at the pod level, and it's one of the highest-leverage security controls in a cluster.
+
+This is the practical guide — why the default-open posture is a problem, how NetworkPolicies work, the patterns that scale, and the CNI gotcha that trips people up.
+
+## The Default-Open Problem
+
+A Kubernetes cluster out of the box has flat pod networking. Any pod can reach any other pod by IP, and there's no firewall between them. This is a deliberate design choice — it makes the platform easy to use — but it means the security boundary is the cluster, not the pod. If an attacker gets code execution in one pod (through a vulnerable dependency, an exposed debug endpoint, a misconfigured RBAC, a leaked token), they can probe and attack every other pod in the cluster, including the databases, the internal admin services, the other tenants' workloads.
+
+Lateral movement is how small compromises become large ones. The initial foothold is often a low-value pod — a web frontend with a dependency vulnerability. From there, the attacker scans the pod network, finds a database with no auth on an internal port, an admin service that trusts internal traffic, a metadata endpoint — and escalates. NetworkPolicies don't prevent the initial foothold, but they contain it: a compromised frontend can only reach what it's explicitly allowed to reach, which should be its backend API and nothing else.
+
+The CNI matters because NetworkPolicies are enforced by the Container Network Interface, not by Kubernetes itself. Kubernetes defines the NetworkPolicy resource, but it's the CNI plugin (Calico, Cilium, Weave, etc.) that actually implements the rules. Some CNIs don't implement NetworkPolicies at all (the basic `kubenet` doesn't, and some cloud CNIs have partial support), which means you can apply a NetworkPolicy, see it accepted by the API, and have it do nothing — a silent security failure. The first step in any NetworkPolicy work is confirming your CNI enforces them.
+
+## NetworkPolicy Basics
+
+A NetworkPolicy selects pods (via labelSelector) and defines rules for ingress (incoming) and egress (outgoing) traffic. An empty ingress section means "allow no ingress" — the default-deny. A populated section means "allow only what's listed."
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: production
+spec:
+  podSelector: {}          # selects all pods in the namespace
+  policyTypes: [Ingress, Egress]
+  ingress: []              # no ingress allowed
+  egress: []               # no egress allowed
+```
+
+This is the default-deny baseline: applied to a namespace, it blocks all traffic to and from every pod in it. Nothing works after this — which is the point. From this baseline, you allow-list what's actually needed, pod by pod. The discipline of "block everything, then allow what's needed" is what makes the policy correct: every allowed flow is a deliberate decision, and anything not allowed is blocked by default.
+
+The default-deny pattern applied per-namespace is the starting point. Apply the above to every namespace, and every pod is isolated. Then add allow policies for the specific flows: the frontend can reach the backend on port 8080, the backend can reach the database on port 5432, and so on. The order matters — apply the denies first, then the allows, so you're never in a state where something is accidentally open.
+
+## Common Patterns
+
+**Allow-list by namespace and labels.** The most common pattern: a pod can talk to pods in a specific namespace with specific labels, on a specific port.
+
+```yaml
+spec:
+  podSelector:
+    matchLabels: { app: frontend }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: backend }
+      ports:
+        - port: 8080
+          protocol: TCP
+```
+
+This allows the backend to receive traffic from the frontend on 8080, and nothing else. Combined with the default-deny, the backend is reachable only by the frontend, on that port — even if an attacker compromises a different pod, they can't reach the backend, because the NetworkPolicy blocks it.
+
+**Database isolation.** A database pod should be reachable only by its application, from nowhere else. This is the highest-value isolation, because databases are the most common escalation target. The pattern is the same — allow from the app's labels, deny everything else — but it's worth being strict: no namespace-wide allows, no "all pods in the backend namespace," just the specific application pods. The tighter the allow-list, the smaller the blast radius.
+
+**Egress to external services.** Egress is often forgotten (people focus on ingress), but it matters for data exfiltration. A pod that can't egress to the internet can't phone home with stolen data. The pattern: allow egress only to specific IPs/CIDRs (a database, an API, a DNS server) and block everything else. DNS egress (UDP 53 to the cluster DNS) is usually needed and easy to forget — if you block it, pods can't resolve names, and everything breaks in confusing ways.
+
+## CNI Support and Testing
+
+Which CNIs enforce NetworkPolicies: Calico and Cilium both fully enforce them (and add their own richer policy APIs on top). Cloud-managed CNIs vary — some enforce standard NetworkPolicies, some only enforce their own proprietary policies, some don't enforce at all. If you're on a managed Kubernetes service, verify NetworkPolicy enforcement before relying on it; the API accepting the resource doesn't mean it's enforced. Cilium is increasingly the default on managed services and is a safe choice.
+
+Auditing with Hubble (Cilium's observability layer) is the testing advantage of Cilium: it shows you the actual traffic flows between pods, including what's being denied, so you can see what your policies are doing and what they're blocking that shouldn't be. Without this, debugging NetworkPolicies is guesswork — you apply a policy, a service breaks, and you're not sure which rule is blocking what. Hubble turns it into a query: "show me denied flows to the database," and you see exactly what's being blocked and why. For any non-trivial NetworkPolicy setup, this observability is worth the Cilium choice on its own.
+
+The rollout pattern that avoids outages: apply policies in audit/permissive mode first (Cilium supports this — log what would be denied without actually denying it), watch the logs for a few days, fix the flows you didn't know about, then switch to enforcing. Applying a default-deny cold to a production cluster will break something you didn't anticipate; the audit-first approach finds those things before they're outages. This is the same progressive-delivery instinct from [canary deployments](/blog/canary-deployment-strategies-kubernetes), applied to security policy.
+
+The honest framing: NetworkPolicies are the cluster's internal firewall, and default-deny with allow-listing is the only sane posture for any cluster running real workloads. The default-open posture is a liability that becomes an incident eventually. Pair this with [RBAC](/blog/kubernetes-rbac-configuration) for identity controls and the broader [network policy tutorial](/blog/kubernetes-network-policies-tutorial) for the full pattern set, and you have a cluster where a compromise in one pod stays in one pod — which is what zero-trust [actually means](/articles/k8s-crashloopbackoff-troubleshooting) in practice.
+
+

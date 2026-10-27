@@ -1,0 +1,328 @@
+---
+title: "Automated Code Review & AI Guardrails Guide"
+description: "Deploy AI code review that catches real issues without the noise — CI agent review architecture, anti-pattern pre-screening, hallucinated-package defense, and the guardrails that keep AI reviews trustworthy in production."
+category: ai-ml
+slug: automated-code-review-ai-guardrails-guide
+lastUpdated: "2026-08-28"
+tags: ["code-review", "ai-agents", "devsecops", "ci-cd"]
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Automated Code Review & AI Guardrails Guide
+
+**AI code review is a force multiplier — until it hallucinates a vulnerability that doesn't exist and your team learns to ignore every alert.** The failure mode of AI review isn't missing issues; it's noise. An agent that flags 50 things per PR, 45 of which are wrong, gets muted within a week. This guide covers the architecture of AI review that earns trust: CI integration, anti-pattern pre-screening, the hallucinated-package defense, and the guardrails that keep the signal-to-noise ratio high enough that humans keep reading.
+
+---
+
+## Table of Contents
+
+1. [The Trust Problem](#1-the-trust-problem)
+2. [CI Agent Review Architecture](#2-ci-agent-review-architecture)
+3. [Anti-Pattern Pre-Screening](#3-anti-pattern-pre-screening)
+4. [Hallucinated Package Defense](#4-hallucinated-package-defense)
+5. [Review Quality Calibration](#5-review-quality-calibration)
+6. [Human-AI Review Integration](#6-human-ai-review-integration)
+
+---
+
+## 1. The Trust Problem
+
+The single most important metric for an AI code reviewer isn't recall (issues found) — it's precision (issues flagged that are actually issues). A reviewer with 90% recall and 30% precision is useless; a reviewer with 50% recall and 90% precision is valuable. Humans tune out noisy alerts fast, and once they've learned to ignore the AI, no amount of later improvement recovers that trust.
+
+### The Precision-Recall Trade-off
+
+| Reviewer profile | Recall | Precision | Team response |
+|---|---|---|---|
+| Aggressive (flag everything) | 95% | 30% | Ignored within a week |
+| Balanced (flag likely issues) | 70% | 75% | Read selectively |
+| Conservative (flag confident issues) | 50% | 90% | Trusted, read consistently |
+| Over-cautious (flag only certain) | 30% | 98% | Trusted but misses real issues |
+
+<Callout variant="warning" title="Precision is non-negotiable">
+  Start conservative. A reviewer that flags 3 things per PR, all real, builds trust. A reviewer that flags 30 things, 5 real, destroys it — even though it found more total issues. You can always tune precision down later as the team's trust grows. You cannot recover from the "we ignore the AI reviewer" state. Err on the side of fewer, correct flags.
+</Callout>
+
+### What AI Review Is Good At (and Isn't)
+
+| Good at | Bad at |
+|---|---|
+| Pattern-based issues (anti-patterns, common bugs) | Architectural judgment |
+| Consistency checks (naming, conventions) | Business logic correctness |
+| Security anti-patterns (SQL injection, XSS) | Subtle security context |
+| Test coverage gaps | Whether a test is meaningful |
+| Documentation drift | Whether docs match intent |
+| Dependency issues (outdated, vulnerable) | Whether an upgrade is safe |
+
+The AI reviewer should be deployed against what it's good at, with humans handling what it's bad at. Trying to make the AI do architectural review produces noise; trying to make humans catch every SQL injection pattern wastes their time.
+
+---
+
+## 2. CI Agent Review Architecture
+
+The architecture of the AI review determines whether it's fast enough to run on every PR and reliable enough to trust.
+
+### The Review Pipeline
+
+```text
+PR opened/updated
+     |
+     ↓
+[1] Diff extraction — what changed
+     |
+     ↓
+[2] Context retrieval — surrounding code, types, tests
+     |
+     ↓
+[3] Pre-screening — deterministic checks first (lint, patterns)
+     |
+     ↓
+[4] AI review — model evaluates the diff + context
+     |
+     ↓
+[5] Post-filtering — drop low-confidence, deduplicate
+     |
+     ↓
+[6] Report — structured comments on the PR
+```
+
+### The Two-Stage Design
+
+The key architectural decision is the two-stage split: deterministic pre-screening before the AI, and confidence-based post-filtering after. This is what keeps the AI's input focused and its output trustworthy.
+
+**Stage 1 — Deterministic pre-screening** catches the issues that don't need a model: lint violations, known anti-pattern regexes, dependency vulnerabilities. These are fast, certain, and free. The AI never sees a diff that failed pre-screening for a deterministic issue — it would just re-flag what the linter already caught.
+
+**Stage 2 — AI review** evaluates what the deterministic checks can't: subtle anti-patterns, context-dependent issues, consistency with the surrounding code. The AI gets the diff plus curated context (not the whole repo), and produces structured findings.
+
+<Callout variant="tip" title="Don't ask the AI what a regex can catch">
+  Every issue you catch deterministically is one fewer hallucination risk for the AI. If you can catch "unused variable" with a linter, don't ask the model to catch it — it might miss it, or flag a used variable as unused. Use the AI for what only the AI can do: semantic understanding, context-dependent judgment, and pattern recognition that doesn't reduce to a rule.
+</Callout>
+
+### Context Curation for Review
+
+The AI's review quality is determined by what context it receives. Too little and it misses issues; too much and it loses signal in noise.
+
+| Context layer | Include? | Why |
+|---|---|---|
+| The diff itself | Always | What's being reviewed |
+| Full changed files | Yes | The AI needs surrounding code |
+| Type definitions referenced | Yes | To understand the change |
+| Test files for changed code | Yes | To assess coverage |
+| Related files (callers/callees) | Sometimes | Only if the change affects their interface |
+| Entire codebase | No | Too much noise, lost-in-the-middle |
+| Git history | No | Rarely relevant to a single review |
+
+---
+
+## 3. Anti-Pattern Pre-Screening
+
+The deterministic pre-screening stage is where you encode your codebase's anti-patterns as checkable rules. This catches the high-frequency, high-certainty issues before the AI ever runs.
+
+### Pattern Categories
+
+**1. Security anti-patterns**
+
+```text
+- Raw SQL string concatenation (SQL injection risk)
+- Unparameterized user input in queries
+- Hardcoded secrets / API keys (regex for common patterns)
+- Disabled security controls (e.g., verify=False in requests)
+- eval/exec on dynamic input
+- Insecure deserialization (pickle.loads on untrusted input)
+```
+
+**2. Reliability anti-patterns**
+
+```text
+- Bare except clauses (catches KeyboardInterrupt, SystemExit)
+- Mutable default arguments in Python
+- Unchecked null/None returns
+- Resource leaks (file/handle opened without context manager)
+- Infinite loops without break conditions
+```
+
+**3. Consistency anti-patterns**
+
+```text
+- Naming convention violations (project-specific)
+- Missing error handling on I/O calls
+- Missing docstrings on public APIs
+- Inconsistent error types (mixing exceptions and error codes)
+```
+
+### Encoding Patterns as Checks
+
+Each anti-pattern becomes a deterministic check with:
+- A detection rule (regex, AST pattern, or lint rule)
+- A severity (block, warn, info)
+- A confidence (certain, likely)
+- A remediation message (what to do instead)
+
+```text
+Example check definition:
+
+  name: "sql-string-concat"
+  detection: AST pattern for string concat in execute() call
+  severity: "block"
+  confidence: "certain"
+  message: "Use parameterized queries. String concatenation in SQL
+           is a SQL injection vector. Use cursor.execute(sql, params)."
+```
+
+<Callout variant="note" title="The pre-screening ROI">
+  Pre-screening has the highest ROI of any part of the AI review system. It's fast (milliseconds), certain (no hallucination), and catches the issues that occur most frequently. Every pattern you encode here is one fewer thing the AI has to catch — and one fewer opportunity for the AI to be wrong. Invest here first; add AI review second.
+</Callout>
+
+---
+
+## 4. Hallucinated Package Defense
+
+One of the most dangerous AI review failure modes is the hallucinated package: the AI suggests importing a package that doesn't exist, or recommends a function that isn't part of the library. If a developer trusts the suggestion and adds the import, they've either broken the build or — worse — installed a typosquatted malicious package that happens to share the hallucinated name.
+
+### The Hallucination Vectors
+
+| Vector | Example | Risk |
+|---|---|---|
+| Non-existent package | `import react-utils` (doesn't exist) | Build break, or typosquat install |
+| Wrong package name | `import lodash-utils` (real lodash, fake sub-package) | Build break |
+| Non-existent function | `_.deepMerge()` (lodash has merge, not deepMerge) | Build break |
+| Wrong API | `requests.get(url, async=True)` (no async param) | Build break |
+| Deprecated API | Using a removed function | Build break or runtime error |
+
+### The Defense Stack
+
+**1. Package existence validation**
+
+Before the AI's suggestion reaches the developer, validate that every imported package exists in the actual registry (npm, PyPI, etc.). If the AI suggests `import react-utils`, check whether `react-utils` is a real npm package. If not, block the suggestion.
+
+**2. Symbol validation**
+
+For each import the AI suggests, validate that the symbol (function, class) actually exists in the package's public API. Use the package's type definitions or API docs as the source of truth. If the AI suggests `_.deepMerge`, check lodash's API — it doesn't exist; block.
+
+**3. Typosquat detection**
+
+Even if a package exists, check whether it's a likely typosquat of a popular package. A package named `reqeusts` (misspelled) exists and is malicious. Flag any suggestion that's a near-match to a popular package name.
+
+**4. Version pinning check**
+
+Validate that the AI's suggested API is available in the version the project uses, not just the latest. An API added in v5 doesn't exist if the project pins v4.
+
+<ChecklistBox
+  title="Hallucinated Package Defense"
+  items={[
+    "Every AI-suggested import validated against the real package registry",
+    "Every AI-suggested symbol validated against the package's type definitions",
+    "Typosquat detection on suggested package names (near-match to popular packages)",
+    "Version compatibility check — suggested API exists in the project's pinned version",
+    "Unknown packages blocked, not warned — a build break is safer than a malicious install",
+    "Validation runs before the suggestion reaches the developer, not after",
+  ]}
+/>
+
+<Callout variant="warning" title="The supply chain stakes">
+  The hallucinated-package problem isn't just a build-break nuisance — it's a supply chain attack vector. A developer who Googles the hallucinated package name and installs it may land on a typosquatted malicious package. The AI review system must treat package suggestions as security-sensitive: validate before suggest, block if uncertain. A false negative (missing a valid suggestion) is recoverable; a false positive (suggesting a malicious package) is not.
+</Callout>
+
+---
+
+## 5. Review Quality Calibration
+
+An AI reviewer deployed without calibration produces inconsistent results — flagging the same pattern in one PR and missing it in another. Calibration is the process of making the reviewer consistent and measurable.
+
+### The Calibration Loop
+
+```text
+[1] AI flags an issue
+       |
+       ↓
+[2] Human marks it: valid / invalid / partial
+       |
+       ↓
+[3] Feedback recorded (issue type, confidence, human judgment)
+       |
+       ↓
+[4] Periodic analysis: which issue types have low precision?
+       |
+       ↓
+[5] Adjust: tighten thresholds for low-precision categories
+       |
+       ↓
+[ (loop) ]
+```
+
+### Metrics to Track
+
+| Metric | Target | What it measures |
+|---|---|---|
+| Precision (valid / total flagged) | >80% | Are flags trustworthy? |
+| Recall (caught / total real issues) | >60% | Is it missing things? |
+| False positive rate | under 20% | Noise level |
+| Time-to-resolution on flagged issues | Tracking | Are flags actionable? |
+| Override rate (humans dismissing flags) | under 30% | Trust level |
+
+<Callout variant="tip" title="Track precision by category, not aggregate">
+  Aggregate precision hides category-specific problems. The AI might be 95% precise on security issues but 40% precise on style suggestions — and the aggregate looks fine while the style suggestions destroy trust. Track precision per issue category and tune each independently. Drop or tighten the low-precision categories; they're the ones eroding trust.
+</Callout>
+
+---
+
+## 6. Human-AI Review Integration
+
+The AI reviewer doesn't replace human review — it changes what human review should focus on. The integration design determines whether the AI helps or just adds noise.
+
+### The Division of Labor
+
+| AI handles | Humans handle |
+|---|---|
+| Anti-pattern detection | Architectural fit |
+| Security pattern checks | Business logic correctness |
+| Consistency / convention | Edge case reasoning |
+| Test coverage gaps | Test meaningfulness |
+| Dependency issues | Upgrade risk judgment |
+| Documentation drift | Documentation accuracy |
+
+### The Review Flow
+
+```text
+PR opened
+  ↓
+AI review runs (CI) → structured comments
+  ↓
+Author addresses AI findings (or dismisses with reason)
+  ↓
+Human reviewer focuses on what AI can't assess
+  ↓
+Human + AI findings resolved → merge
+```
+
+The AI runs first, so the human reviewer sees a PR where the mechanical issues are already addressed. The human's review time goes to judgment, not pattern-matching.
+
+### Dismissal as Signal
+
+When a developer dismisses an AI finding, that's signal, not failure. Track dismissals:
+
+- **Dismissed because invalid** — the AI was wrong; calibrate
+- **Dismissed because intentional** — the AI was right but the context justified it; document the exception
+- **Dismissed because out of scope** — the AI flagged something real but not for this PR; tune the scope
+
+<Callout variant="note" title="The goal is fewer, better human reviews">
+  A successful AI review system doesn't increase total review activity — it shifts it. The AI handles the pattern-matching that humans are bad at (and bored by), so human review becomes faster and more focused on judgment. If your AI review is making human review slower (more noise to triage), it's mis-calibrated. The win is measured in human review time per PR, not in AI comments per PR.
+</Callout>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="AI Code Review Sign-off"
+  items={[
+    "Two-stage architecture deployed: deterministic pre-screening + AI review",
+    "Precision-first calibration: started conservative, tracking precision by category",
+    "Anti-pattern pre-screening encodes codebase-specific patterns as deterministic checks",
+    "Hallucinated package defense: existence, symbol, typosquat, and version validation",
+    "Context curation focused: diff + changed files + types + tests, not whole repo",
+    "Human-AI division of labor defined: AI for patterns, humans for judgment",
+    "Dismissal tracking installed as calibration signal, not as failure",
+  ]}
+/>

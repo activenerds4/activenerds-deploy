@@ -1,0 +1,154 @@
+---
+title: "Multi-Tenant K8s Isolation Checklist"
+description: "Isolate tenants on a shared cluster — RBAC scoping, compute quotas, Pod Security Standards restricted, and KMS-backed secret encryption."
+category: kubernetes
+slug: multi-tenant-k8s-isolation-checklist
+lastUpdated: "2026-08-28"
+tags: ["kubernetes", "devsecops", "rbac", "multi-tenant"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Multi-Tenant K8s Isolation Checklist
+
+**Shared cluster, separate tenants — without one tenant's bug becoming everyone's outage.**
+
+Multi-tenancy on a single cluster saves cost and ops overhead, but it's only safe if tenants can't see, starve, or break each other. This checklist covers the four isolation axes — identity, compute, pod security, and secrets — that keep tenants in their lanes.
+
+---
+
+## Table of Contents
+
+1. [Namespace & Tenant Boundaries](#1-namespace--tenant-boundaries)
+2. [RBAC Scoping](#2-rbac-scoping)
+3. [Compute Quotas & Limits](#3-compute-quotas--limits)
+4. [Pod Security Standards](#4-pod-security-standards)
+5. [Secret Encryption & Data Isolation](#5-secret-encryption--data-isolation)
+6. [Network Isolation](#6-network-isolation)
+
+---
+
+## 1. Namespace & Tenant Boundaries
+
+<ChecklistBox
+  title="Namespace & Tenant Boundaries"
+  items={[
+    "One namespace per tenant (or a documented namespace-per-tenant-team scheme)",
+    "Namespace labels/annotations record tenant ownership for policy targeting",
+    "Tenant namespaces created via a controlled process, not ad-hoc kubectl",
+    "No shared namespaces across tenants in production",
+    "Default service accounts per namespace, not a shared cluster-wide one",
+    "Namespace lifecycle (creation, deletion) gated by an approval process",
+    "Tenant offboarding process revokes access and cleans up resources",
+  ]}
+/>
+
+---
+
+## 2. RBAC Scoping
+
+<ChecklistBox
+  title="RBAC Scoping"
+  items={[
+    "Roles/RoleBindings scoped to a namespace, not ClusterRoles for tenant access",
+    "No tenant service account has cluster-admin or broad wildcard permissions",
+    "Tenant users can only get/list/watch resources in their own namespace",
+    "ServiceAccount tokens per tenant, not a shared long-lived token",
+    "RoleBindings reference tenant-specific ServiceAccounts, not default",
+    "Access reviewed periodically — stale bindings removed when tenants leave",
+    "ClusterRoles reserved for platform-team / admin use, audited and minimal",
+  ]}
+/>
+
+<Callout variant="warning" title="ClusterRole is a cluster-wide blast radius">
+  A ClusterRoleBinding grants access across every namespace. If a tenant gets one, they can read (or worse, mutate) every other tenant's resources. Keep tenant permissions in namespace-scoped Roles. Reserve ClusterRoles for the platform team and audit them often.
+</Callout>
+
+---
+
+## 3. Compute Quotas & Limits
+
+<ChecklistBox
+  title="Compute Quotas & Limits"
+  items={[
+    "ResourceQuota per namespace: CPU, memory, PVC storage, and object counts",
+    "LimitRange per namespace: default requests/limits and min/max bounds",
+    "Quotas sized so one tenant cannot exhaust cluster capacity",
+    "Quota enforcement tested: a tenant hitting quota is denied, not silently over-provisioned",
+    "PriorityClasses used so platform/critical workloads preempt tenant workloads under pressure",
+    "Node taints/affinity can pin noisy or trusted tenants to dedicated node pools",
+    "Quota usage monitored and alerted before a tenant hits the ceiling",
+  ]}
+/>
+
+---
+
+## 4. Pod Security Standards
+
+<ChecklistBox
+  title="Pod Security Standards"
+  items={[
+    "Pod Security Standard set to `restricted` for all tenant namespaces",
+    "Enforced via namespace labels (`pod-security.kubernetes.io/enforce=restricted`)",
+    "Privileged containers blocked by the restricted standard",
+    "hostNetwork, hostPID, hostIPC blocked",
+    "runAsNonRoot enforced; runAsUser > 0 required",
+    "allowPrivilegeEscalation: false required",
+    "readOnlyRootFilesystem encouraged / required where the app supports it",
+    "Escalation audited: `kubectl get pods -A -o jsonpath` for privileged exceptions reviewed",
+  ]}
+/>
+
+---
+
+## 5. Secret Encryption & Data Isolation
+
+<ChecklistBox
+  title="Secret Encryption & Data Isolation"
+  items={[
+    "etcd encryption at rest enabled with a KMS-backed key (not the default static key)",
+    "KMS key rotation policy defined and tested",
+    "Tenant secrets scoped to tenant namespaces (no cross-namespace secret reads)",
+    "External Secrets Operator syncs from a tenant-scoped vault path, not a shared one",
+    "Secret access RBAC-scoped — tenant SAs can only read their namespace's secrets",
+    "No secrets in ConfigMaps or env vars in plaintext",
+    "Key per tenant (or per namespace) so one compromise doesn't expose all tenants",
+  ]}
+/>
+
+<Callout variant="tip" title="KMS over static keys">
+  Static encryption keys in the API server config are better than nothing, but they're hard to rotate and a config leak exposes everything. A KMS provider (cloud KMS, Vault) lets you rotate keys and scope them per tenant without re-encrypting the whole etcd at once.
+</Callout>
+
+---
+
+## 6. Network Isolation
+
+<ChecklistBox
+  title="Network Isolation"
+  items={[
+    "Default-deny ingress and egress per tenant namespace",
+    "Tenant A pods cannot reach tenant B pods unless explicitly allowed",
+    "Egress to shared services (ingress, DNS) explicitly allowed per tenant",
+    "Egress to external/internet restricted to what the tenant actually needs",
+    "NetworkPolicy tested cross-tenant (attempt a connection, confirm it's denied)",
+    "Service mesh mTLS (Istio/Linkerd) considered for L7 isolation and auth policies",
+    "Per-tenant ingress rate limiting at the ingress controller to prevent noisy-neighbor abuse",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Isolation Sign-off"
+  items={[
+    "Cross-tenant isolation tested: tenant A cannot read/mutate tenant B resources",
+    "Cross-tenant network isolation tested: tenant A cannot reach tenant B pods",
+    "Noisy-neighbor test: one tenant at quota does not degrade another tenant",
+    "Tenant offboarding runbook tested end-to-end (access revoked, resources cleaned)",
+  ]}
+/>

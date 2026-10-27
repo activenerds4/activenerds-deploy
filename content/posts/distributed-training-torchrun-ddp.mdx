@@ -1,0 +1,186 @@
+---
+title: "Distributed Training with Torchrun and DDP"
+slug: distributed-training-torchrun-ddp
+description: "A hands-on guide to multi-GPU distributed training in PyTorch using torchrun and DistributedDataParallel."
+date: "2025-09-14"
+author: activenerds-team
+category: ai-machine-learning
+tags: ["pytorch", "mlops"]
+featured: true
+relatedArticles: ["distributed-data-parallel-vs-model-parallel", "mixed-precision-training-pytorch", "debugging-oom-pytorch", "optimize-pytorch-training-speed", "data-augmentation-techniques-pytorch"]
+image: https://cdn.activenerds.com/images/posts/distributed-training-torchrun-ddp.png
+imageAlt: "Several spring-green GPU cards linked by glowing gradient-sync all-reduce arrows on a deep slate background"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Uneven batch sizes**: If your dataset size isn't divisible by `world_size`, the last batch on some GPUs will be smaller.
+- **Random seed management**: Without proper seeding, each GPU will use different random initialization, leading to divergent models.
+- **Network debugging**: If DDP hangs on `init_process_group`, check that your master node is reachable on the specified port.
+</Callout>
+
+When your model outgrows a single GPU — either in memory or training time — distributed training becomes essential. PyTorch's DistributedDataParallel (DDP) combined with `torchrun` is the standard path, and it's more approachable than you might think. The tricky part isn't the API; it's the gotchas around [data loading](/articles/data-preprocessing-pipeline-best-practices), checkpointing, and process management that catch people off guard.
+
+This guide walks through a complete DDP setup from scratch, including the patterns that production teams actually use.
+
+## Why Distributed Training
+
+There are two reasons to go multi-GPU: **memory** (your model doesn't fit on one GPU) and **speed** (you want to train faster by parallelizing data across GPUs). DDP solves the speed problem by replicating your model on each GPU and splitting the data batch across them. For the memory problem, you need model parallelism (FSDP, pipeline parallelism), which is a separate topic.
+
+DDP works by running identical copies of your model on each GPU, each processing a different shard of the data. After each backward pass, gradients are synchronized across all GPUs via all-reduce. This means every GPU sees the same averaged gradients, and your model stays in sync.
+
+<Note>
+DDP requires your model to fit entirely on a single GPU. If it doesn't, look into Fully Sharded [Data Parallel](/articles/distributed-data-parallel-vs-model-parallel) (FSDP) instead, which shards model parameters across GPUs.
+</Note>
+
+## DDP Fundamentals
+
+The core of DDP is the `DistributedDataParallel` wrapper. When you wrap your model, DDP hooks into the backward pass to synchronize gradients. Here's the minimal setup:
+
+```python
+import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+def setup(rank, world_size):
+    dist.init_process_group(
+        backend="nccl",
+        init_method="env://",
+        rank=rank,
+        world_size=world_size,
+    )
+
+def cleanup():
+    dist.destroy_process_group()
+
+def train(rank, world_size):
+    setup(rank, world_size)
+    
+    model = MyModel().to(rank)
+    model = DDP(model, device_ids=[rank])
+    
+    # Distributed sampler ensures each GPU gets different data
+    sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+    loader = DataLoader(dataset, sampler=sampler, batch_size=32, num_workers=4)
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    
+    for epoch in range(num_epochs):
+        sampler.set_epoch(epoch)  # Critical for proper shuffling
+        for batch in loader:
+            loss = model(batch)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+    
+    cleanup()
+```
+
+The `DistributedSampler` is the key piece most tutorials underexplain. Without it, every GPU would process the same data — giving you zero speedup. The sampler ensures each GPU gets a unique shard, and `set_epoch(epoch)` reshuffles the shard assignment each epoch.
+
+## Torchrun Setup
+
+`torchrun` is the recommended launcher for DDP. It handles process spawning, environment variable setup, and fault tolerance. You don't need to manually set `RANK`, `WORLD_SIZE`, or `MASTER_ADDR` — torchrun does it for you.
+
+```bash
+# Single node, 4 GPUs
+torchrun --nproc_per_node=4 train.py
+
+# Multi-node (2 nodes, 4 GPUs each)
+# Node 0 (master):
+torchrun --nproc_per_node=4 --nnodes=2 --node_rank=0 \
+    --master_addr=10.0.0.1 --master_port=29500 train.py
+
+# Node 1:
+torchrun --nproc_per_node=4 --nnodes=2 --node_rank=1 \
+    --master_addr=10.0.0.1 --master_port=29500 train.py
+```
+
+The beauty of torchrun is that your training script doesn't need to change between single-node and multi-node. The environment variables are set automatically, and your `dist.init_process_group("nccl")` call picks them up.
+
+<Callout type="tip">
+Use `--rdzv_backend=c10d` and `--rdzv_endpoint` for elastic training, which allows nodes to join and leave dynamically. This is essential for spot instance-based training.
+</Callout>
+
+## Code Walkthrough
+
+Here's a production-ready pattern with proper checkpointing:
+
+```python
+import os
+import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+def main():
+    dist.init_process_group(backend="nccl")
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    local_rank = int(os.environ["LOCAL_RANK"])
+    
+    torch.cuda.set_device(local_rank)
+    
+    model = MyModel().cuda(local_rank)
+    model = DDP(model, device_ids=[local_rank])
+    
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4 * world_size)
+    
+    # Only rank 0 saves checkpoints
+    if rank == 0 and not os.path.exists("checkpoints"):
+        os.makedirs("checkpoints")
+    
+    sampler = DistributedSampler(dataset, shuffle=True)
+    loader = DataLoader(dataset, sampler=sampler, batch_size=32, num_workers=4,
+                       pin_memory=True)
+    
+    for epoch in range(num_epochs):
+        sampler.set_epoch(epoch)
+        model.train()
+        for step, (x, y) in enumerate(loader):
+            x, y = x.cuda(local_rank, non_blocking=True), y.cuda(local_rank, non_blocking=True)
+            
+            loss = model(x, y)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            
+            if rank == 0 and step % 100 == 0:
+                print(f"Epoch {epoch}, Step {step}, Loss {loss.item():.4f}")
+        
+        # Save checkpoint only on rank 0
+        if rank == 0:
+            torch.save({
+                "epoch": epoch,
+                "model_state": model.module.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+            }, f"checkpoints/epoch_{epoch}.pt")
+    
+    dist.barrier()  # Ensure all ranks finish before cleanup
+    dist.destroy_process_group()
+
+if __name__ == "__main__":
+    main()
+```
+
+Key patterns to notice: `model.module.state_dict()` (not `model.state_dict()`) because DDP wraps your model, `pin_memory=True` for faster GPU transfer, and `non_blocking=True` for asynchronous data loading.
+
+## Common Pitfalls and Fixes
+
+**Uneven batch sizes**: If your dataset size isn't divisible by `world_size`, the last batch on some GPUs will be smaller. DDP handles this, but it can cause slight gradient imbalance. Use `drop_last=True` on your DataLoader if this matters.
+
+**Random seed management**: Without proper seeding, each GPU will use different random initialization, leading to divergent models. Set seeds explicitly:
+
+```python
+torch.manual_seed(42 + rank)  # Different seed per rank for data shuffling
+torch.cuda.manual_seed_all(42)  # Same model init across all GPUs
+```
+
+**Network debugging**: If DDP hangs on `init_process_group`, check that your master node is reachable on the specified port. Use `NCCL_DEBUG=INFO` environment variable to get detailed logging.
+
+<Warning>
+Never call `dist.barrier()` inside a conditional that only some ranks enter. This will cause a deadlock — all ranks must reach every collective operation.
+</Warning>
+
+DDP is one of those things that feels intimidating until you run it once. After that, it's just another tool in your MLOps toolkit. Start with a single node, get it working, then scale to multi-node when you need it.
+
+

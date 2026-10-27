@@ -1,0 +1,103 @@
+---
+title: "Building a Kubernetes Custom Controller"
+slug: kubernetes-custom-controller-development
+description: "A practical guide to developing a Kubernetes custom controller with controller-runtime — CRDs, reconcile loops, and production patterns."
+date: "2026-04-24"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: false
+relatedArticles: ["kubernetes-admission-controllers-guide", "kubernetes-autcaling-hpa-keda", "secrets-management-kubernetes-vault", "devsecops-hardening-checklist", "kubernetes-debugging-k9s-kubectl"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-custom-controller-development.png
+imageAlt: "Kubernetes custom controller development — building custom controllers with client-go and the reconciliation pattern"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: A practical guide to developing a Kubernetes custom controller with controller-runtime.
+- **Key Capabilities**: CRDs, reconcile loops, and production patterns.
+- **Why Custom Controllers**: Apply structured configurations and validated production patterns.
+- **CRDs and the API**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Most things in Kubernetes are controllers. The Deployment controller watches Deployments and creates ReplicaSets. The ReplicaSet controller watches ReplicaSets and creates Pods.
+
+The Job controller watches Jobs and creates Pods. The pattern is the same everywhere: watch a resource, compare the current state to the desired state, and take action to close the gap. Once you understand this, you understand custom controllers — they're the same pattern, just for your own resource type.
+
+Building one is less exotic than it sounds. The hard part isn't the code; it's internalizing the level-triggered, eventually-consistent mental model that makes controllers robust. Most bugs in custom controllers come from writing them like scripts — assuming an order of events, holding state across reconciles, acting on every change — when the system is designed for the opposite.
+
+## Why Custom Controllers
+
+The case for a custom controller is the case for declarative management of something that currently isn't. If you have a process that a human runs imperatively — "create these five things in this order, then check that they're ready, then configure that other thing" — a controller turns it into a resource you apply and forget. The controller watches the resource, does the imperative work, and keeps doing it as conditions change. This is what operators are: controllers for application-specific operational knowledge.
+
+The win is that the desired state becomes version-controlled, reviewable, and self-healing. Delete a thing the controller created, and it recreates it. Change a field, and it reconciles. Crash the controller, and a new instance picks up where it left off because the state lives in the cluster, not in the controller's memory. This is fundamentally more robust than a script that runs once and assumes the world stays put.
+
+When not to build one: if a Helm chart or a plain Deployment does the job, you don't need a controller. If your "automation" is a one-shot setup that never needs to react to changes, a Job is simpler. Controllers earn their complexity when there's ongoing reconciliation — when the system drifts and needs to be brought back. If there's no drift to manage, the controller pattern is overhead.
+
+## CRDs and the API
+
+A custom controller needs a custom resource to watch, which means a CustomResourceDefinition (CRD). The CRD defines the schema — the fields your resource has, their types, and validation rules. kubebuilder scaffolds the whole thing: the CRD definition, the controller skeleton, and the Go types that back it.
+
+```go
+// The Go type that becomes the CRD schema
+type WidgetSpec struct {
+    Size     string `json:"size"`
+    Replicas int    `json:"replicas"`
+}
+
+type WidgetStatus struct {
+    Ready   bool   `json:"ready"`
+    Message string `json:"message"`
+}
+
+// +kubebuilder:object:root=true
+type Widget struct {
+    metav1.TypeMeta   `json:",inline"`
+    metav1.ObjectMeta `json:"metadata,omitempty"`
+    Spec   WidgetSpec   `json:"spec,omitempty"`
+    Status WidgetStatus `json:"status,omitempty"`
+}
+```
+
+The split between `Spec` and `Status` is the most important convention. `Spec` is what the user wants — the desired state, read-only from the controller's perspective. `Status` is what the controller observes — the current state, written by the controller. Never write to `Spec`; never let users write to `Status`. This separation is what makes reconciliation safe: the controller reads desired, observes current, writes status, and acts — it never confuses what it wants with what it has.
+
+## The Reconcile Loop
+
+The reconcile function is the heart of the controller, and it has one job: given the name of a resource, make the world match the desired state. It's called with a `ReconcileRequest` containing the namespace and name, and it returns either a result (requeue after some duration, or done) or an error.
+
+```go
+func (r *WidgetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+    var widget widgetv1.Widget
+    if err := r.Get(ctx, req.NamespacedName, &widget); err != nil {
+        return ctrl.Result{}, client.IgnoreNotFound(err)
+    }
+
+    // Observe current state, compute desired state, act to close the gap
+    // ...create/update/delete child resources...
+
+    // Update status
+    widget.Status.Ready = true
+    if err := r.Status().Update(ctx, &widget); err != nil {
+        return ctrl.Result{}, err
+    }
+    return ctrl.Result{}, nil
+}
+```
+
+The three properties of a correct reconcile loop: it's **level-triggered**, not edge-triggered — it acts on the current state, not on the fact that something changed, so it doesn't matter whether an event was missed. It's **idempotent** — running it twice produces the same result as running it once, so retries are safe. It's **stateless across calls** — all state comes from the cluster (the resource and its children), not from controller memory, so a restart or a leader switch doesn't corrupt anything.
+
+The most common bug is holding state in the reconciler struct and reasoning about "the previous reconcile." There is no previous reconcile; there's only the current state of the world. If you need to know whether you've already done something, look at the cluster (the Status field, or the existence of a child resource) — don't remember it. The second bug is acting on every event without filtering: reconcile should be cheap and only do work when the state is wrong, so check whether action is needed before taking it.
+
+## Production Patterns
+
+A controller that works on a laptop and a controller that survives in a production cluster are different things. Three patterns separate them.
+
+**Leader election.** Run multiple replicas of the controller for high availability, but only one should be actively reconciling — otherwise they fight. controller-runtime's `LeaderElection` makes this a config flag. Without it, two controllers will both try to act on the same resource and produce a race.
+
+**Status conditions.** A single `Ready: true` boolean is fine for a demo; production controllers use a `conditions` array with typed, dated conditions (`Ready`, `Progressing`, `Degraded`) so humans and other controllers can tell *why* something isn't ready. This is what `kubectl wait --for=condition=...` reads.
+
+**Metrics and events.** Emit Prometheus metrics (reconcile count, errors, queue depth) and Kubernetes Events for significant actions. A controller with no observability is a controller you can't debug when it silently stops reconciling — and they do, usually because of a subtle error that the retry loop swallows. Log the reconcile result, emit an event on state transitions, and expose a metric on error rate.
+
+The honest framing: custom controllers are powerful because they encode operational knowledge into the cluster's own reconciliation model, but they're not free. A bad controller — one that holds state, isn't idempotent, or fights its replicas — is worse than a script, because it's a bad controller that runs forever. The patterns that make them safe are the patterns that make the built-in controllers safe: level-triggered, stateless, idempotent, observable. Get those right, and the rest is application logic. If you're not ready to internalize that model, reach for an [operator framework](/blog/k8s-operators-explained) or an [admission controller](/blog/kubernetes-admission-controllers-guide) instead — they cover a lot of the same ground with less rope to hang yourself.
+
+

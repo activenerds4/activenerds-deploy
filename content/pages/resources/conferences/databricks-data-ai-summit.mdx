@@ -1,0 +1,172 @@
+---
+title: "Databricks Data + AI Summit Guide: Passes, Travel, Tracks & ROI"
+description: "The applied data, ML, and lakehouse conference — pipeline architecture, MLOps, vector search, and governance for teams shipping real ML. Who should go, what to see, and how to last the week."
+category: "Conferences"
+slug: databricks-data-ai-summit
+parentCalendarUrl: "/resources/tech-conference-calendar"
+lastUpdated: "2026-08-28"
+conferenceDetails:
+  name: "Databricks Data + AI Summit"
+  organizer: "Databricks"
+  typicalDates: "June (San Francisco)"
+  primaryLocation: "San Francisco, CA (Moscone Center)"
+  format: "In-person + Virtual"
+  estimatedPassCost: "Standard ~$1,200–$1,800; Training add-on ~$500–$1,000; Community/academic discounts"
+tags: ["conferences", "ai-ml", "mlops", "data-engineering"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+
+# Databricks Data + AI Summit Guide
+
+**Data + AI Summit (DAIS) is the applied-ML conference for teams that ship pipelines, not papers.** Where GTC is hardware and NeurIPS is research, DAIS is the messy middle: lakehouse architecture, MLOps, feature stores, vector search, governance, and the operational reality of keeping models in production. If your day job is "make the data flow and the model serve," this is your event.
+
+---
+
+## Table of Contents
+
+1. [Who Should Attend](#1-who-should-attend)
+2. [Pass Tiers & Training](#2-pass-tiers--training)
+3. [Session Selection Strategy](#3-session-selection-strategy)
+4. [Budget & Discount Hacks](#4-budget--discount-hacks)
+5. [Travel & Accommodation](#5-travel--accommodation)
+6. [Physical Survival & Wellness](#6-physical-survival--wellness)
+7. [Pre-Conference Checklist](#7-pre-conference-checklist)
+
+---
+
+## 1. Who Should Attend
+
+DAIS spans data engineering, ML, and analytics, but the core audience is the team that builds and operates the ML platform.
+
+<Callout variant="tip" title="Best fit: data & ML platform teams in production">
+If you build pipelines, manage feature stores, serve models, or govern data/ML at scale, DAIS is the most directly applicable conference on the calendar. The sessions are case-study heavy and the hallway track is full of people solving the same operational problems you are.
+</Callout>
+
+- **Data & ML platform engineers** — lakehouse, Delta, pipeline orchestration, MLOps, model registry.
+- **ML engineers & applied scientists** — feature stores, vector search, RAG pipelines, fine-tuning at scale.
+- **Data engineering leads** — pipeline reliability, governance, Unity Catalog, cost optimization.
+- **Analytics & governance folks** — the data-governance and lineage tracks have grown substantially as regulation tightened.
+
+<Callout variant="info" title="Maybe skip if">
+You're purely a researcher or you never touch Databricks — a meaningful share of content is Databricks-platform-specific. If you're vendor-neutral, weigh that against the genuinely good applied-ML and MLOps content.
+</Callout>
+
+---
+
+## 2. Pass Tiers & Training
+
+DAIS offers a training add-on that's one of the better conference training programs.
+
+<ComparisonTable
+  title="DAIS Pass Tiers (typical)"
+  columns={["Standard", "Training Pass", "Virtual", "Community/Academic"]}
+  rows={[
+    { label: "Keynotes + sessions", values: [true, true, "Livestream", "Some"] },
+    { label: "Hands-on training (full-day)", values: [false, true, false, "Some"] },
+    { label: "Expo hall & demos", values: [true, true, false, true] },
+    { label: "Networking events", values: [true, true, false, "Limited"] },
+    { label: "Recordings on demand", values: [true, true, true, true] },
+    { label: "Typical price (USD)", values: ["$1,200–$1,800", "$1,700–$2,800", "Free–$300", "Discounted"] },
+  ]}
+/>
+
+<Callout variant="warning" title="The training day is worth the upcharge">
+The full-day training add-on (Spark, MLOps, LLM ops, lakehouse) is taught by Databricks curriculum authors and is genuinely useful — often more retention than a week of 30-minute talks. If budget allows, buy the Training Pass.
+</Callout>
+
+---
+
+## 3. Session Selection Strategy
+
+DAIS runs parallel tracks across data, ML, and governance. Filter hard.
+
+- **Prioritize production case studies** over roadmap sessions. "How we serve 10k RPS with vector search" beats "here's what's coming next quarter."
+- **The MLOps and LLMOps tracks are the core.** Model registry, feature stores, evaluation, and RAG-in-production sessions are the highest signal.
+- **Don't skip the governance/lineage track** if you operate in a regulated industry — it's where the real compliance-as-code content lives.
+- **Reserve time for the expo hall's non-Databricks vendors** — the ecosystem (vector DBs, orchestration, observability) is well represented.
+
+<Callout variant="tip" title="Bring your pipeline architecture">
+The hallway track at DAIS is unusually collaborative. Sketch your current pipeline (ingest → features → train → serve → monitor) on a napkin and you'll get 30 minutes of free architecture review from someone who's done it at scale.
+</Callout>
+
+---
+
+## 4. Budget & Discount Hacks
+
+San Francisco in June is expensive; stack the discounts.
+
+<ChecklistBox
+  title="Discount & cost-reduction checklist"
+  items={[
+    "Apply for the community / academic / nonprofit discount",
+    "Check for a diversity & inclusion scholarship (pass + travel)",
+    "Register early-bird — saves several hundred dollars",
+    "Ask your Databricks account team for a comped pass if you're a customer",
+    "Book the hotel block before it closes — SF June rates are brutal off-block",
+    "Consider the virtual pass for the team; recordings are solid",
+  ]}
+/>
+
+---
+
+## 5. Travel & Accommodation
+
+San Francisco's Moscone Center is downtown and walkable, but SF logistics have quirks.
+
+- **Hotel:** stay in SoMa near Moscone; the walk beats transit after a long day.
+- **Flights:** SFO is the main airport; BART connects directly to downtown. Arrive Sunday for Monday training.
+- **Ground transport:** walk or rideshare; SF parking is expensive and unnecessary.
+- **Food:** SoMa has good lunch options but they're busy at noon — scout 2–3 within 3 blocks on Sunday.
+- **Layers:** SF in June is famously cold and foggy ("June Gloom"); pack a jacket even if it's summer.
+
+---
+
+## 6. Physical Survival & Wellness
+
+DAIS is a full week of dense applied content; the cognitive load is real.
+
+<Callout variant="warning" title="Pipeline-brain is a real fatigue mode">
+Data/ML sessions are dense with architecture diagrams and trade-offs. By Thursday your retention drops. Pace yourself like a long debugging session — structured breaks beat heroic cramming.
+</Callout>
+
+<ChecklistBox
+  title="Conference-week wellness protocol"
+  items={[
+    "Wear supportive shoes — Moscone floors are concrete",
+    "Alternate sit/stand; stand at the back for 2 sessions per day",
+    "20-20-20 eye reset between diagram-heavy sessions",
+    "Hydrate 1:1 with the coffee; SF summer air conditioning is aggressive",
+    "Take a 10-minute outdoor walk at lunch — even in the fog, daylight helps",
+    "Cap evening events at 2 nights; the training day is morning-fresh",
+    "Pack a resistance band for thoracic mobility in your room",
+    "Use the focus blocks: 50 min session, 10 min break, like a deep-work cycle",
+  ]}
+/>
+
+<Callout variant="tip" title="Use the Focus Session Tracker">
+Our [Focus Session Tracker](/tools/focus-session-tracker) is built for exactly this — track your session blocks with movement reminders and streak stats, so you don't grind through Thursday on empty.
+</Callout>
+
+---
+
+## 7. Pre-Conference Checklist
+
+<ChecklistBox
+  title="Two weeks out"
+  items={[
+    "Register and book the training day if buying the Training Pass",
+    "Install the app; star MLOps/LLMOps and governance sessions",
+    "Sketch your current pipeline to bring to hallway-track reviews",
+    "Book hotel in the SoMa block; confirm cancellation policy",
+    "Pack a jacket — SF June is cold and foggy, not sunny",
+    "Pack a power bank, supportive shoes, a resistance band, and blue-light glasses",
+  ]}
+/>
+
+---
+
+See the full [Tech Conference Calendar](/resources/tech-conference-calendar) for dates, or read our [MLOps pipeline best practices](/blog/mlops-pipeline-best-practices) and [RAG pipeline architecture](/blog/rag-pipeline-architecture) articles to prep.

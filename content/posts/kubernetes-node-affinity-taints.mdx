@@ -1,0 +1,103 @@
+---
+title: "Kubernetes Node Affinity & Taints Guide"
+slug: kubernetes-node-affinity-taints
+description: "Control pod placement in Kubernetes with node affinity and taints — scheduling rules for GPU nodes, dedicated workloads, and strict node isolation patterns."
+date: "2026-03-13"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: true
+relatedArticles: ["kubernetes-autcaling-hpa-keda", "kubernetes-debugging-k9s-kubectl", "kubernetes-job-cronjob-patterns", "kubernetes-network-policies-tutorial", "kubernetes-network-security-policies"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-node-affinity-taints.png
+imageAlt: "Kubernetes node affinity and taints tolerations — advanced pod scheduling constraints for specialized workloads"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: Control pod placement in Kubernetes with node affinity and taints.
+- **Key Capabilities**: scheduling rules for GPU nodes, dedicated workloads, and strict node isolation patterns.
+- **Why Scheduling Rules Matter**: Apply structured configurations and validated production patterns.
+- **Node Affinity**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Not every pod belongs on every node. The GPU training job needs the GPU nodes; the latency-sensitive API shouldn't land on a spot instance that might vanish; the compliance-bound workload must stay off shared infrastructure. [Kubernetes](/articles/kubernetes-job-cronjob-patterns) gives you two complementary mechanisms for this: node affinity, which attracts pods to the right nodes, and taints, which repel pods from the wrong ones. Most teams reach for one and ignore the other, then wonder why their scheduling rules are full of holes.
+
+This guide covers how the two work, when each is the right tool, and the patterns that actually hold up in a heterogeneous cluster.
+
+## Why Scheduling Rules Matter
+
+A cluster without scheduling rules is a cluster where the scheduler makes placement decisions you didn't intend. On a homogeneous cluster that's fine — every node is like every other node. The moment you introduce heterogeneity, it breaks down.
+
+The common sources of heterogeneity: GPU nodes mixed with CPU-only nodes, spot/preemptible node pools alongside on-demand, nodes with different local SSD configurations, and dedicated nodes reserved for a specific team or compliance scope. In all these cases, a pod that lands on the wrong node either fails (a CPU pod scheduled onto a GPU node wastes expensive capacity) or violates a constraint (a regulated workload on shared nodes).
+
+Isolation requirements sharpen this further. A workload processing payment data may need to run only on nodes that never host other tenants. A noisy batch job shouldn't co-locate with a latency-sensitive service. Scheduling rules are how you express these constraints declaratively, so the scheduler enforces them automatically rather than relying on operator vigilance.
+
+## Node Affinity
+
+Node affinity lets a pod express preferences about where it runs based on node labels. It's the upgrade path from `nodeSelector` — which is just a simple label equality match — to a full rule system with required and preferred tiers.
+
+**Required affinity** is a hard constraint: if no node matches, the pod stays pending. Use it for hard requirements like "must run on a GPU node" or "must run in a specific zone." A pod that can't satisfy required affinity will sit unscheduled, which is the correct behavior — it surfaces the constraint failure rather than silently running somewhere wrong.
+
+**Preferred affinity** is a soft preference: the scheduler tries to honor it but will schedule elsewhere if it can't. Each preferred rule carries a weight (1–100), and the scheduler scores nodes accordingly. Use it for optimizations, not requirements — "prefer local SSD nodes, but fall back if none are free."
+
+```yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: accelerator
+              operator: In
+              values: ["nvidia-gpu"]
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 50
+        preference:
+          matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["g5.2xlarge"]
+```
+
+The operators (`In`, `NotIn`, `Exists`, `DoesNotExist`, `Gt`, `Lt`) cover most matching needs. The `Gt`/`Lt` operators are useful for numeric labels like generation numbers or capacity tiers.
+
+Upgrading from `nodeSelector` to affinity is straightforward — `nodeSelector` is equivalent to a single required `matchExpressions` rule. Affinity's advantage is the preferred tier and the richer operators, which let you express "best effort, fall back gracefully" without writing multiple manifests.
+
+## Taints and Tolerations
+
+Taints are the inverse: they mark a node as repelling pods, and pods opt in via tolerations. Where affinity is a pull ("come to me"), taints are a push ("stay away unless you're allowed"). The two work together because they solve different problems — affinity gets a pod to the right node, taints keep the wrong pods off it.
+
+A taint has an effect: `NoSchedule` (never schedule a non-tolerant pod here), `NoExecute` (evict already-running pods that don't tolerate it), and `PreferNoSchedule` (try to avoid, but allow if no other option). `NoExecute` is the strong form — it actively evicts, so use it deliberately.
+
+```bash
+# Mark GPU nodes as restricted
+kubectl taint nodes gpu-node-1 dedicated=gpu:NoSchedule
+```
+
+```yaml
+# A pod that's allowed to use GPU nodes
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "gpu"
+    effect: "NoSchedule"
+```
+
+Toleration seconds refine `NoExecute` taints: a pod can tolerate a taint for a bounded time, then get evicted. This is useful for graceful draining — a pod tolerates the taint for 5 minutes to finish in-flight requests before the node evicts it.
+
+The pattern that makes affinity and taints work together: taint the special nodes so generic pods can't land on them, then give the special workloads both an affinity for those nodes *and* a toleration for their taint. Affinity pulls the GPU job to the GPU node; the taint keeps the CPU job off it; the toleration lets the GPU job through. Using only one half leaves a gap — affinity alone doesn't stop other pods from also targeting the node; taints alone don't pull the right pod *to* the node.
+
+## Common Patterns
+
+A few patterns cover most real scheduling needs.
+
+**Dedicating nodes to a team or workload class.** Taint the dedicated nodes with a team-specific taint, and give only that team's pods the matching toleration (often via a default `ServiceAccount`-bound or namespace-level mechanism). This is how you carve a shared cluster into isolated slices without running separate clusters.
+
+**GPU workload placement.** Label GPU nodes with `accelerator=nvidia-gpu`, taint them `dedicated=gpu:NoSchedule`, and give GPU jobs both the affinity and the toleration. This is the pattern that prevents the expensive failure mode of a non-GPU pod squatting on a GPU node. Pair it with [cost-aware autoscaling](/blog/kubernetes-cost-optimization-finops) so GPU nodes scale down when idle rather than sitting billed-but-empty.
+
+**Debugging unschedulable pods.** When a pod stays Pending, `kubectl describe pod <name>` shows the scheduling failures at the bottom — "0/12 nodes available: 6 node(s) had untolerated taint, 4 node(s) didn't match affinity, 2 insufficent cpu." Read that message carefully; it tells you exactly which rule is blocking placement. The most common cause of an unschedulable pod that "should work" is a taint you forgot about or an affinity rule that's stricter than you intended. The second most common is resource pressure — the node matches the rules but doesn't have enough free capacity, which affinity rules don't surface as clearly.
+
+A note on operational hygiene: scheduling rules are most legible when they're consistent. If you use `dedicated=gpu` as a taint on GPU nodes, use the same key consistently across the cluster; ad hoc per-team taint keys accumulate into a tangle that no one can reason about. Document the taint and label conventions in the same place you document cluster topology, because a new team member can't infer them from the cluster alone.
+
+Used together, affinity and taints turn the scheduler from a black box that occasionally surprises you into a system where placement is explicit, debuggable, and enforced. The investment is small — a handful of labels and taints — and the payoff is a cluster where the right workloads land on the right nodes without you watching.
+
+

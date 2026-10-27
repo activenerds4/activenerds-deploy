@@ -1,0 +1,211 @@
+---
+title: "Hackathon Preparation Guide for Developers"
+slug: hackathon-preparation-developers
+description: "A complete hackathon prep guide for developers — team formation, idea selection, scope management, and survival tips."
+date: "2026-02-08"
+author: activenerds-team
+category: events-community
+tags: ["conferences"]
+featured: false
+relatedArticles: ["speak-at-tech-conferences", "tech-hackathons-2026-calendar", "focus-management-long-training-runs", "hackathon-team-formation-strategies", "sustainable-pacing-oncall-rotations"]
+image: https://cdn.activenerds.com/images/posts/hackathon-preparation-developers.png
+imageAlt: "Hackathon preparation for developers — pre-event checklist and strategy guide for competitive coding success"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Form and vet your team before the event**: the 2am dropout sinks teams
+- **Pre-stage tooling and scaffold**: environment failures waste hours
+- **Define the MVP in one sentence**: if you can't, your scope is too broad
+- **Budget time for the presentation**: a great demo beats a great build
+- **Sleep 3-4 hours**: the no-sleep culture destroys performance
+- **Plan for demo failure**: have a screen recording as insurance
+- **Move and eat real food**: a hackathon is an extreme sedentary event; survive it physically
+</Callout>
+
+Most hackathon teams don't lose because their idea was bad. They lose because they ran out of time, fought about scope, had a teammate disappear at 3am, or delivered a broken demo. The difference between a winning team and an also-ran is rarely talent — it's preparation and execution. This guide covers everything you control before and during a hackathon that determines whether you finish with a working demo or a half-built GitHub repo.
+
+## Before the Hackathon
+
+### Team Formation Strategies
+
+Your team is 70% of your outcome. Form it deliberately, not at kickoff.
+
+**Ideal team composition (4 people):**
+- **1 frontend/generalist**: builds the demo-able UI
+- **1 backend/integration**: wires services together
+- **1 ML/specialist**: the hard technical part
+- **1 presenter/polisher**: owns the demo and slide deck
+
+If you're a team of 2-3, combine roles — but someone must own the demo. A team where everyone codes and no one prepares the presentation loses to a team with a weaker build and a great demo.
+
+**Vet commitment before registering:**
+- Confirm everyone can attend the full duration
+- Agree on [sleep strategy](/articles/sleep-optimization-shift-workers) in advance (see Health section)
+- Set a "no silent quitting" rule — if someone needs to drop, they say so at hour 6, not hour 18
+
+**Where to find teammates:**
+- Your existing network (best — you know their reliability)
+- The hackathon's Discord/Slack (most events have one pre-event)
+- Local meetups (see our [meetup guide](/blog/local-tech-meetups-finding-guide))
+
+### Idea Brainstorming
+
+Don't wait until kickoff to brainstorm. Have 3-5 candidate ideas ready, then pick at the event based on the theme and [judging criteria](/articles/hackathon-judging-criteria-guide).
+
+**Good hackathon ideas have:**
+- A clear demo path (you can show the result in 4 minutes)
+- A "wow moment" (one feature that makes judges react)
+- Feasibility in the time available (if it needs 3 weeks, it's not a hackathon idea)
+- A fallback (a simpler version you can ship if the ambitious version stalls)
+
+**Bad hackathon ideas:**
+- Anything requiring "we just need to train a model first" (training takes too long)
+- Anything where the value only appears at scale (judges can't see scale in a demo)
+- Anything you've already built (judges and rules usually exclude prior work)
+
+### Tooling Prep
+
+Pre-stage everything before the event:
+- **Repo scaffolded**: monorepo or polyrepo, CI/CD skipped (no time), basic structure ready
+- **Accounts and API keys**: OpenAI/Anthropic, cloud provider, any sponsor APIs — create keys now, not at 2am when you hit rate limits
+- **Local dev environments**: everyone confirms their setup works before arrival
+- **Demo infrastructure**: a deployment target (Vercel, Railway, a cloud VM) ready to go
+- **Template slide deck**: title, problem, solution, demo, tech stack — fill in as you build
+
+<Callout type="info">
+**The 2am failure:** The most common hackathon disaster is a teammate whose environment doesn't work and spends 4 hours debugging setup instead of building. Verify every teammate can run the scaffold before the event. No exceptions.
+</Callout>
+
+## Idea Selection and Scoping
+
+### MVP Definition
+
+Define your MVP in one sentence before you write any code: "By judging time, we will have [specific working feature] that demonstrates [specific value]."
+
+If you can't state it in one sentence, your scope is too broad. Cut until you can.
+
+### Judge Criteria Analysis
+
+Read the judging rubric before finalizing your idea. [Hackathons](/articles/tech-hackathons-2026-calendar) weight differently:
+- **Technical difficulty**: favor ambitious architecture, hard algorithms
+- **Impact/usefulness**: favor real-world problem, clear user
+- **Polish/design**: favor a beautiful, working demo
+- **Sponsor prizes**: favor use of a specific sponsor's API/tool
+
+Align your idea to the rubric. A technically brilliant project loses a "polish"-weighted hackathon to a simpler, prettier one. Know the game you're playing.
+
+### Scope Cutting
+
+The most important skill in a hackathon: recognizing when to cut. Rules:
+- **Cut at hour 8, not hour 18** — early cuts preserve the core; late cuts leave broken edges
+- **Cut features, not the core demo path** — the "wow moment" stays; peripheral features go
+- **Have a "v1" defined explicitly** — the minimum that demos well; everything else is "v2 if time"
+- **When in doubt, cut** — unfinished features hurt more than missing features
+
+## During the Event
+
+### Time Allocation
+
+A rough budget for a 24-hour hackathon:
+- **Hour 0-2**: finalize idea, divide work, scaffold (already done if you prepped)
+- **Hour 2-14**: build the core — the demo path end to end
+- **Hour 14-18**: polish, fix the demo-breaking bugs, deploy
+- **Hour 18-22**: build the presentation, rehearse the demo
+- **Hour 22-24**: sleep (yes, really — see Health), final rehearsal
+- **Hour 24**: present
+
+The teams that fail allocate all 24 hours to building and zero to presenting. A working project with a bad demo loses to a half-working project with a great demo.
+
+### Division of Labor
+
+Parallelize from hour 1:
+- **Backend and frontend work simultaneously** against an agreed API contract
+- **The presenter starts the slide deck at hour 12** — not hour 22
+- **One person owns deployment** — getting it live early exposes integration bugs
+- **The ML/specialist works the hardest part first** — if it's going to fail, know by hour 8
+
+### Checkpoint Reviews
+
+Stop the team every 4 hours for a 10-minute sync:
+- **What's working?**
+- **What's blocked?**
+- **Are we on the demo path or distracted?**
+- **Do we need to cut?**
+
+These feel like interruptions but save hours of misaligned work. A team that syncs every 4 hours out-executes a team that goes heads-down for 24 hours.
+
+## Presentation and Demo
+
+### Demo Script
+
+Write the demo as a script before rehearsing:
+1. **"Here's the problem"** (30 sec) — set up the pain
+2. **"Here's our solution"** (30 sec) — one sentence
+3. **"Let me show you"** (2-3 min) — the live demo, narrated
+4. **"Here's what's under the hood"** (30-60 sec) — the technical depth
+5. **"What's next"** (15 sec) — future vision, shows it's real
+
+Total: 4-5 minutes. Practice it until you can do it without notes.
+
+### Slide Design
+
+- **Max 6 slides** — title, problem, solution, demo (you'll switch to the live app), architecture, team
+- **One idea per slide**
+- **Architecture diagram** showing the tech stack — judges care about this
+- **No code on slides** unless it's a single, highlighted line
+
+### Handling Live Demo Failures
+
+Live demos fail. Plan for it:
+- **Have a screen recording of the demo working** — if live fails, play the recording and narrate
+- **Know your fallback** — "if the live demo breaks, I'll show you the recording"
+- **Don't panic-aologize** — calmly switch to the recording; judges have seen worse
+- **Rehearse the failure** — actually practice switching to the recording so it's smooth
+
+The recording isn't cheating — it's insurance. Most winning teams have one.
+
+## Health and Survival
+
+### Sleep Strategy
+
+The "no sleep" hackathon culture is macho nonsense that destroys performance. The evidence is clear: after 17 hours awake, cognitive performance equals legal alcohol impairment. A team that sleeps 4 hours beats a team that sleeps 0.
+
+**Recommended strategy for 24h events:**
+- **One 3-4 hour sleep block** between 2am-6am for the whole team
+- **The presenter sleeps the most** — they're on stage; they need to be sharp
+- **Set alarms** — oversleeping is as bad as not sleeping
+
+### Movement Breaks
+
+A hackathon is an extreme version of the sedentary, high-focus work ActiveNerds covers all year. Apply the same principles, intensified:
+
+<Callout type="tip">
+**Hackathon movement protocol:**
+1. Stand up every 90 minutes — even 60 seconds helps
+2. Walk during any team discussion over 5 minutes
+3. 20-20-20 rule every hour (look 20 feet away for 20 seconds)
+4. Hydrate aggressively — caffeine dehydrates and you'll forget water
+5. Do desk stretches at your workstation between commits
+</Callout>
+
+See our [micro-exercise routines](/blog/micro-exercise-routines-developers) and [movement snack checklist](/blog/movement-snack-checklist-desk-workers) for the full routines.
+
+### Nutrition Tips
+
+- **Eat real food, not just energy drinks and pizza** — blood sugar crashes kill focus
+- **Protein every 4-6 hours** — sustained energy, not spikes
+- **Limit caffeine after midnight** — it'll wreck the sleep block you need
+- **Have snacks at the workstation** — you won't leave to eat unless food is present
+
+### Post-Event Recovery
+
+- **Sleep 8+ hours the next night** — you're in sleep debt; repay it
+- **Take a real day off** — don't jump back into work the next morning
+- **Hydrate and move** — a long walk the day after clears the stiffness
+- **Reflect**: what worked, what didn't, what to do differently next time
+
+## Summary & Next Steps
+
+For events to apply this to, see our [2026 hackathon calendar](/blog/tech-hackathons-2026-calendar). For what to do after you win (or learn), see our guides on [speaking at conferences](/blog/speak-at-tech-conferences) and [conference networking](/blog/tech-conference-networking-strategies). Pick an event, form a team this week, and prep — the teams that prepare are the teams that place.
+

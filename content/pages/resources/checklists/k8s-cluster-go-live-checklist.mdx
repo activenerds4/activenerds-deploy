@@ -1,0 +1,153 @@
+---
+title: "Kubernetes Cluster Go-Live & Audit Checklist"
+description: "Take a cluster to production safely — default-deny NetworkPolicies, PDBs, resource parity, probe tuning, and topology spread constraints."
+category: kubernetes
+slug: k8s-cluster-go-live-checklist
+lastUpdated: "2026-08-28"
+tags: ["kubernetes", "kubectl", "production", "networking"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Kubernetes Cluster Go-Live & Audit Checklist
+
+**The gap between "kubectl get nodes is Ready" and "this cluster can survive a Monday."**
+
+A cluster that boots is not a cluster that's production-ready. This checklist covers the controls that keep workloads alive when traffic spikes, a node dies, or someone deploys a bad rollout — networking, disruption budgets, resource parity, probes, and spread.
+
+---
+
+## Table of Contents
+
+1. [Networking & NetworkPolicies](#1-networking--networkpolicies)
+2. [Workload Resilience](#2-workload-resilience)
+3. [Resources & Quotas](#3-resources--quotas)
+4. [Probes & Health](#4-probes--health)
+5. [Topology & Scheduling](#5-topology--scheduling)
+6. [Cluster Baseline](#6-cluster-baseline)
+
+---
+
+## 1. Networking & NetworkPolicies
+
+<ChecklistBox
+  title="Networking & NetworkPolicies"
+  items={[
+    "Default-deny ingress NetworkPolicy applied to every production namespace",
+    "Default-deny egress NetworkPolicy applied to every production namespace",
+    "Ingress allowed only from explicit sources (ingress controller, known namespaces)",
+    "Egress allowed only to explicit destinations (DB, external APIs, DNS)",
+    "DNS (kube-system) egress permitted for all namespaces that need name resolution",
+    "No hostNetwork, hostPID, or hostIPC usage in production workloads",
+    "NetworkPolicy tested: a pod in namespace A cannot reach a pod in namespace B unless allowed",
+  ]}
+/>
+
+<Callout variant="warning" title="Default-deny is the floor, not the ceiling">
+  A default-deny policy with no allow rules blocks everything — including your app. Always pair deny with explicit allow policies for the traffic you actually need. Test by trying to reach a blocked destination and confirming the connection is refused.
+</Callout>
+
+---
+
+## 2. Workload Resilience
+
+<ChecklistBox
+  title="Workload Resilience"
+  items={[
+    "PodDisruptionBudget defined for every horizontally-scaled production workload",
+    "PDB minAvailable or maxUnavailable set to survive one node drain without outage",
+    "Replica count ≥ 2 for any production workload (a single replica is a single point of failure)",
+    "Workload spread across nodes (anti-affinity or topology spread — see section 5)",
+    "RollingUpdate strategy with maxSurge/maxUnavailable tuned for zero-downtime rollouts",
+    "Rollback verified: `kubectl rollout undo` tested and completes within the SLO",
+    "Stateful workloads use StatefulSet with persistent volume claims, not Deployment + PVC",
+  ]}
+/>
+
+---
+
+## 3. Resources & Quotas
+
+<ChecklistBox
+  title="Resources & Quotas"
+  items={[
+    "Resource requests set on every container (CPU and memory)",
+    "Resource limits set on every container (memory always; CPU per policy)",
+    "Requests and limits reviewed for parity — limits far above requests cause throttling/OOM surprises",
+    "ResourceQuota applied per namespace (CPU, memory, PVC, object counts)",
+    "LimitRange set to default requests/limits for pods that don't specify them",
+    "QoS class reviewed (Guaranteed for critical, Burstable for most, avoid BestEffort in prod)",
+    "Namespace quotas prevent one team from starving the cluster (no unbounded growth)",
+  ]}
+/>
+
+---
+
+## 4. Probes & Health
+
+<ChecklistBox
+  title="Probes & Health"
+  items={[
+    "livenessProbe configured and points at a true liveness signal (not just TCP port open)",
+    "readinessProbe configured and gates traffic (pod not routed until ready)",
+    "startupProbe configured for slow-starting apps (separate from liveness to avoid kill-on-boot)",
+    "Probe failureThreshold and periodSeconds tuned (not the 1s/3-fail default for slow apps)",
+    "Readiness probe fails when dependencies are down (don't serve traffic into a broken app)",
+    "Liveness probe does NOT check dependencies (you don't want cascading restarts)",
+    "Graceful shutdown: preStop hook + terminationGracePeriodSeconds tuned for in-flight requests",
+  ]}
+/>
+
+<Callout variant="tip" title="Liveness vs readiness — the classic mistake">
+  Liveness = "should this pod be restarted?" Readiness = "should this pod receive traffic?" If your liveness probe checks the database, a DB blip restarts every pod and you get a thundering herd. Liveness checks the app itself; readiness checks whether the app can do its job (including deps).
+</Callout>
+
+---
+
+## 5. Topology & Scheduling
+
+<ChecklistBox
+  title="Topology & Scheduling"
+  items={[
+    "topologySpreadConstraints configured to spread pods across zones (maxSkew: 1)",
+    "Pod anti-affinity used to keep replicas off the same node where feasible",
+    "Node affinity / taints used to pin workloads to appropriate node pools",
+    "Single-zone clusters documented as an accepted risk (or moved to multi-zone)",
+    "Critical workloads tolerate node taints that maintenance workloads don't",
+    "Pod priority classes set so critical pods preempt non-critical under pressure",
+    "Scheduler tested: drain a node and confirm pods reschedule within the SLO",
+  ]}
+/>
+
+---
+
+## 6. Cluster Baseline
+
+<ChecklistBox
+  title="Cluster Baseline"
+  items={[
+    "Kubernetes version within a supported minor release (not EOL)",
+    "Control plane HA (multi-master) for production clusters",
+    "etcd backed up on a schedule with tested restore",
+    "Audit logging enabled on the API server",
+    "RBAC follows least privilege — no cluster-admin for app service accounts",
+    "Pod Security Standards enforced (restricted for production namespaces)",
+    "Metrics server + cluster autoscaler / KEDA operational for demand scaling",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Go-Live Sign-off"
+  items={[
+    "Chaos drill passed: drain a node / kill a zone — workloads recover within SLO",
+    "Rollout + rollback tested end-to-end in the production cluster",
+    "On-call runbook covers node loss, bad rollout, and capacity exhaustion",
+    "Backup restore tested (not just 'backup succeeded')",
+  ]}
+/>

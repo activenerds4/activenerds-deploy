@@ -1,0 +1,62 @@
+{
+  "batch": "keywords-batch-07",
+  "createdAt": "2026-08-25T00:00:00.000Z",
+  "totalKeywords": 15,
+  "clusters": [
+    {
+      "category": "ai-machine-learning",
+      "keywords": [
+        { "id": "kw-181", "term": "mixed precision training pytorch", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "tutorial", "primaryTag": "pytorch", "targetPillar": "training", "status": "published" },
+        { "id": "kw-182", "term": "prompt engineering techniques guide", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "llms", "targetPillar": "prompting", "status": "published" }
+      ]
+    },
+    {
+      "category": "containers-kubernetes",
+      "keywords": [
+        { "id": "kw-183", "term": "kubernetes statefulset patterns guide", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "stateful", "status": "published" },
+        { "id": "kw-184", "term": "container image registry comparison", "searchIntent": "commercial", "targetAudience": "intermediate", "suggestedContentType": "comparison", "primaryTag": "docker", "targetPillar": "registry", "status": "published" }
+      ]
+    },
+    {
+      "category": "fitness-wellness-tech",
+      "keywords": [
+        { "id": "kw-185", "term": "walking pad under desk review", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "review", "primaryTag": "standing-desk", "targetPillar": "movement", "status": "published" },
+        { "id": "kw-186", "term": "desk cycling machine benefits", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "habit-building", "targetPillar": "movement", "status": "published" }
+      ]
+    },
+    {
+      "category": "devsecops-security",
+      "keywords": [
+        { "id": "kw-187", "term": "kubernetes certificate management cert-manager", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "tutorial", "primaryTag": "kubernetes", "targetPillar": "tls", "status": "published" },
+        { "id": "kw-188", "term": "owasp top 10 cloud native", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "devsecops", "targetPillar": "risk-mapping", "status": "published" }
+      ]
+    },
+    {
+      "category": "gear-gadgets",
+      "keywords": [
+        { "id": "kw-189", "term": "ergonomic monitor stand guide", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "ergonomics", "targetPillar": "displays", "status": "published" },
+        { "id": "kw-190", "term": "fitness smartwatch for developers", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "fitness-trackers", "targetPillar": "wearables", "status": "published" }
+      ]
+    },
+    {
+      "category": "events-community",
+      "keywords": [
+        { "id": "kw-191", "term": "developer conference talk templates", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "conferences", "targetPillar": "speaking", "status": "published" },
+        { "id": "kw-192", "term": "hackathon team formation strategies", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "conferences", "targetPillar": "hackathons", "status": "published" }
+      ]
+    },
+    {
+      "category": "platform-engineering-devops",
+      "keywords": [
+        { "id": "kw-193", "term": "blue green deployment kubernetes", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "deployment", "status": "published" },
+        { "id": "kw-194", "term": "terraform module design patterns", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "iac", "status": "published" }
+      ]
+    },
+    {
+      "category": "focus-productivity",
+      "keywords": [
+        { "id": "kw-195", "term": "deep work environment setup", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "deep-work", "targetPillar": "environment", "status": "published" }
+      ]
+    }
+  ]
+}

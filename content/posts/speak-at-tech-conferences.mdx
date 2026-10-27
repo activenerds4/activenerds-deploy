@@ -1,0 +1,196 @@
+---
+title: "How to Speak at Tech Conferences"
+slug: speak-at-tech-conferences
+description: "A step-by-step guide to landing your first tech conference talk — from CFP to slides to delivery and follow-up."
+date: "2026-02-02"
+author: activenerds-team
+category: events-community
+tags: ["conferences"]
+featured: false
+relatedArticles: ["hackathon-preparation-developers", "local-tech-meetups-finding-guide", "virtual-tech-events-online-meetups", "kubecon-attendance-guide", "tech-conference-networking-strategies"]
+image: https://cdn.activenerds.com/images/posts/speak-at-tech-conferences.png
+imageAlt: "Speaking at tech conferences — presentation skills and CFP writing tips for engineer speakers"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Match the CFP to your real expertise**: reviewers spot posturing; specificity wins
+- **The abstract is the acceptance**: specific, benefit-driven, with a clear takeaway
+- **Slides support, not duplicate**: one idea per slide, code at 18pt+, no text walls
+- **Rehearse out loud 5+ times**: most first-timers run 20% long
+- **Pre-record risky demos**: live coding rarely pays off
+- **Leverage the talk after**: slides, blog post, video, and the next proposal all flow from one good talk
+</Callout>
+
+Speaking at a [tech conference](/articles/tech-conference-networking-strategies) is the highest-leverage career move most engineers never make. One good talk gets you on the radar of hiring managers, open-source maintainers, and potential collaborators in a way that years of Slack lurking can't. But the path from "I've never spoken" to "I'm on stage at KubeCon" is opaque. This is the step-by-step guide I wish I'd had for my first talk.
+
+## Finding the Right CFP
+
+### Where to Find CFPs
+
+A CFP (Call for Proposals) is the open application process most conferences use to select speakers. The main aggregators:
+
+- **cfp.land**: the largest aggregator, filterable by topic and location
+- **Papercall.io**: focused on tech conferences, shows submission counts
+- **devevents.com**: community-maintained calendar
+- **Conference websites directly**: the most reliable for major events (KubeCon, QCon, GTC)
+
+Set up alerts for your topics (Kubernetes, ML, security) so you catch CFPs when they open, not when they close.
+
+### Matching Your Expertise
+
+The most common mistake first-timers make is proposing a topic they think is impressive rather than one they actually know. Reviewers can tell. The talks that get accepted solve a specific problem the audience has, delivered by someone who's lived it.
+
+Good first-talk topics:
+- "How we solved [specific problem] at [scale]" — war stories from production
+- "A practical guide to [tool/technique]" — hands-on, demo-able
+- "What I learned failing at [thing]" — honest, contrarian
+
+Bad first-talk topics:
+- "The future of [broad field]" — too vague, no evidence
+- "An introduction to [thing everyone knows]" — low value
+- "Why [controversial opinion]" — hot takes without data get rejected
+
+### Deadlines and Timing
+
+CFPs typically run 4-8 months before the event. KubeCon CFPs close ~6 months out; smaller conferences closer to 3-4 months. Submit 2-3 weeks before the deadline — early enough to not rush, late enough to see what others are proposing (some CFP platforms show public submissions).
+
+## Writing a Winning Proposal
+
+### Title and Abstract
+
+The title is what gets you read; the abstract is what gets you accepted. Both need to be specific and benefit-driven.
+
+**Weak title:** "[Kubernetes Security](/articles/kubernetes-security-news-monthly)"
+**Strong title:** "Locking Down K8s: A Defense-in-Depth Approach for Multi-Tenant Clusters"
+
+**Weak abstract:** "This talk covers Kubernetes security best practices for production clusters."
+**Strong abstract:** "Multi-tenant Kubernetes clusters face a unique threat surface: noisy neighbors, privilege escalation paths, and shared control planes. This talk walks through a defense-in-depth architecture tested across 40+ production clusters, covering network policy design, Pod Security Standards admission, and runtime detection with Falco. Attendees will leave with a concrete [hardening checklist](/articles/devsecops-hardening-checklist) and the trade-offs behind each control."
+
+The second abstract tells reviewers exactly what the audience learns and signals you've done the work.
+
+### Outline Structure
+
+Most CFPs ask for an outline or talk structure. A reliable format:
+
+1. **The problem (2-3 min)**: why this matters, who it affects
+2. **Background (3-5 min)**: the minimum context needed to follow
+3. **The approach (10-15 min)**: the meat — your solution, with specifics
+4. **Demo or case study (5-8 min)**: proof it works
+5. **Lessons and trade-offs (3-5 min)**: what didn't work, what you'd do differently
+6. **Q&A (5-10 min)**: leave time for this
+
+Include time estimates per section. Reviewers want to see you've thought about pacing.
+
+### What Reviewers Look For
+
+Talking to program committee members, the consistent themes:
+
+- **Specificity over generality** — concrete examples beat abstract claims
+- **A clear takeaway** — "attendees will learn X" should be explicit
+- **Speaker fit** — evidence you have the experience to deliver this
+- **Novelty** — not a rehash of last year's accepted talks (reviewers remember)
+- **Practical applicability** — can the audience use this Monday morning?
+
+<Callout type="info">
+**Rejection is normal.** Acceptance rates at major conferences run 15-25%. Expect to be rejected multiple times before you're accepted. Each rejection with feedback makes the next proposal stronger. Submit to 3-5 CFPs in parallel.
+</Callout>
+
+## Slide Design for Technical Talks
+
+### Code on Slides Done Right
+
+The cardinal sin of technical talks: a full-screen screenshot of code no one can read. Rules for code on slides:
+
+- **Maximum 8-10 lines per slide** — if it doesn't fit, it's too much
+- **Font size 18pt minimum** — if the back row can't read it, it's decoration
+- **Highlight the relevant line(s)** — dim everything except what you're discussing
+- **Use a high-contrast theme** — dark background, light text reads well on projectors
+
+```text
+Good code slide structure:
+1. Show the problem (2-3 lines of broken code)
+2. Reveal the fix (highlight the changed line)
+3. Explain why (one bullet, not a paragraph)
+```
+
+### Visual Storytelling
+
+The best technical talks use visuals that a blog post couldn't:
+- **Architecture diagrams** that build piece by piece (animate in)
+- **Before/after comparisons** showing the impact
+- **Timelines or flow diagrams** for processes
+- **Real dashboards or logs** (redacted) showing the system in action
+
+Avoid: stock photos of people pointing at whiteboards, walls of bullet points, screenshots of terminals with 200 lines.
+
+### Avoiding Text Walls
+
+A slide with 6+ bullet points is a document, not a presentation. Rules:
+- **One idea per slide**
+- **Max 3 bullets, max 6 words each** (the 6x6 rule, relaxed)
+- **If you're reading your slides, the slides are doing your job** — cut the text
+
+Slides should support what you say, not duplicate it. If the audience can get everything from the slides, they don't need you.
+
+## Delivery and Stage Presence
+
+### Rehearsal Strategy
+
+- **Rehearse out loud, standing, 5+ times** — reading silently teaches you nothing about timing
+- **Time every rehearsal** — most first-timers run 20% long; cut accordingly
+- **Record yourself** — watch for filler words ("um," "so," "right") and pace
+- **Rehearse with the demo** — live demos fail; rehearse the failure recovery
+- **Do a dry run with colleagues** — their confusion reveals where you lost the thread
+
+### Live Coding Tips
+
+Live coding is high-risk, high-reward. If you must:
+- **Pre-stage everything** — repos cloned, dependencies installed, terminals sized
+- **Have a "known good" checkpoint** — a git tag you can reset to if things break
+- **Type slowly and narrate** — the audience can't read as fast as you type
+- **Consider a recording** — if the live demo is critical, pre-record it and narrate over the video; this is accepted practice, not cheating
+
+Honestly: most live coding should be pre-recorded. The risk/reward rarely favors live.
+
+### Handling Q&A
+
+- **Repeat the question** — ensures the audience heard and buys you thinking time
+- **It's okay to say "I don't know"** — followed by "but here's how I'd find out"
+- **Redirect to the room** — "has anyone dealt with this?" surfaces audience expertise
+- **Don't get defensive** — challenging questions aren't attacks; engage with the substance
+
+## Post-Talk Leveraging
+
+### Sharing Slides and Video
+
+- **Post slides immediately** — on your site, Speaker Deck, or GitHub; link in the conference chat
+- **Share the video when posted** — most conferences post talks within weeks; share on LinkedIn and your community
+- **Write a companion blog post** — expands the talk into searchable content; drives traffic long after the event
+
+### Building on the Talk
+
+One talk should seed the next:
+- **The Q&A reveals what people wanted more of** — that's your next talk
+- **Repurpose for meetups** — a 45-minute conference talk becomes a 20-minute meetup talk
+- **Turn it into a workshop** — if the talk generated interest, a paid workshop monetizes it
+
+### Networking at the Event
+
+The talk is the icebreaker; the hallway track is where the value compounds. After your talk:
+- **Linger near the stage** — people with questions will find you
+- **Go to the speaker dinner** — this is where collaborators and hiring managers are
+- **Follow up within 48 hours** — connect on LinkedIn with a specific note ("great question about X")
+
+See our [tech conference networking strategies](/blog/tech-conference-networking-strategies) for the full playbook.
+
+<Callout type="tip">
+**Movement break:** If you're rehearsing a talk, rehearse standing and walk during the parts where you're not demoing. Movement improves delivery and you'll be on your feet for 40 minutes on stage — train for it.
+</Callout>
+
+## Summary & Next Steps
+
+Speaking compounds. One talk leads to invitations to others, to workshop offers, to the conversations that shape your career. Find a CFP this month — [cfp.land](https://cfp.land) is the place to start — and submit. The first acceptance is the hardest; every one after gets easier.
+
+For related guides, see our [tech conference networking strategies](/blog/tech-conference-networking-strategies), [hackathon preparation guide](/blog/hackathon-preparation-developers), and [local tech meetups guide](/blog/local-tech-meetups-finding-guide).
+

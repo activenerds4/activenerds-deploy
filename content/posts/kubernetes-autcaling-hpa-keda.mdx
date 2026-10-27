@@ -1,0 +1,174 @@
+---
+title: "Kubernetes Autoscaling: HPA and KEDA"
+slug: kubernetes-autcaling-hpa-keda
+description: "Master Kubernetes autoscaling with Horizontal Pod Autoscaler and KEDA — event-driven scaling for real workloads."
+date: "2025-10-08"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: true
+relatedArticles: ["kubernetes-observability-prometheus-grafana", "kubernetes-rbac-configuration", "kubernetes-statefulset-patterns-guide", "kubernetes-custom-controller-development", "kubernetes-debugging-k9s-kubectl"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-autcaling-hpa-keda.png
+imageAlt: "Kubernetes autoscaling with HPA and KEDA — metric-driven pod scaling for variable workload management"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Horizontal Pod Autoscaler (HPA)**: Adds or removes pod replicas based on metrics.
+- **Vertical Pod Autoscaler (VPA)**: Adjusts CPU and memory requests/limits for pods.
+- **Cluster Autoscaler**: Adds or removes nodes from the cluster when pods can't be scheduled or nodes are underutilized.
+- **Queue-based scaling**: The most common KEDA use case.
+</Callout>
+
+Autoscaling in [Kubernetes](/articles/kubernetes-node-affinity-taints) is one of those features that everyone knows exists but few implement well. The Horizontal Pod Autoscaler (HPA) has been around since the early days, but it has real limitations — it only scales on CPU and memory by default, which doesn't match how most real workloads behave. That's where KEDA comes in: event-driven autoscaling that can scale based on queue length, HTTP requests, or any custom metric.
+
+This guide covers both tools and when to use each.
+
+## Autoscaling in Kubernetes
+
+[Kubernetes](/articles/kubernetes-observability-prometheus-grafana) has three autoscaling mechanisms that operate at different levels:
+
+**Horizontal Pod Autoscaler (HPA)**: Adds or removes pod replicas based on metrics. This is what most people mean by "K8s autoscaling."
+
+**Vertical Pod Autoscaler (VPA)**: Adjusts CPU and memory requests/limits for pods. Useful for right-sizing but can't scale to zero and requires pod restarts to apply changes.
+
+**Cluster Autoscaler**: Adds or removes nodes from the cluster when pods can't be scheduled or nodes are underutilized. This works with HPA — HPA scales pods, Cluster Autoscaler scales nodes.
+
+<Note>
+HPA and VPA are not mutually exclusive in theory, but in practice you should pick one. Using both on the same workload leads to unpredictable behavior as they fight each other.
+</Note>
+
+## HPA Configuration
+
+HPA scales your deployment based on a target metric value. The default is CPU utilization, but you can use any custom metric via the Metrics API:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-server-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-server
+  minReplicas: 3
+  maxReplicas: 50
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+```
+
+The `behavior` section is often overlooked but crucial. Without it, HPA can scale down too aggressively, causing oscillation. The `stabilizationWindowSeconds: 300` tells HPA to wait 5 minutes of low utilization before scaling down — preventing flapping.
+
+### Custom Metrics with HPA
+
+For most real workloads, CPU and memory aren't the right scaling signals. A web API should scale on request rate; a worker should scale on queue depth. This requires the Kubernetes Metrics Server (for resource metrics) or a custom metrics adapter (for application metrics):
+
+```yaml
+# HPA with custom metric (requests per second via Prometheus adapter)
+metrics:
+- type: Pods
+  pods:
+    metric:
+      name: http_requests_per_second
+    target:
+      type: AverageValue
+      averageValue: "100"
+```
+
+This requires setting up the Prometheus Adapter or a similar custom metrics pipeline, which is non-trivial. This is exactly the gap KEDA fills.
+
+## KEDA for Event-Driven Scaling
+
+KEDA (Kubernetes Event-Driven Autoscaling) is a CNCF project that extends K8s with event-driven scaling. It works as a layer on top of HPA — KEDA creates and manages HPA objects, but it can scale based on events from dozens of sources: Kafka, RabbitMQ, AWS SQS, Redis, Azure Service Bus, Prometheus, and more.
+
+The key advantage: **KEDA can scale to zero**. HPA requires at least 1 replica (`minReplicas: 1`). KEDA can scale a deployment to zero replicas when there's no work, and bring it back when events arrive.
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: kafka-worker-scaler
+spec:
+  scaleTargetRef:
+    name: kafka-worker
+  minReplicaCount: 0
+  maxReplicaCount: 30
+  pollingInterval: 30
+  cooldownPeriod: 300
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka:9092
+      consumerGroup: my-group
+      topic: events
+      lagThreshold: "10"
+```
+
+This ScaledObject tells KEDA: "Scale the `kafka-worker` deployment based on consumer group lag. If lag is 0, scale to zero. If lag exceeds 10 per consumer, scale up. Check every 30 seconds."
+
+<Callout type="tip">
+KEDA's scale-to-zero is a game-changer for cost optimization. Workloads that process intermittent events (batch jobs, queue workers, scheduled tasks) can go from always-on to on-demand, saving significant compute costs.
+</Callout>
+
+## Real-World Patterns
+
+**Queue-based scaling**: The most common KEDA use case. A worker deployment scales based on queue depth — SQS, Kafka, RabbitMQ, or Redis Streams. When the queue is empty, scale to zero. When messages pile up, scale out fast.
+
+```yaml
+# AWS SQS trigger
+triggers:
+- type: aws-sqs
+  metadata:
+    queueURL: https://sqs.us-east-1.amazonaws.com/123456789/my-queue
+    queueLength: "5"
+    awsRegion: us-east-1
+```
+
+**Cron-based scaling**: Scale workloads on a schedule. Perfect for batch jobs that run at specific times:
+
+```yaml
+triggers:
+- type: cron
+  metadata:
+    timezone: UTC
+    start: "0 9 * * 1-5"
+    end: "0 17 * * 1-5"
+    desiredReplicas: "5"
+```
+
+**Multi-trigger setups**: Combine multiple triggers — KEDA scales based on the maximum of all triggers. This lets you scale based on queue depth AND CPU, or schedule AND HTTP request rate.
+
+## Common Pitfalls
+
+**Cold start latency**: When scaling from zero, the first request waits for a pod to start, pull the image, and warm up. This can add 10-30 seconds of latency. For user-facing services, keep `minReplicas: 1` to avoid cold starts. For background workers, cold starts are fine.
+
+**Metric lag**: Both HPA and KEDA poll metrics at intervals (default 30 seconds for KEDA, 15 seconds for HPA). Rapid traffic spikes can overwhelm your pods before autoscaling kicks in. Set appropriate `minReplicas` to handle baseline load.
+
+**Resource requests tuning**: HPA calculates replica count based on `actual_utilization / target_utilization * current_replicas`. If your resource requests are wrong (too high or too low), HPA's scaling decisions will be wrong too. Right-size your requests first.
+
+<Warning>
+Don't set `minReplicas: 0` for services that receive unpredictable traffic. The cold start will cause timeouts and errors. Scale-to-zero is for batch and event-driven workloads, not web servers.
+</Warning>
+
+The practical advice: start with HPA on CPU/memory for stateless web services. Add KEDA when you have event-driven workloads that benefit from scale-to-zero. And always pair autoscaling with the Cluster Autoscaler — scaling pods is useless if there are no nodes to schedule them on.
+
+

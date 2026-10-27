@@ -1,0 +1,333 @@
+---
+title: "K8s Multi-Cluster Fleet Management & GitOps Guide"
+description: "Manage dozens of Kubernetes clusters as one fleet — ArgoCD and Flux fleet patterns, configuration drift detection, external secrets operators, and the GitOps architecture that scales multi-cluster operations without per-cluster toil."
+category: kubernetes
+slug: k8s-multicluster-fleet-gitops-guide
+lastUpdated: "2026-08-28"
+tags: ["kubernetes", "gitops", "argocd", "multi-cluster"]
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# K8s Multi-Cluster Fleet Management & GitOps Guide
+
+**One cluster is a project. Ten clusters is a fleet. A hundred clusters is an architecture problem.** The moment you operate more than a handful of Kubernetes clusters, per-cluster kubectl and manual deploys become unsustainable. GitOps — declaring cluster state in Git and letting automation reconcile it — is the answer. This guide covers the fleet architecture: ArgoCD and Flux at scale, drift detection, the external secrets pattern, and the organizational model that lets a small team operate a large fleet.
+
+---
+
+## Table of Contents
+
+1. [The Fleet Problem](#1-the-fleet-problem)
+2. [GitOps Fundamentals for Fleets](#2-gitops-fundamentals-for-fleets)
+3. [ArgoCD vs Flux for Fleet Management](#3-argocd-vs-flux-for-fleet-management)
+4. [Configuration Drift Detection](#4-configuration-drift-detection)
+5. [External Secrets Operator](#5-external-secrets-operator)
+6. [Fleet Organization & Scaling](#6-fleet-organization--scaling)
+
+---
+
+## 1. The Fleet Problem
+
+Operating multiple clusters introduces problems that single-cluster teams never face. Understanding these problems clarifies why GitOps is the solution.
+
+### The Multi-Cluster Challenges
+
+| Challenge | Single-cluster | Fleet |
+|---|---|---|
+| Deployment | kubectl apply | Repeat across N clusters |
+| Configuration | One config | Per-cluster variations |
+| Secrets | One secret store | Synced across clusters |
+| Drift | Detectable manually | Invisible across clusters |
+| Visibility | One dashboard | N dashboards |
+| Rollback | One cluster | Coordinated across clusters |
+
+<Callout variant="warning" title="Per-cluster toil doesn't scale">
+  The team that deploys to 3 clusters with kubectl will, at 10 clusters, spend more time on deployment mechanics than on the actual changes. At 30 clusters, they're drowning. The transition from "we can do it manually" to "we need automation" should happen at 3–5 clusters, not 30. GitOps is the automation; adopting it early is far easier than migrating a fleet that's already drowning in manual ops.
+</Callout>
+
+### Why Clusters Multiply
+
+Clusters proliferate for good reasons:
+- **Environment isolation** — dev, staging, prod as separate clusters
+- **Failure isolation** — a cluster failure shouldn't take down everything
+- **Compliance** — regulated data must stay in specific regions/clusters
+- **Latency** — regional clusters for global users
+- **Multi-tenancy** — separate clusters for different tenants/teams
+- **Upgrade isolation** — canary a new Kubernetes version on one cluster
+
+The fleet is inevitable for any organization that scales. The question is whether you manage it with discipline (GitOps) or chaos (manual ops).
+
+---
+
+## 2. GitOps Fundamentals for Fleets
+
+GitOps is the operating model where Git is the source of truth for cluster state, and automation continuously reconciles the cluster to match Git. For fleets, this means one Git repository (or a structured set of them) defines the state of every cluster.
+
+### The GitOps Principles
+
+1. **Declarative** — cluster state is described declaratively in Git, not imperatively applied
+2. **Versioned** — every change is a Git commit, with history, authorship, and rollback
+3. **Pulled automatically** — agents in the cluster pull desired state (not pushed from outside)
+4. **Continuously reconciled** — the agent detects and corrects drift continuously
+
+### The Fleet GitOps Model
+
+```text
+Git Repository (source of truth)
+  ├── base/                    — shared manifests (all clusters)
+  ├── clusters/
+  │     ├── prod-us/           — prod US cluster overlays
+  │     ├── prod-eu/           — prod EU cluster overlays
+  │     ├── staging/           — staging cluster overlays
+  │     └── dev/               — dev cluster overlays
+  └── components/              — reusable Kustomize components
+
+Each cluster's agent pulls its overlay and reconciles.
+```
+
+The structure separates **base** (shared across all clusters) from **overlays** (per-cluster variations). A change to base propagates to every cluster; a change to an overlay affects only that cluster.
+
+<Callout variant="tip" title="Kustomize over Helm for fleet base">
+  For fleet management, Kustomize's overlay model fits better than Helm's templating. Kustomize lets you define a base and patch per-cluster differences cleanly, without re-templating the whole manifest. Helm is great for distributing an application; Kustomize is great for managing variations of the same application across a fleet. Use both: Helm for third-party charts, Kustomize for your fleet structure.
+</Callout>
+
+---
+
+## 3. ArgoCD vs Flux for Fleet Management
+
+The two dominant GitOps tools — ArgoCD and Flux — take different architectural approaches. Both work at fleet scale; the choice depends on your operational model.
+
+### ArgoCD — The Pull-Based Dashboard
+
+ArgoCD runs as a control plane (often on a management cluster) and reconciles target clusters by pushing to them. It provides a rich UI for visibility.
+
+**Strengths:**
+- Excellent UI for visualizing fleet state across clusters
+- Application-level model (an "Application" = a deployable unit)
+- Sync waves for ordered deployments
+- Strong multi-cluster support from a central control plane
+
+**Limitations:**
+- Central control plane is a critical dependency (if it's down, reconciliations stop)
+- More resource-intensive (the control plane)
+- Push model (control plane pushes to target clusters — needs credentials)
+
+### Flux — The Per-Cluster Agent
+
+Flux runs as an agent in each cluster, pulling its own state from Git. There's no central control plane; each cluster is autonomous.
+
+**Strengths:**
+- No central control plane (no single point of failure)
+- Pull model (clusters pull their own state — no outbound credentials to manage)
+- Lightweight per-cluster footprint
+- Native multi-tenancy via Flux instances per tenant
+
+**Limitations:**
+- No built-in fleet-wide UI (use a separate dashboard like Capacitor or Weave GitOps)
+- Per-cluster agent management (N clusters = N Flux instances to maintain)
+- Less visual than ArgoCD out of the box
+
+| Dimension | ArgoCD | Flux |
+|---|---|---|
+| Architecture | Central control plane | Per-cluster agents |
+| Model | Push (to target clusters) | Pull (each cluster pulls) |
+| UI | Rich, built-in | Separate tool needed |
+| Failure mode | Control plane down = stops | Each cluster autonomous |
+| Best for | Visibility-heavy ops | Autonomous, resilient fleets |
+
+<Callout variant="note" title="The push vs pull trade-off">
+  ArgoCD's push model means the control plane needs credentials to access every target cluster — a security and operational consideration at fleet scale. Flux's pull model means each cluster only needs read access to Git — no cluster-to-cluster credentials. For security-sensitive or large fleets, Flux's pull model reduces the credential blast radius. For teams that prioritize a single pane of glass, ArgoCD's central UI is worth the push model's complexity.
+</Callout>
+
+### The ApplicationSet / Cluster API Pattern
+
+For fleet-scale ArgoCD, the ApplicationSet controller generates Applications across clusters programmatically. Instead of defining an Application per cluster, you define a generator that creates them:
+
+```text
+ApplicationSet (template + cluster list)
+  → generates Application for cluster A
+  → generates Application for cluster B
+  → generates Application for cluster C
+
+Adding a cluster = adding it to the generator's list.
+```
+
+This is the pattern that scales: one ApplicationSet definition deploys an app to the entire fleet, and adding/removing clusters is a list edit, not N application edits.
+
+---
+
+## 4. Configuration Drift Detection
+
+Drift — when the cluster's actual state diverges from Git's declared state — is the silent killer of fleet reliability. Someone kubectl-edits a resource in production, the change works, and six months later a GitOps sync overwrites it during an unrelated deploy, causing an outage.
+
+### Drift Sources
+
+| Source | Example | Detection |
+|---|---|---|
+| Manual edits | kubectl edit, kubectl scale | Sync overwrites (or fails) |
+| Admission controllers mutating | Kyverno/OPA adding labels | Expected, not drift |
+| HPA/VPA scaling | Replica count changes | Expected, exclude from drift |
+| Emergency hotfixes | Direct cluster edit during incident | Must be back-ported to Git |
+| Tooling side effects | Operators modifying resources | Often expected |
+
+### Drift Detection in Practice
+
+Both ArgoCD and Flux detect drift by comparing the cluster's live state to Git's declared state. The key configuration decision is **what to do when drift is detected:**
+
+- **Auto-sync (self-heal)** — automatically overwrite the drift to match Git. Strict, but can revert intentional changes.
+- **Manual sync** — flag the drift, require human action. Safer for intentional changes, but drift can persist.
+
+<Callout variant="warning" title="Self-heal can revert hotfixes">
+  Auto-sync (self-heal) is great for preventing drift, but it's dangerous during incidents. An on-call engineer hotfixes a config via kubectl to stop an outage; auto-sync immediately reverts it, restoring the outage. The pattern: enable self-heal normally, but have a documented "break glass" procedure to pause sync on a cluster during incidents, with a commitment to back-port the hotfix to Git before re-enabling.
+</Callout>
+
+### Managing Expected Drift
+
+Not all drift is bad. HPA scaling, VPA adjustments, and operator-managed fields change legitimately. Exclude these from drift detection:
+
+- **HPA-managed replica counts** — use `ignoreDifferences` to exclude `spec.replicas`
+- **VPA-managed resources** — exclude `resources` for VPA-managed containers
+- **Operator-managed fields** — exclude fields the operator owns
+- **Last-applied annotations** — exclude Kubernetes bookkeeping fields
+
+<ChecklistBox
+  title="Drift Management"
+  items={[
+    "Drift detection enabled (ArgoCD sync status / Flux status conditions)",
+    "Self-heal enabled for non-critical clusters, manual for production",
+    "Break-glass procedure documented for pausing sync during incidents",
+    "Expected drift excluded (HPA replicas, VPA resources, operator fields)",
+    "Hotfix back-port SLA: any direct cluster edit back-ported to Git within 24h",
+    "Drift alerts routed to on-call (not just visible in a dashboard nobody watches)",
+    "Periodic drift audit: weekly review of all drifted resources across the fleet",
+  ]}
+/>
+
+---
+
+## 5. External Secrets Operator
+
+Secrets are the hardest part of fleet GitOps. You can't (and shouldn't) store secrets in Git. The External Secrets Operator (ESO) is the standard solution: Git stores a reference to a secret, and ESO fetches the actual secret from a vault (AWS Secrets Manager, HashiCorp Vault, GCP Secret Manager) and creates the Kubernetes Secret.
+
+### The External Secrets Architecture
+
+```text
+Git (stores references)
+  ├── ExternalSecret: "api-db-secret"
+  │     → references vault path: "prod/api/db-credentials"
+  │
+  └── (no actual secret values in Git)
+
+Cluster (ESO reconciles)
+  ESO reads ExternalSecret
+    → fetches secret from vault (AWS SM / Vault / GCP SM)
+    → creates Kubernetes Secret "api-db-secret"
+    → keeps it synced (re-fetches on rotation)
+```
+
+### Why External Secrets for Fleets
+
+| Problem | External Secrets solution |
+|---|---|
+| Can't store secrets in Git | Git stores references, not values |
+| Secrets differ per cluster/environment | Each cluster's ExternalSecret points to its vault path |
+| Secret rotation is manual | ESO re-fetches on a schedule, picks up rotations |
+| Secret access auditing | All access goes through the vault (auditable) |
+| Per-cluster secret distribution | Vault is the single source, ESO distributes per cluster |
+
+### The Vault as Single Source
+
+The external vault (AWS Secrets Manager, HashiCorp Vault, etc.) becomes the single source of truth for secrets. GitOps manages the *references*; the vault manages the *values*. This separation is what makes secrets manageable at fleet scale:
+
+- **Rotate a secret** → update it in the vault; ESO picks it up across all clusters
+- **Add a cluster** → point its ExternalSecrets at the vault; secrets flow automatically
+- **Audit access** → the vault logs every fetch; no secrets scattered in Git history
+
+<Callout variant="tip" title="One vault path convention per environment">
+  Standardize the vault path structure across the fleet: `environment/application/secret-name`. So `prod/api/db-credentials`, `staging/api/db-credentials`, `dev/api/db-credentials`. Each cluster's ExternalSecrets use a templated path based on the cluster's environment. This lets one ExternalSecret definition work across environments, with the path varying by cluster label.
+</Callout>
+
+### ESO Access Control
+
+The cluster's ESO needs credentials to access the vault. The secure pattern:
+
+- **IRSA / Workload Identity** (cloud) — the cluster's ESO uses a cloud IAM role, no static credentials
+- **Vault Kubernetes auth** (Vault) — the cluster authenticates to Vault using its service account token, no static credentials
+- **Short-lived credentials** — wherever possible, avoid long-lived static credentials for ESO
+
+---
+
+## 6. Fleet Organization & Scaling
+
+The technical architecture is half the battle; the organizational model determines whether a fleet is operable by a small team or drowns them.
+
+### The Fleet Team Model
+
+| Model | Description | Scales to |
+|---|---|---|
+| Centralized platform team | One team operates all clusters | ~20–30 clusters |
+| Federated with platform tooling | Teams own clusters, platform provides GitOps | ~50–100 clusters |
+| Self-service with guardrails | Teams self-serve via templated clusters | 100+ clusters |
+
+<Callout variant="note" title="The platform team's product is the fleet">
+  At fleet scale, the platform team's job shifts from operating clusters to building the system that lets other teams operate clusters. The GitOps repo structure, the cluster templates, the External Secrets setup, the drift detection — these are the platform team's product. Application teams consume the platform; they don't need to understand the fleet internals. This is how a small platform team operates a large fleet.
+</Callout>
+
+### Cluster Templates
+
+For self-service scaling, provide cluster templates — standardized cluster definitions that teams can instantiate:
+
+```text
+Cluster templates:
+  ├── standard/         — general-purpose cluster
+  ├── gpu/              — GPU-enabled cluster for ML
+  ├── compliance/       — hardened cluster for regulated data
+  └── edge/             — minimal cluster for edge locations
+
+A team requests a cluster → picks a template → platform provisions it
+→ GitOps bootstraps it → team deploys via their overlay
+```
+
+Templates encode the platform team's standards (security, observability, networking) so every cluster starts compliant. Teams customize via their overlay; they don't start from a blank cluster.
+
+### Fleet Visibility
+
+At fleet scale, visibility is critical. You can't operate what you can't see:
+
+- **Fleet dashboard** — all clusters, their sync status, drift, health (ArgoCD's multi-cluster view, or a tool like Rancher, Komodor, or a custom Grafana dashboard)
+- **Unified alerting** — alerts from all clusters routed to a central system, de-duplicated
+- **Audit trail** — who changed what, when, across the fleet (Git history + cluster audit logs)
+- **Cost visibility** — per-cluster cost attribution (the fleet's cost is the sum of its clusters)
+
+<ChecklistBox
+  title="Fleet Scaling Readiness"
+  items={[
+    "GitOps repo structured: base/ + clusters/ overlays + components/",
+    "Cluster templates defined for self-service provisioning",
+    "External Secrets Operator deployed, vault as single source",
+    "Drift detection with break-glass procedure for incidents",
+    "Fleet dashboard: sync status, drift, health across all clusters",
+    "Unified alerting: cluster alerts de-duplicated and routed centrally",
+    "Per-cluster cost attribution for chargeback/showback",
+    "Platform team's product is the fleet system, not individual clusters",
+  ]}
+/>
+
+---
+
+## Sign-off
+
+<ChecklistBox
+  title="Multi-Cluster Fleet GitOps Sign-off"
+  items={[
+    "GitOps tool selected: ArgoCD (centralized) or Flux (autonomous) based on ops model",
+    "Repo structured: base manifests + per-cluster overlays (Kustomize)",
+    "ApplicationSet / cluster generators used for fleet-wide app deployment",
+    "Drift detection enabled with self-heal (non-prod) and break-glass (prod)",
+    "External Secrets Operator deployed; vault as single source of truth",
+    "ESO access via IRSA / Workload Identity / Vault Kubernetes auth (no static creds)",
+    "Cluster templates for self-service provisioning at scale",
+    "Fleet dashboard, unified alerting, and per-cluster cost attribution deployed",
+  ]}
+/>

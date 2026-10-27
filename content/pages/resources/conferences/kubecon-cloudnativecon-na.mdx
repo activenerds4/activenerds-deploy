@@ -1,0 +1,176 @@
+---
+title: "KubeCon + CloudNativeCon North America Guide: Passes, Travel, Tracks & ROI"
+description: "The flagship CNCF event for platform engineers and K8s operators — pass tiers, co-located days, track strategy, and how to survive a week of deep technical sessions without wrecking your back."
+category: "Conferences"
+slug: kubecon-cloudnativecon-na
+parentCalendarUrl: "/resources/tech-conference-calendar"
+lastUpdated: "2026-08-28"
+conferenceDetails:
+  name: "KubeCon + CloudNativeCon North America"
+  organizer: "CNCF / Linux Foundation"
+  typicalDates: "November (co-located Mon–Tue, main Wed–Fri)"
+  primaryLocation: "Rotates — Salt Lake City, Chicago, Atlanta"
+  format: "Hybrid (in-person + virtual)"
+  estimatedPassCost: "Standard ~$1,900–$2,400; Academic/Individual ~$300–$900"
+tags: ["conferences", "kubernetes", "cncf", "platform-engineering"]
+published: true
+---
+
+import { Callout } from "@/components/mdx/Callout";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+
+# KubeCon + CloudNativeCon North America Guide
+
+**KubeCon NA is the gravitational center of the cloud-native world.** For one week every November, the people who build, operate, and secure Kubernetes gather to ship the next year of standards, tooling, and war stories. If your day job touches a cluster, this is the highest-density learning week of the year — and the most physically punishing if you don't plan for it.
+
+---
+
+## Table of Contents
+
+1. [Who Should Attend](#1-who-should-attend)
+2. [Pass Tiers & Co-Located Days](#2-pass-tiers--co-located-days)
+3. [Track Strategy & Session Selection](#3-track-strategy--session-selection)
+4. [Budget & Discount Hacks](#4-budget--discount-hacks)
+5. [Travel & Accommodation](#5-travel--accommodation)
+6. [Physical Survival & Wellness](#6-physical-survival--wellness)
+7. [Pre-Conference Checklist](#7-pre-conference-checklist)
+
+---
+
+## 1. Who Should Attend
+
+KubeCon NA is broad enough to serve most of the cloud-native ecosystem, but it pays off most for a few specific profiles.
+
+<Callout variant="tip" title="Best fit: platform & SRE teams running production clusters">
+If you operate K8s at scale — multi-tenant isolation, node tuning, fleet GitOps, supply chain security — the deep-dive tracks and hallway-track conversations with SIG leads are unmatched. You'll leave with a backlog of concrete improvements.
+</Callout>
+
+- **Platform engineers & SREs** — the core audience. Service mesh, multi-cluster, autoscaling, and platform-engineering tracks are dense and practitioner-led.
+- **DevSecOps & cloud-native security folks** — CloudNativeSecurityCon runs as a co-located event; the supply-chain, policy-as-code, and runtime-security sessions are first-rate.
+- **AI/ML infrastructure engineers** — the GPU scheduling, MLOps-on-K8s, and inference-serving tracks have grown sharply as training workloads moved onto clusters.
+- **OSS maintainers & contributors** — the contributor summit, SIG meetings, and project pavilion are where roadmap decisions actually happen.
+
+<Callout variant="info" title="Maybe skip if">
+You're brand-new to containers — the content assumes you already run K8s. Start with a local K8s tutorial and a DevOpsDays regional event, then come to KubeCon once you have real questions.
+</Callout>
+
+---
+
+## 2. Pass Tiers & Co-Located Days
+
+The week is split: **co-located events Monday–Tuesday** (smaller, deep-dive single-track days) and the **main conference Wednesday–Friday** (keynotes + multi-track). Your pass type determines what you can attend.
+
+<ComparisonTable
+  title="KubeCon NA Pass Tiers (typical)"
+  columns={["All-Access", "Main Conference", "Virtual", "Academic/Individual"]}
+  rows={[
+    { label: "Co-located days (Mon–Tue)", values: [true, false, false, "Select one"] },
+    { label: "Main conference (Wed–Fri)", values: [true, true, "Livestream", true] },
+    { label: "Hallway track & sponsor pavilion", values: [true, true, false, true] },
+    { label: "Hands-on workshops", values: [true, "Some", false, "Some"] },
+    { label: "Recordings on demand", values: [true, true, true, true] },
+    { label: "Typical price (USD)", values: ["$2,100–$2,400", "$1,900–$2,100", "$150–$300", "$300–$900"] },
+  ]}
+/>
+
+<Callout variant="warning" title="Co-located days are where the real depth lives">
+The main conference sessions are 35-minute overviews. The co-located days (CloudNativeSecurityCon, Platform Engineering Day, Observability Day, AI + Kubernetes Day) are single-track, deeper, and where practitioners actually learn. If budget allows, buy All-Access and treat Monday–Tuesday as the main event.
+</Callout>
+
+---
+
+## 3. Track Strategy & Session Selection
+
+There are typically 8–12 parallel tracks. You cannot see everything, and the recordings land on YouTube within weeks — so optimize for **what doesn't record well**: hallway conversations, SIG meetings, and hands-on labs.
+
+- **Monday morning:** skim the schedule app, star 2 sessions per slot. Accept that you'll drop one.
+- **Prioritize practitioner talks over vendor talks.** Look for "we run X in production at scale" in the abstract. Vendor demos are marketing with extra steps.
+- **Reserve one slot per day for the hallway track.** The CNCF project pavilion and SIG booths are where you meet the maintainers whose docs you've been arguing with.
+- **Keynotes are skimmable.** Watch them at 1.5x on the recording later; use keynote time for a walk and a real meal.
+
+<Callout variant="tip" title="The contributor summit (Tuesday)">
+If you've ever merged a PR to a CNCF project, register for the contributor summit. It's free with your pass, it's where governance and roadmap get decided, and the ratio of maintainers to attendees is the best networking of the week.
+</Callout>
+
+---
+
+## 4. Budget & Discount Hacks
+
+The sticker price is steep, but the real cost is travel + a week of hotel at convention rates. Stack the discounts.
+
+<ChecklistBox
+  title="Discount & cost-reduction checklist"
+  items={[
+    "Apply for the diversity scholarship (covers pass + travel) — deadline is usually ~4 months out",
+    "Check the CNCF travel fund if you're a contributor or maintainer",
+    "Buy the Academic / Individual pass if you're a student, indie, or unemployed — it's a fraction of the corporate price",
+    "Register during the early-bird window (saves ~$300–$500 on the standard pass)",
+    "Ask your employer to sponsor a co-located day or a booth shift in exchange for a comped All-Access pass",
+    "Book the hotel through the conference block before it sells out — off-block rates spike 2x once the block closes",
+    "Fly in Sunday, out Saturday — midweek flights to convention cities are the most expensive of the year",
+  ]}
+/>
+
+<Callout variant="note" title="The virtual pass is a steal for teams">
+If you can't justify the travel, the virtual pass (~$150–$300) gets you every recording, the livestream, and the Slack. Buy one for the whole on-call rotation and run a watch-party during keynotes.
+</Callout>
+
+---
+
+## 5. Travel & Accommodation
+
+Convention cities rotate, but the logistics are the same: book early, stay close, and protect your sleep.
+
+- **Hotel:** stay within walking distance of the venue. Convention centers are in dead zones after 6pm — a 10-minute walk beats a 25-minute rideshare queue at 9pm when 8,000 people leave at once.
+- **Flights:** arrive Sunday afternoon. Monday morning flights into convention hubs are delayed more often than not, and you'll miss the co-located day you paid for.
+- **Ground transport:** skip the rental car. Convention-center parking is expensive and you won't use it. Walk, rideshare, or use the light rail.
+- **Food:** venue food is overpriced and mediocre. Scout 2–3 restaurants within 3 blocks on Sunday; the lines at lunch are brutal.
+
+---
+
+## 6. Physical Survival & Wellness
+
+A week of 8am–6pm sessions in a windowless convention center will wreck your back, your eyes, and your sleep. Plan for it the way you'd plan an on-call rotation.
+
+<Callout variant="warning" title="The convention-center body is a real injury risk">
+You'll sit in 35-minute sessions, stand in lines, and walk 5–8 miles a day on concrete. Without countermeasures, expect lower-back pain by Thursday and a sleep-debt crash by Friday. Treat this like a high-cognitive-load work week, not a vacation.
+</Callout>
+
+<ChecklistBox
+  title="Conference-week wellness protocol"
+  items={[
+    "Wear the most supportive shoes you own — convention-center floors are unforgiving concrete",
+    "Stand at the back of at least 2 sessions per day; alternate sit/stand like a desk duty cycle",
+    "Do the 20-20-20 eye reset between sessions: every 20 min, look 20 ft away for 20 seconds",
+    "Hydrate aggressively — convention-center air is dry and the coffee is free; balance it 1:1 with water",
+    "Take a 10-minute outdoor walk at lunch — daylight resets your circadian clock after windowless mornings",
+    "Book a hotel with a real desk or use the lobby desk; don't hunch over a laptop on the bed",
+    "Cap social events at 2 nights; the hallway track is more valuable than the 3rd party",
+    "Pack a resistance band — 5 minutes of thoracic mobility in your room beats a stiff back all week",
+  ]}
+/>
+
+<Callout variant="tip" title="Use the Desk Stretch Timer">
+Our [Desk Stretch Timer](/tools/desk-stretch-timer) is built for exactly this: set 35-minute focus blocks matching the session length, and it'll prompt a micro-stretch between talks. Run it during the day and you'll feel the difference by Friday.
+</Callout>
+
+---
+
+## 7. Pre-Conference Checklist
+
+<ChecklistBox
+  title="Two weeks out"
+  items={[
+    "Install the conference app and star your must-see sessions (2 per slot max)",
+    "Book flights and hotel inside the block; confirm cancellation policy",
+    "Print or save offline copies of your pass QR code and any workshop prerequisites",
+    "Order business cards or set up a digital card (Linktree / NFC tag) for the hallway track",
+    "Charge and pack a power bank — venue outlets are scarce and contested",
+    "Pack supportive shoes, a resistance band, and blue-light glasses for evening screen time",
+  ]}
+/>
+
+---
+
+See the full [Tech Conference Calendar](/resources/tech-conference-calendar) for dates and the European edition, or read our [KubeCon attendance guide](/blog/kubecon-attendance-guide) for session selection and networking strategy.

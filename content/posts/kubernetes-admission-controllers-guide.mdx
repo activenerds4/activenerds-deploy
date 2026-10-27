@@ -1,0 +1,93 @@
+---
+title: "Kubernetes Admission Controllers Guide"
+slug: kubernetes-admission-controllers-guide
+description: "A practical guide to Kubernetes admission controllers — mutating vs validating, OPA Gatekeeper, and enforcing policy at cluster entry."
+date: "2025-11-07"
+author: activenerds-team
+category: devsecops-security
+tags: ["kubernetes", "devsecops"]
+featured: false
+relatedArticles: ["devsecops-hardening-checklist", "kubernetes-network-policies-tutorial", "kubernetes-rbac-configuration", "supply-chain-security-k8s", "compliance-automation-kubernetes"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-admission-controllers-guide.png
+imageAlt: "Kubernetes admission controllers guide — ValidatingWebhook and MutatingWebhook gatekeeping for cluster security"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Core Architecture**: A practical guide to Kubernetes admission controllers.
+- **Key Capabilities**: mutating vs validating, OPA Gatekeeper, and enforcing policy at cluster entry.
+- **Admission Controller Fundamentals**: Apply structured configurations and validated production patterns.
+- **Policy with OPA Gatekeeper**: Apply structured configurations and validated production patterns.
+</Callout>
+
+Admission controllers are the gatekeepers of a [Kubernetes](/articles/kubernetes-custom-controller-development) cluster — every API request to create or modify a resource passes through them before it's persisted. That makes them the right place to enforce policy: "no privileged containers," "images must come from our registry," "every Pod needs a resource limit." Instead of catching violations after they're deployed, you block them at the door. This guide covers how admission controllers work and how to put real policy behind them with OPA Gatekeeper.
+
+## Admission Controller Fundamentals
+
+When you submit a request to the Kubernetes API (say, `kubectl apply` a Deployment), the request passes through an authentication and authorization check, then through **admission controllers**, before being written to etcd. Admission comes in two flavors:
+
+**Mutating** controllers run first and can *modify* the object — inject a sidecar, add a label, set a default. They change the request in flight.
+
+**Validating** controllers run after mutation and can only *accept or reject* the request. They can't change it; they just decide whether it's allowed.
+
+Kubernetes ships several built-in admission controllers (like `NamespaceLifecycle` and `LimitRanger`), but the powerful ones are **dynamic admission webhooks** — your own code, running as a service in the cluster, that the API server calls for every relevant request. You write a webhook server, expose it over TLS, and register it with the API server via a `ValidatingWebhookConfiguration` or `MutatingWebhookConfiguration`.
+
+The request lifecycle, simplified: authenticate → authorize → mutate → validate → persist. Policy belongs in the validate (and sometimes mutate) stage.
+
+## Policy with OPA Gatekeeper
+
+Writing a custom webhook from scratch is real engineering — TLS, CA bundles, failure handling, availability. Most teams don't need to; **OPA Gatekeeper** packages the pattern into a policy-as-code system you configure rather than code you write.
+
+Gatekeeper runs as a validating webhook and evaluates policies written in Rego (OPA's policy language). You define **constraints** (instances of a policy with parameters) and **constraint templates** (the reusable policy logic). A constraint might say "no container may run privileged in these namespaces."
+
+Common policies teams enforce with Gatekeeper:
+
+- Require images to come from an approved registry.
+- Disallow `privileged` containers and `hostPath` mounts.
+- Require resource requests and limits on every container.
+- Require labels for cost attribution or team ownership.
+- Enforce that services don't use the default namespace.
+
+```yaml
+# Example: disallow privileged containers
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sPSPPrivilegedContainer
+metadata:
+  name: no-privileged-containers
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+```
+
+Gatekeeper supports two modes: **audit** (reports violations without blocking) and **deny** (blocks the request). The right rollout path is always audit first — discover what your existing workloads violate, fix the real problems, then flip to deny. Turning on deny without an audit period is how teams break their own deploys.
+
+## Building a Custom Webhook
+
+When Gatekeeper's constraint model isn't expressive enough — complex logic, external data lookups, mutation that Gatekeeper can't express cleanly — you write a custom webhook. The shape: a small HTTP server that receives an `AdmissionReview` request, does its logic, and returns an `AdmissionResponse` with `allowed: true/false`.
+
+The operational details are where custom webhooks get hard. The API server needs to reach your webhook over TLS, which means a valid certificate and a CA bundle the API server trusts (configured in the webhook configuration). If your webhook is down or slow, it affects every API request that matches its rules — so you must handle **failure modes**: `failurePolicy: Fail` rejects requests if the webhook is unavailable (secure but can block the cluster), while `failurePolicy: Ignore` lets requests through (available but less safe). Choose deliberately, and set **timeouts** so a slow webhook can't hang the API server.
+
+Most teams should exhaust Gatekeeper before writing a custom webhook. The custom path is for genuine edge cases, not for policy that Gatekeeper expresses fine.
+
+## Rolling Out Safely
+
+The order of operations for adopting admission policy:
+
+1. **Deploy in audit mode** and collect violations for a week or two.
+2. **Triage the violations** — some are real problems to fix, some are exceptions you need to allowlist.
+3. **Fix or allowlist** before flipping any policy to deny.
+4. **Flip to deny** one policy at a time, with a rollback plan if it blocks a legitimate deploy.
+5. **Exclude critical namespaces** (like `kube-system`) unless you've specifically tested them — breaking the control plane with your own policy is a memorable mistake.
+
+Monitor denial rates after rollout. A policy that denies a lot of legitimate requests is either too strict or a sign that your workload authors need better defaults (which a *mutating* webhook could provide automatically).
+
+<Callout type="tip">
+Admission policy is most valuable when it encodes decisions you'd otherwise make in code review. "Does this need privileged mode?" is a question better answered by policy at deploy time than by hoping every reviewer catches it every time. See our [policy-as-code guide](/blog/policy-as-code-opa-kyverno) for the broader pattern.
+</Callout>
+
+Admission controllers turn "we should probably enforce that" into "the cluster enforces that." They're one of the highest-leverage security controls in Kubernetes because they operate at the single chokepoint every workload passes through. Start with Gatekeeper in audit mode, fix what you find, and graduate to deny — then to custom webhooks only when you genuinely outgrow the constraint model.
+
+

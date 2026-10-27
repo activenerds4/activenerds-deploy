@@ -1,0 +1,60 @@
+---
+title: "Progressive Delivery with Argo Rollouts"
+slug: progressive-delivery-argo-rollouts
+description: "Move beyond basic canary deploys with Argo Rollouts — blue-green, canary analysis, and automated promotion and rollback."
+date: "2026-06-26"
+author: activenerds-team
+category: platform-engineering-devops
+tags: ["kubernetes"]
+featured: true
+relatedArticles: ["devcontainer-setup-consistent-environments", "feature-flags-implementation-guide", "kubernetes-debugging-k9s-kubectl", "kubernetes-rbac-configuration", "canary-deployment-strategies-kubernetes"]
+image: https://cdn.activenerds.com/images/posts/progressive-delivery-argo-rollouts.png
+imageAlt: "Progressive delivery with Argo Rollouts — canary blue-green deployment orchestration with analysis-based promotion"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Experiment and traffic routing**: the Experiment feature lets you run a new version with no production traffic to gather baseline metrics, useful for A/B-style comparisons or for validating a version before it enters a canary.
+- **Service mesh integration**: for true traffic-based canary, you need a traffic router.
+- **Adoption safely**: start with a blue-green strategy on a low-traffic service (it's simpler and gives you the rollback muscle), then move to canary with analysis as you get comfortable.
+</Callout>
+
+A standard Kubernetes Deployment gives you rolling updates, and for most workloads that's fine — it replaces pods gradually and you get a basic zero-downtime deploy. But rolling updates have a ceiling: they can't pause for analysis, can't route a percentage of traffic to the new version while you watch metrics, and can't automatically roll back when those metrics go bad. Progressive delivery is the practice of decoupling deploy from release — putting a new version out gradually, measuring whether it's actually working, and promoting or rolling back based on data. Argo Rollouts is the Kubernetes-native tool that makes this practical, and it's a meaningful upgrade over hand-rolled canary scripts. Here's how to use it.
+
+## Beyond kubectl apply
+
+The limitation of rolling update is that it's binary in spirit: you change the image, and the controller replaces pods until the new version is fully live. There's no "send 5% of traffic, wait, evaluate, then send 25%" — you get a rate (maxSurge, maxUnavailable) but no analysis gate. If the new version is subtly broken in a way that only shows up under real traffic, you find out when it's at 100% and your users find out at the same time.
+
+**Progressive delivery** reframes this: deploy the new version, but only route a fraction of traffic to it, observe real metrics (error rate, latency, business KPIs), and only increase the fraction if the metrics hold. If they don't, roll back automatically. The new version is "released" only when it has safely taken over full traffic. This turns deployment from a leap into a controlled walk, with a safety net that catches regressions you can't catch in staging.
+
+Where Argo Rollouts fits: it's a CRD controller that replaces the Deployment in your release path with a `Rollout` resource. A Rollout looks like a Deployment but adds strategy fields for canary and blue-green, analysis templates for metric-based promotion, and integration with traffic routers (Istio, NGINX, ALB) to control the actual traffic split. It's part of the Argo Project and integrates cleanly with ArgoCD, so it slots into a GitOps workflow without new tooling overhead.
+
+## Strategies
+
+Argo Rollouts supports two main strategies, each with variations.
+
+**Canary with analysis** is the flagship. You define a Rollout that starts the new version at a small traffic percentage (say 5%), pauses or runs an analysis, and if healthy, steps up (5% → 25% → 50% → 100%) with pauses or analyses between steps. The traffic split is real — handled by your service mesh or ingress controller, not just pod counts — so 5% of actual requests hit the new version while 95% stay on the old. The analysis at each step checks metrics and gates the promotion: if error rate exceeds a threshold, the Rollout aborts and traffic returns to the old version. This is the strategy that delivers the core progressive-delivery value: small exposure, measurement, automated safety.
+
+**Blue-green** is the simpler alternative. You run the new version (green) alongside the old (blue) with no traffic, switch traffic all at once when green is ready, and keep blue around for instant rollback. It's less granular than canary — there's no gradual ramp — but it's operationally simpler and gives you a fast, tested rollback path (switch back to blue). Blue-green suits stateless services where you can afford the resource overhead of running two full copies briefly.
+
+**Experiment and traffic routing** — the Experiment feature lets you run a new version with no production traffic to gather baseline metrics, useful for A/B-style comparisons or for validating a version before it enters a canary. Traffic routing integration (Istio, NGINX, AWS ALB, SMI) is what makes the percentages real; without a traffic router, Argo Rollouts can only do "canary by pod count," which is a rough proxy and doesn't give you true traffic isolation. Use a traffic router for any serious canary work.
+
+## Analysis and Automation
+
+The differentiator that makes Argo Rollouts more than a fancy canary controller is **analysis** — the ability to gate promotion on real metrics and roll back automatically on failure. You define an `AnalysisTemplate` that specifies queries (against Prometheus, Datadog, Wavefront, and others) and success/failure conditions. At each canary step, the Rollout runs an analysis: it executes the queries, compares results to your thresholds, and returns healthy, failed, or inconclusive. Healthy promotes to the next step; failed aborts the rollout and reverts traffic; inconclusive can be configured to pause for a human.
+
+**Metric-based promotion** is where you connect the deployment to what actually matters. The naive version checks error rate and latency; the sophisticated version checks business metrics — conversion rate, signups, revenue per request — so a deploy that's technically healthy but hurts the business gets caught too. The queries are just PromQL or your provider's query language, so you can gate on anything you can measure. Start with error rate and p99 latency; add business metrics as you mature.
+
+**Integrating Prometheus** is the common path. An AnalysisTemplate queries Prometheus for the new version's error rate over the analysis window and compares it to a threshold (e.g., "error rate < 1% and within 2× the previous version's rate"). The comparison-to-baseline pattern is important: an absolute threshold (error rate < 1%) is brittle, because a normally-noisy service might always be at 0.8%, and a regression to 1.5% is real but under your threshold. Comparing to the old version's rate catches relative regressions that absolute thresholds miss. Use both.
+
+**Auto-rollback on failure** is the payoff. When an analysis fails, Argo Rollouts aborts the rollout and routes traffic back to the stable version — automatically, in seconds, without a human noticing the regression first. This is the safety net that lets you deploy more aggressively: you can ship more often because the cost of a bad deploy is a quick auto-rollback rather than an incident. The psychological effect is real — teams that trust their auto-rollback deploy more frequently and with less ceremony.
+
+## Operational Patterns
+
+A few patterns make Argo Rollouts work in practice. **Rollout vs Deployment** — you replace your Deployment with a Rollout, but the Rollout creates and manages an underlying ReplicaSet, so it's compatible with your existing service and pod specs. The migration is mostly changing the kind and adding strategy fields; you don't rewrite your app. Start with one non-critical service, learn the tool, then expand.
+
+**Service mesh integration** — for true traffic-based canary, you need a traffic router. Istio and Linkerd give you the richest traffic control; the AWS ALB integration works well if you're on AWS and don't run a mesh; NGINX Ingress works if that's your ingress. Pick the one you already operate — introducing a mesh just for canary is usually more trouble than it's worth.
+
+**Adoption safely** — start with a blue-green strategy on a low-traffic service (it's simpler and gives you the rollback muscle), then move to canary with analysis as you get comfortable. Define conservative thresholds at first (fail fast, roll back generously) and tighten as you learn your metrics' normal behavior. The goal is a deployment pipeline where every release is a measured walk rather than a leap, with a net that catches what staging can't — and that's exactly what Argo Rollouts delivers when it's set up with real analysis and a real traffic router.
+
+

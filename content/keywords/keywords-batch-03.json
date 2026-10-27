@@ -1,0 +1,82 @@
+{
+  "batch": "keywords-batch-03",
+  "createdAt": "2026-08-25T00:00:00.000Z",
+  "totalKeywords": 40,
+  "clusters": [
+    {
+      "category": "ai-machine-learning",
+      "keywords": [
+        { "id": "kw-086", "term": "LoRA fine-tuning techniques for LLMs", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "llms", "targetPillar": "llm-training", "status": "ready" },
+        { "id": "kw-087", "term": "vector database comparison pinecone weaviate", "searchIntent": "commercial", "targetAudience": "intermediate", "suggestedContentType": "comparison", "primaryTag": "mlops", "targetPillar": "retrieval", "status": "ready" },
+        { "id": "kw-088", "term": "feature store for machine learning", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "mlops", "targetPillar": "mlops", "status": "ready" },
+        { "id": "kw-089", "term": "data preprocessing pipeline best practices", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "pytorch", "targetPillar": "data", "status": "ready" },
+        { "id": "kw-090", "term": "hyperparameter tuning strategies", "searchIntent": "informational", "targetAudience": "advanced", "suggestedContentType": "tutorial", "primaryTag": "pytorch", "targetPillar": "training", "status": "ready" },
+        { "id": "kw-091", "term": "diffusion model optimization techniques", "searchIntent": "informational", "targetAudience": "advanced", "suggestedContentType": "guide", "primaryTag": "llms", "targetPillar": "inference", "status": "ready" },
+        { "id": "kw-092", "term": "transformer architecture explained", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "reference", "primaryTag": "llms", "targetPillar": "fundamentals", "status": "ready" },
+        { "id": "kw-093", "term": "ML data labeling tools comparison", "searchIntent": "commercial", "targetAudience": "intermediate", "suggestedContentType": "comparison", "primaryTag": "mlops", "targetPillar": "data", "status": "ready" }
+      ]
+    },
+    {
+      "category": "containers-kubernetes",
+      "keywords": [
+        { "id": "kw-094", "term": "kubernetes cluster backup disaster recovery", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "resilience", "status": "ready" },
+        { "id": "kw-095", "term": "kubernetes cost optimization finops", "searchIntent": "transactional", "targetAudience": "intermediate", "suggestedContentType": "checklist", "primaryTag": "kubernetes", "targetPillar": "cost", "status": "ready" },
+        { "id": "kw-096", "term": "distroless container images security", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "docker", "targetPillar": "security", "status": "ready" },
+        { "id": "kw-097", "term": "kubernetes multi-cluster management", "searchIntent": "informational", "targetAudience": "advanced", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "operations", "status": "ready" },
+        { "id": "kw-098", "term": "kubernetes pod security standards", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "security", "status": "ready" },
+        { "id": "kw-099", "term": "container image signing cosign", "searchIntent": "transactional", "targetAudience": "intermediate", "suggestedContentType": "tutorial", "primaryTag": "devsecops", "targetPillar": "supply-chain", "status": "ready" },
+        { "id": "kw-100", "term": "kubernetes storage comparison", "searchIntent": "commercial", "targetAudience": "intermediate", "suggestedContentType": "comparison", "primaryTag": "kubernetes", "targetPillar": "storage", "status": "ready" },
+        { "id": "kw-101", "term": "kubernetes upgrade strategy guide", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "operations", "status": "ready" }
+      ]
+    },
+    {
+      "category": "fitness-wellness-tech",
+      "keywords": [
+        { "id": "kw-102", "term": "posture correction exercises for desk workers", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "desk-stretches", "targetPillar": "posture", "status": "ready" },
+        { "id": "kw-103", "term": "hydration habits for developers", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "habit-building", "targetPillar": "wellness", "status": "ready" },
+        { "id": "kw-104", "term": "sleep optimization for shift workers", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "habit-building", "targetPillar": "recovery", "status": "ready" },
+        { "id": "kw-105", "term": "desk yoga routines for programmers", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "desk-stretches", "targetPillar": "movement", "status": "ready" },
+        { "id": "kw-106", "term": "stretching for wrist pain relief", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "ergonomics", "targetPillar": "injury-prevention", "status": "ready" },
+        { "id": "kw-107", "term": "lunch break workouts for developers", "searchIntent": "informational", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "habit-building", "targetPillar": "movement", "status": "ready" }
+      ]
+    },
+    {
+      "category": "devsecops-security",
+      "keywords": [
+        { "id": "kw-108", "term": "SBOM generation tools comparison", "searchIntent": "commercial", "targetAudience": "intermediate", "suggestedContentType": "comparison", "primaryTag": "devsecops", "targetPillar": "supply-chain", "status": "ready" },
+        { "id": "kw-109", "term": "kubernetes admission controllers guide", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "policy", "status": "ready" },
+        { "id": "kw-110", "term": "cloud security posture management", "searchIntent": "commercial", "targetAudience": "intermediate", "suggestedContentType": "comparison", "primaryTag": "devsecops", "targetPillar": "cloud-security", "status": "ready" },
+        { "id": "kw-111", "term": "secrets scanning in CI pipelines", "searchIntent": "transactional", "targetAudience": "intermediate", "suggestedContentType": "checklist", "primaryTag": "devsecops", "targetPillar": "ci-security", "status": "ready" },
+        { "id": "kw-112", "term": "zero trust architecture for kubernetes", "searchIntent": "informational", "targetAudience": "advanced", "suggestedContentType": "guide", "primaryTag": "devsecops", "targetPillar": "zero-trust", "status": "ready" },
+        { "id": "kw-113", "term": "container runtime security best practices", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "devsecops", "targetPillar": "runtime", "status": "ready" }
+      ]
+    },
+    {
+      "category": "gear-gadgets",
+      "keywords": [
+        { "id": "kw-114", "term": "wrist rest for keyboard guide", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "ergonomics", "targetPillar": "peripherals", "status": "ready" },
+        { "id": "kw-115", "term": "mechanical keyboard for programmers", "searchIntent": "commercial", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "ergonomics", "targetPillar": "peripherals", "status": "ready" },
+        { "id": "kw-116", "term": "posture corrector device review", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "comparison", "primaryTag": "affiliate", "targetPillar": "posture", "status": "ready" },
+        { "id": "kw-117", "term": "desk lamp for eye strain", "searchIntent": "commercial", "targetAudience": "beginner", "suggestedContentType": "guide", "primaryTag": "affiliate", "targetPillar": "lighting", "status": "ready" }
+      ]
+    },
+    {
+      "category": "events-community",
+      "keywords": [
+        { "id": "kw-118", "term": "organizing a tech meetup guide", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "conferences", "targetPillar": "community", "status": "ready" },
+        { "id": "kw-119", "term": "hackathon judging criteria guide", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "conferences", "targetPillar": "hackathons", "status": "ready" },
+        { "id": "kw-120", "term": "tech conference sponsorship guide", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "conferences", "targetPillar": "sponsorship", "status": "ready" },
+        { "id": "kw-121", "term": "developer community building", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "conferences", "targetPillar": "community", "status": "ready" }
+      ]
+    },
+    {
+      "category": "platform-engineering-devops",
+      "keywords": [
+        { "id": "kw-122", "term": "progressive delivery with argo rollouts", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "tutorial", "primaryTag": "kubernetes", "targetPillar": "deployment", "status": "ready" },
+        { "id": "kw-123", "term": "database migration strategies", "searchIntent": "informational", "targetAudience": "intermediate", "suggestedContentType": "guide", "primaryTag": "kubernetes", "targetPillar": "data", "status": "ready" },
+        { "id": "kw-124", "term": "API gateway comparison for microservices", "searchIntent": "commercial", "targetAudience": "intermediate", "suggestedContentType": "comparison", "primaryTag": "kubernetes", "targetPillar": "networking", "status": "ready" },
+        { "id": "kw-125", "term": "feature flags implementation guide", "searchIntent": "transactional", "targetAudience": "intermediate", "suggestedContentType": "tutorial", "primaryTag": "kubernetes", "targetPillar": "delivery", "status": "ready" }
+      ]
+    }
+  ]
+}

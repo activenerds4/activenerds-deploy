@@ -1,0 +1,365 @@
+---
+title: "Prompt Engineering & Structured Outputs Cheat Sheet"
+description: "Force LLMs to return valid JSON every time — schemas, Pydantic/Zod tool calling, few-shot templates, and chain-of-thought patterns that actually work."
+category: ai-llm-engineering
+slug: prompt-engineering-structured-outputs
+lastUpdated: "2026-08-28"
+tags: ["llms", "prompt-engineering", "json", "rag"]
+published: true
+---
+
+import { TabsGroup, TabsList, TabsTrigger, TabsContent } from "@/components/mdx/TabsGroup";
+import { Callout } from "@/components/mdx/Callout";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# Prompt Engineering & Structured Outputs Cheat Sheet
+
+**Make the model return data, not vibes.**
+
+The difference between a toy prompt and a production one is determinism. This sheet covers the patterns that get you parseable JSON on the first try — schemas, tool calling, few-shot, and chain-of-thought.
+
+---
+
+## Table of Contents
+
+1. [Structured Output Strategies](#1-structured-output-strategies)
+2. [JSON Schema Enforcement](#2-json-schema-enforcement)
+3. [Tool / Function Calling](#3-tool--function-calling)
+4. [Pydantic & Zod Patterns](#4-pydantic--zod-patterns)
+5. [Few-Shot Templates](#5-few-shot-templates)
+6. [Chain-of-Thought & Reasoning](#6-chain-of-thought--reasoning)
+7. [Prompt Hygiene Checklist](#7-prompt-hygiene-checklist)
+
+---
+
+## 1. Structured Output Strategies
+
+<TabsGroup defaultValue="constrained">
+<TabsList>
+<TabsTrigger value="constrained">Constrained Decoding</TabsTrigger>
+<TabsTrigger value="tool">Tool Calling</TabsTrigger>
+<TabsTrigger value="prompted">Prompt-Only JSON</TabsTrigger>
+</TabsList>
+<TabsContent value="constrained">
+
+**Best:** Native grammar/constrained decoding (vLLM, llama.cpp, OpenAI structured outputs). The model *cannot* produce invalid JSON — it's blocked at the sampler.
+
+```python
+# OpenAI structured outputs
+response = client.chat.completions.create(
+    model="gpt-4o",
+    response_format={"type": "json_schema", "json_schema": {...}},
+    messages=[...],
+)
+```
+
+</TabsContent>
+<TabsContent value="tool">
+
+**Best for:** Multi-step agents. The model picks a tool; you execute; you feed results back. Schema is enforced by the API.
+
+```python
+tools = [{"type": "function", "function": {...}}]
+response = client.chat.completions.create(model=..., tools=tools, messages=...)
+```
+
+</TabsContent>
+<TabsContent value="prompted">
+
+**Last resort:** Ask nicely in the prompt. Works ~90% of the time, breaks on edge cases. Always wrap in a retry + `json.loads` validator.
+
+```text
+Respond ONLY with valid JSON matching this schema. No prose, no markdown fences.
+```
+
+</TabsContent>
+</TabsGroup>
+
+<Callout variant="tip" title="Prefer native enforcement">
+Constrained decoding (grammar-based) is strictly better than prompt-only JSON. If your runtime supports it (vLLM `--guided-json`, llama.cpp `--grammar-json`, OpenAI `response_format`), use it. You eliminate an entire class of parsing failures.
+</Callout>
+
+---
+
+## 2. JSON Schema Enforcement
+
+### OpenAI structured outputs
+
+```python
+from openai import OpenAI
+client = OpenAI()
+
+schema = {
+    "name": "ticket",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "severity": {"type": "string", "enum": ["low", "medium", "high"]},
+            "summary": {"type": "string"},
+            "affected_services": {"type": "array", "items": {"type": "string"}},
+            "suggested_action": {"type": "string"},
+        },
+        "required": ["severity", "summary", "affected_services", "suggested_action"],
+        "additionalProperties": False,
+    },
+}
+
+resp = client.chat.completions.create(
+    model="gpt-4o",
+    response_format={"type": "json_schema", "json_schema": schema},
+    messages=[{"role": "user", "content": log_text}],
+)
+ticket = resp.choices[0].message.content  # guaranteed valid JSON
+```
+
+### vLLM guided JSON
+
+```python
+from vllm import LLM, SamplingParams
+
+llm = LLM(model="meta-llama/Meta-Llama-3.1-8B-Instruct")
+out = llm.generate(
+    prompts=[{"prompt": "...", "multi_modal_data": {}}],
+    sampling_params=SamplingParams(temperature=0.0, max_tokens=512),
+    guided_decoding={"json": schema},   # grammar-constrained
+)
+```
+
+### llama.cpp grammar
+
+```bash
+./llama-server -m model.gguf \
+  --grammar-file ticket.schema.json \
+  --port 8080
+```
+
+<Callout variant="warning" title="strict: true has limits">
+With `strict: true`, OpenAI requires every property in `required`, forbids `additionalProperties`, and supports no recursion. Design flat-ish schemas. For deep nesting, use tool calling instead.
+</Callout>
+
+---
+
+## 3. Tool / Function Calling
+
+### Define a tool
+
+```python
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_cluster_status",
+            "description": "Get health of a Kubernetes cluster by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cluster": {"type": "string", "description": "Cluster name"},
+                    "namespace": {"type": "string"},
+                },
+                "required": ["cluster"],
+            },
+        },
+    }
+]
+
+resp = client.chat.completions.create(
+    model="gpt-4o",
+    messages=msgs,
+    tools=tools,
+    tool_choice="auto",   # or "required", or {"type":"function","function":{"name":"..."}}
+)
+```
+
+### Execute and feed back
+
+```python
+import json
+
+msg = resp.choices[0].message
+if msg.tool_calls:
+    for call in msg.tool_calls:
+        args = json.loads(call.function.arguments)
+        result = get_cluster_status(**args)          # your real function
+        msgs.append(msg)                              # assistant's tool call
+        msgs.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": json.dumps(result),
+        })
+    # Second pass: model reads the tool result and answers
+    final = client.chat.completions.create(model="gpt-4o", messages=msgs, tools=tools)
+```
+
+<Callout variant="note" title="tool_choice cheat sheet">
+`"auto"` lets the model decide. `"required"` forces a tool call. `"none"` forbids tools. Passing a specific `{"function":{"name":...}}` forces that exact tool. Use `"required"` when you always need structured action.
+</Callout>
+
+---
+
+## 4. Pydantic & Zod Patterns
+
+### Pydantic (Python) → JSON schema
+
+```python
+from pydantic import BaseModel, Field
+from openai import OpenAI
+
+class Incident(BaseModel):
+    severity: str = Field(..., description="low | medium | high")
+    summary: str
+    affected_services: list[str]
+    suggested_action: str
+
+client = OpenAI()
+resp = client.beta.chat.completions.parse(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": log_text}],
+    response_format=Incident,        # Pydantic model = schema
+)
+incident: Incident = resp.choices[0].message.parsed   # typed object
+```
+
+### Zod (TypeScript) → structured output
+
+```typescript
+import { z } from "zod";
+
+const IncidentSchema = z.object({
+  severity: z.enum(["low", "medium", "high"]),
+  summary: z.string(),
+  affectedServices: z.array(z.string()),
+  suggestedAction: z.string(),
+});
+
+// With the AI SDK
+const { object } = await generateObject({
+  model,
+  schema: IncidentSchema,
+  prompt: logText,
+});
+// object is fully typed as z.infer<typeof IncidentSchema>
+```
+
+<ComparisonTable
+  title="Pydantic vs Zod"
+  columns={["Pydantic", "Zod"]}
+  rows={[
+    { label: "Language", values: ["Python", "TypeScript"] },
+    { label: "Schema source", values: ["Class + Field()", "z.object({...})"] },
+    { label: "Runtime parse", values: ["model.validate_json()", "schema.parse()"] },
+    { label: "AI SDK support", values: ["OpenAI .parse()", "Vercel AI generateObject"] },
+    { label: "Nested models", values: ["Yes (subclasses)", "Yes (z.object nested)"] },
+  ]}
+/>
+
+<Callout variant="tip" title="Let the schema carry the description">
+Put `description=` on every field. Models use field descriptions as in-context hints about what to fill in. A good description often beats a long system prompt.
+</Callout>
+
+---
+
+## 5. Few-Shot Templates
+
+Give the model examples of the exact input→output shape you want.
+
+```python
+system = """You classify support tickets. Respond with JSON: {"category": str, "priority": int}.
+
+Examples:
+Input: "pod keeps restarting with OOMKilled"
+Output: {"category": "infrastructure", "priority": 1}
+
+Input: "how do I reset my password"
+Output: {"category": "account", "priority": 4}
+
+Input: "billing charge I don't recognize"
+Output: {"category": "billing", "priority": 3}
+"""
+```
+
+### Few-shot via messages (cleaner for chat models)
+
+```python
+examples = [
+    ("pod keeps restarting with OOMKilled", '{"category": "infrastructure", "priority": 1}'),
+    ("how do I reset my password", '{"category": "account", "priority": 4}'),
+]
+messages = [{"role": "system", "content": "Classify tickets. Output JSON only."}]
+for inp, out in examples:
+    messages.append({"role": "user", "content": inp})
+    messages.append({"role": "assistant", "content": out})
+messages.append({"role": "user", "content": new_ticket})
+```
+
+<Callout variant="note" title="3–5 examples is the sweet spot">
+More than ~5 examples hits diminishing returns and burns context. Pick diverse, edge-case examples (not all easy ones). Include at least one example of the trickiest category.
+</Callout>
+
+---
+
+## 6. Chain-of-Thought & Reasoning
+
+For tasks where the model should reason before answering, separate the reasoning from the final structured output.
+
+### Pattern: reason, then emit JSON
+
+```text
+Analyze the following incident log. First, reason step by step about root cause
+in a "reasoning" field. Then give your final structured assessment.
+
+Return JSON:
+{
+  "reasoning": "string (your step-by-step analysis)",
+  "root_cause": "string",
+  "confidence": "number between 0 and 1",
+  "next_steps": ["string"]
+}
+```
+
+### Two-call pattern (stronger, costs more)
+
+```python
+# Call 1: free-form reasoning
+reasoning = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": f"Reason about root cause: {log}"}],
+).choices[0].message.content
+
+# Call 2: structure the reasoning
+structured = client.beta.chat.completions.parse(
+    model="gpt-4o",
+    messages=[
+        {"role": "user", "content": log},
+        {"role": "assistant", "content": reasoning},
+        {"role": "user", "content": "Now output the structured JSON per schema."},
+    ],
+    response_format=Incident,
+).choices[0].message.parsed
+```
+
+<Callout variant="tip" title="CoT + structured output = best of both">
+Let the model think in a `reasoning` field (or a separate call), then constrain the final answer. This combines reasoning quality with parseability. For reasoning models (o1, DeepSeek-R1), the model already thinks internally — skip explicit CoT and just ask for the structured result.
+</Callout>
+
+---
+
+## 7. Prompt Hygiene Checklist
+
+<ChecklistBox title="Before shipping a prompt" items={[
+  "✅ **Set temperature low** (0–0.3) for structured/factual tasks; higher only for creative.",
+  "✅ **Use native schema enforcement** (constrained decoding or tool calling), not prompt-only JSON.",
+  "✅ **Every field has a description** — the model reads it as a hint.",
+  "✅ **Define the output format explicitly** — JSON, no markdown fences, no prose.",
+  "✅ **Include 3–5 diverse few-shot examples** for classification/extraction.",
+  "✅ **Validate + retry** — wrap every call in a parser with a typed retry on failure.",
+  "✅ **Cap max_tokens** so a runaway response can't blow your context budget.",
+  "✅ **Separate reasoning from output** when the task is hard.",
+  "✅ **Test on edge cases** — empty input, very long input, ambiguous input.",
+  "✅ **Pin the model version** — `gpt-4o-2024-08-06`, not `gpt-4o`, for reproducibility."
+]} />
+
+<Callout variant="warning" title="Prompt-only JSON is fragile">
+If you're relying on "respond with JSON only" in the prompt, you will eventually get a response wrapped in ```json fences, with a leading "Sure!", or truncated mid-object. Always strip fences, validate with `json.loads`, and retry. Or switch to native structured outputs and delete that code entirely.
+</Callout>

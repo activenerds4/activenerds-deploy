@@ -1,0 +1,392 @@
+---
+title: "K8s Security & RBAC Matrix Cheat Sheet"
+description: "Lock down a cluster — NetworkPolicies (default-deny/egress), Pod Security Standards, and RBAC ClusterRole templates you can paste and adapt."
+category: kubernetes-containers
+slug: k8s-security-rbac-policy-matrix
+lastUpdated: "2026-08-28"
+tags: ["kubernetes", "security", "rbac", "devsecops"]
+published: true
+---
+
+import { TabsGroup, TabsList, TabsTrigger, TabsContent } from "@/components/mdx/TabsGroup";
+import { Callout } from "@/components/mdx/Callout";
+import { ComparisonTable } from "@/components/mdx/ComparisonTable";
+import { ChecklistBox } from "@/components/mdx/ChecklistBox";
+
+# K8s Security & RBAC Matrix Cheat Sheet
+
+**Default-deny everything, then allow what's needed.**
+
+Kubernetes is open by default — pods can talk to any pod, any user can do a lot. This sheet is the lockdown: NetworkPolicies, Pod Security Standards, and RBAC templates that follow least privilege.
+
+---
+
+## Table of Contents
+
+1. [NetworkPolicies](#1-networkpolicies)
+2. [Pod Security Standards](#2-pod-security-standards)
+3. [RBAC Building Blocks](#3-rbac-building-blocks)
+4. [ClusterRole Templates](#4-clusterrole-templates)
+5. [Service Accounts & Tokens](#5-service-accounts--tokens)
+6. [Audit & Verification](#6-audit--verification)
+
+---
+
+## 1. NetworkPolicies
+
+<Callout variant="warning" title="NetworkPolicy needs a CNI that supports it">
+NetworkPolicies are enforced by the CNI plugin, not Kubernetes itself. `flannel` does **not** support them by default; `Calico`, `Cilium`, `Weave`, and cloud CNIs do. Verify your CNI before relying on policies — silently-ignored policies are worse than no policy.
+</Callout>
+
+### Default-deny all ingress (the starting point)
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: production
+spec:
+  podSelector: {}          # selects ALL pods in the namespace
+  policyTypes:
+    - Ingress
+  ingress: []              # allow nothing
+```
+
+### Default-deny all egress
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress: []               # allow nothing (blocks DNS too — see below)
+```
+
+<Callout variant="tip" title="Egress deny breaks DNS">
+A default-deny egress blocks DNS (kube-dns/CoreDNS), so pods can't resolve service names. Always add an egress allow rule for the DNS namespace/pods on port 53. This is the #1 gotcha when enabling egress policies.
+</Callout>
+
+### Allow DNS through egress
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector: {}     # kube-system or wherever DNS lives
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+```
+
+### Allow specific app-to-app traffic
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-to-backend
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: backend          # applies to backend pods
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend  # only frontend pods
+      ports:
+        - protocol: TCP
+          port: 8080
+```
+
+### Deny cross-namespace by default
+
+```yaml
+# By default, a namespaceSelector: {} + podSelector: {} means "any namespace".
+# To restrict to same-namespace only, use an empty podSelector inside a namespaceSelector:
+ingress:
+  - from:
+      - podSelector: {}     # same namespace only (no namespaceSelector = current ns)
+```
+
+---
+
+## 2. Pod Security Standards
+
+Pod Security replaced PodSecurityPolicy (removed in 1.25). It's enforced via namespace **labels**.
+
+### The three levels
+
+| Level | What it blocks |
+|-------|----------------|
+| `privileged` | Nothing — fully open (avoid) |
+| `baseline` | The dangerous stuff: privileged containers, hostNetwork/PID/IPC, hostPath, unsafe proc mounts |
+| `restricted` | Baseline + requires runAsNonRoot, drops ALL capabilities, seccomp, no host ports |
+
+### Enforce restricted on a namespace
+
+```bash
+# Enforce + audit + warn on the restricted policy
+kubectl label namespace production \
+  pod-security.kubernetes.io/enforce=restricted \
+  pod-security.kubernetes.io/enforce-version=latest \
+  pod-security.kubernetes.io/audit=restricted \
+  pod-security.kubernetes.io/warn=restricted
+```
+
+### A restricted-compliant pod
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: safe-app
+  labels:
+    app: safe-app
+spec:
+  securityContext:
+    runAsNonRoot: true          # required
+    runAsUser: 1000
+    fsGroup: 2000
+    seccompProfile:
+      type: RuntimeDefault      # required
+  containers:
+    - name: app
+      image: myapp:1.0
+      securityContext:
+        allowPrivilegeEscalation: false   # required
+        runAsNonRoot: true
+        runAsUser: 1000
+        capabilities:
+          drop:
+            - ALL              # required: drop ALL, then add back only what's needed
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        limits:
+          memory: "256Mi"
+          cpu: "500m"
+```
+
+<Callout variant="note" title="enforce vs audit vs warn">
+`enforce` blocks the pod from being created. `audit` logs a violation but allows it. `warn` shows a warning to the user at apply time. Roll out in order: warn → audit → enforce, so you catch violations before they break deploys.
+</Callout>
+
+---
+
+## 3. RBAC Building Blocks
+
+```text
+Role/ClusterRole  →  permissions (what can be done)
+   ↓
+RoleBinding/ClusterRoleBinding  →  who gets those permissions
+   ↓
+Subject: User | Group | ServiceAccount
+```
+
+| Object | Scope |
+|--------|-------|
+| `Role` | One namespace |
+| `ClusterRole` | Cluster-wide (or reusable across namespaces) |
+| `RoleBinding` | Grants a Role in one namespace |
+| `ClusterRoleBinding` | Grants a ClusterRole cluster-wide |
+
+### Verbs cheat sheet
+
+```yaml
+verbs: ["get", "list", "watch"]      # read
+verbs: ["create", "update", "patch"] # write
+verbs: ["delete", "deletecollection"] # delete
+verbs: ["*"]                         # all (avoid)
+```
+
+---
+
+## 4. ClusterRole Templates
+
+### Read-only namespace viewer
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: namespace-viewer
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "secrets", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: viewer-prod
+  namespace: production
+subjects:
+  - kind: User
+    name: jane
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: namespace-viewer
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### Developer role (one namespace, no secrets)
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer
+  namespace: dev
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec", "services", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Explicitly NO access to secrets
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developer-dev
+  namespace: dev
+subjects:
+  - kind: Group
+    name: developers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: developer
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### CI/CD deployer (deploy only, scoped)
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployer
+  namespace: production
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    verbs: ["create"]
+```
+
+<Callout variant="tip" title="Prefer Role over ClusterRole">
+Grant the narrowest scope that works. A `Role` in one namespace can't accidentally affect others. Use `ClusterRole` only for cluster-wide resources (nodes, namespaces, CRDs) or for reusable templates bound per-namespace via `RoleBinding`.
+</Callout>
+
+---
+
+## 5. Service Accounts & Tokens
+
+```bash
+# Create a service account
+kubectl create serviceaccount ci-deployer -n production
+
+# Bind it (use the SA as the subject)
+# subjects:
+#   - kind: ServiceAccount
+#     name: ci-deployer
+#     namespace: production
+
+# Get a long-lived token (1.24+ uses TokenRequest API)
+kubectl create token ci-deployer -n production --duration=24h
+
+# Mount token automatically (default since 1.24: projected, time-bound)
+# Pods get a token via projected service account token volume
+```
+
+### Disable token automounting for pods that don't need API access
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-app
+automountServiceAccountToken: false   # don't auto-mount a token
+---
+spec:
+  serviceAccountName: my-app
+  automountServiceAccountToken: false  # pod-level override
+```
+
+<Callout variant="warning" title="Every pod gets a token by default">
+By default, every pod mounts a service account token with permissions in its namespace. If your app doesn't talk to the API, set `automountServiceAccountToken: false` — it removes a real attack surface. This is one of the easiest security wins.
+</Callout>
+
+---
+
+## 6. Audit & Verification
+
+### Who can do what?
+
+```bash
+# Can a user do an action? (impersonation check)
+kubectl auth can-i create deployments -n production
+kubectl auth can-i delete pods -n production --as=jane
+kubectl auth can-i '*' '*' --as=system:serviceaccount:default:my-sa
+
+# List everything a user can do
+kubectl auth can-i --list -n production --as=jane
+```
+
+### Find over-permissive bindings
+
+```bash
+# Find ClusterRoleBindings (cluster-wide power)
+kubectl get clusterrolebindings -o json | jq '.items[] | select(.roleRef.kind=="ClusterRole") | {name: .metadata.name, role: .roleRef.name, subjects: .subjects}'
+
+# Find bindings to the cluster-admin role (the nuclear option)
+kubectl get clusterrolebindings -o json | jq '.items[] | select(.roleRef.name=="cluster-admin") | .metadata.name'
+```
+
+<ChecklistBox title="Cluster hardening checklist" items={[
+  "✅ **Default-deny ingress** in every production namespace.",
+  "✅ **Default-deny egress** + explicit DNS allow.",
+  "✅ **Enforce `restricted` Pod Security** on production namespaces.",
+  "✅ **Drop ALL capabilities**, add back only what's needed.",
+  "✅ **runAsNonRoot: true** on every workload.",
+  "✅ **Disable SA token automount** for pods that don't need API access.",
+  "✅ **No cluster-admin for humans** — use narrow Roles + groups.",
+  "✅ **Audit bindings** with `kubectl auth can-i --list`.",
+  "✅ **Verify CNI supports NetworkPolicy** (Calico/Cilium, not flannel).",
+  "✅ **Enable audit logging** at the API server for sensitive verbs."
+]} />
+
+<Callout variant="tip" title="can-i is your best friend">
+`kubectl auth can-i --list --as=<user>` shows the full permission matrix for any subject. Run it during access reviews and incident investigations. If you can't explain why a subject has a permission, remove it.
+</Callout>

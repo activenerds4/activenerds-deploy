@@ -1,0 +1,213 @@
+---
+title: "Kubernetes Debugging with k9s and kubectl"
+slug: kubernetes-debugging-k9s-kubectl
+description: "Level up your K8s debugging workflow with k9s and advanced kubectl commands — fast triage for production incidents."
+date: "2025-10-17"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes"]
+featured: false
+relatedArticles: ["kubernetes-rbac-configuration", "kubernetes-network-policies-tutorial", "k8s-crashloopbackoff-troubleshooting", "kubernetes-autcaling-hpa-keda", "kubernetes-network-security-policies"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-debugging-k9s-kubectl.png
+imageAlt: "Kubernetes debugging with k9s and kubectl — terminal-based troubleshooting techniques for pod and node issues"
+published: true
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Logs and events**: the first thing to check when a pod misbehaves:.
+- **Exec into pods**: when logs aren't enough:.
+- **Port forwarding**: for local debugging of cluster services:.
+- **Pod stuck in Pending**: Usually a scheduling problem.
+</Callout>
+
+When a production incident hits, the speed at which you can triage determines how long your users suffer. If you're still running `kubectl get pods` and copying pod names into `kubectl logs`, you're moving slower than you need to. k9s changes the debugging workflow from a sequence of copy-paste commands into a fluid, keyboard-driven navigation experience.
+
+This guide covers k9s and the advanced kubectl commands that should be in every K8s operator's muscle memory.
+
+## Why k9s Changes Everything
+
+k9s is a terminal UI for [Kubernetes](/articles/kubernetes-statefulset-patterns-guide) that gives you a real-time, interactive view of your cluster. Instead of running commands and reading output, you navigate — type `:pods` to see pods, `:svc` for services, `:deploy` for deployments. Select a pod with arrow keys, press `l` for logs, `s` for a shell, `d` to describe, `e` to edit.
+
+The workflow shift is significant: in vanilla kubectl, debugging a failing pod means running 4-5 separate commands. In k9s, it's `:pods` → arrow down → `l` → see logs → `esc` → `d` → see events → `esc` → `s` → exec in. All without leaving the terminal or touching your mouse.
+
+```bash
+# Install k9s
+brew install k9s  # macOS
+# or
+go install github.com/derailed/k9s@latest  # Go install
+```
+
+<Callout type="tip">
+Configure k9s with a custom skin that matches your terminal theme. The default is readable, but a dark theme with syntax highlighting makes log scanning much faster. Create `~/.config/k9s/skin.yml` to customize.
+</Callout>
+
+### Navigation Patterns
+
+The core k9s commands you'll use daily:
+
+| Key | Action |
+|-----|--------|
+| `:` | Enter resource mode (type resource name: pods, svc, deploy, etc.) |
+| `/` | Filter/search within current view |
+| `l` | View logs of selected resource |
+| `s` | Shell into selected pod |
+| `d` | Describe selected resource |
+| `e` | Edit selected resource |
+| `y` | View YAML of selected resource |
+| `p` | Port-forward to selected pod |
+| `x` | View metrics/CPU for selected pod |
+| `Ctrl+d` | Delete selected resource (with confirmation) |
+
+## Essential kubectl Debugging
+
+Even with k9s, you need raw kubectl for scripting and automation. Here are the commands that matter:
+
+**Logs and events** — the first thing to check when a pod misbehaves:
+
+```bash
+# Current logs
+kubectl logs <pod-name> -n <namespace>
+
+# Previous container logs (after a crash)
+kubectl logs <pod-name> -n <namespace> --previous
+
+# Follow logs in real-time
+kubectl logs <pod-name> -n <namespace> -f
+
+# Logs with timestamps
+kubectl logs <pod-name> -n <namespace> --timestamps
+
+# Events sorted by time
+kubectl get events -n <namespace> --sort-by='.lastTimestamp'
+```
+
+**Exec into pods** — when logs aren't enough:
+
+```bash
+# Interactive shell
+kubectl exec -it <pod-name> -n <namespace> -- /bin/sh
+
+# Run a single command
+kubectl exec <pod-name> -n <namespace> -- ls /app
+
+# Exec into a specific container in a multi-container pod
+kubectl exec -it <pod-name> -c <container-name> -n <namespace> -- /bin/sh
+```
+
+**Port forwarding** — for local debugging of cluster services:
+
+```bash
+# Forward a pod port to localhost
+kubectl port-forward <pod-name> 8080:80 -n <namespace>
+
+# Forward a service port
+kubectl port-forward svc/<service-name> 8080:80 -n <namespace>
+```
+
+<Note>
+`kubectl logs --previous` is your best friend for CrashLoopBackOff debugging. It shows the logs from the container's last run before it crashed — which is usually where the actual error is.
+</Note>
+
+## Debugging Common Issues
+
+**Pod stuck in Pending**: Usually a scheduling problem. Check events:
+
+```bash
+kubectl describe pod <pod-name> -n <namespace> | tail -20
+# Look for: Insufficient cpu, Insufficient memory, node(s) didn't match
+# Common fix: adjust resource requests or add nodes
+```
+
+**Service connectivity**: Verify the service selects the right pods:
+
+```bash
+# Check service endpoints
+kubectl get endpoints <service-name> -n <namespace>
+
+# If endpoints are empty, the service selector doesn't match any pods
+kubectl describe svc <service-name> -n <namespace> | grep Selector
+kubectl get pods -n <namespace> --show-labels | grep <selector>
+```
+
+**CrashLoopBackOff deep dive**: The most common production issue. The pattern:
+
+```bash
+# Step 1: Check exit code and reason
+kubectl describe pod <pod-name> -n <namespace> | grep -A5 "Last State"
+
+# Step 2: Check previous logs
+kubectl logs <pod-name> -n <namespace> --previous
+
+# Step 3: Check events for scheduling/health check issues
+kubectl get events -n <namespace> --field-selector involvedObject.name=<pod-name>
+```
+
+Common CrashLoopBackOff causes:
+- **Exit code 1**: Application error — check previous logs
+- **Exit code 137**: OOMKilled — increase memory limits or fix memory leak
+- **Exit code 139**: Segfault — usually a binary/library compatibility issue
+- **Exit code 143**: Graceful shutdown — usually normal during termination
+
+## Advanced k9s Features
+
+**Custom views**: k9s lets you create custom views for specific resources or filtered lists. Create `~/.config/k9s/views.yml`:
+
+```yaml
+views:
+  failing-pods:
+    title: "Failing Pods"
+    command: "pods"
+    filters:
+      - "STATUS!=Running"
+```
+
+**Port forwards in k9s**: Press `p` on any pod or service to start a port forward. k9s manages the forward and shows it in a dedicated view — no need to keep a separate terminal open.
+
+**Log filtering**: In the logs view, type `/` to filter logs by keyword. This is invaluable for finding error messages in verbose logs. Use `f` to toggle follow mode.
+
+**Plugin ecosystem**: k9s supports plugins that extend its functionality. Popular plugins include log-to-file, age encryption, and custom column displays:
+
+```yaml
+# ~/.config/k9s/plugins.yml
+plugins:
+  logs-to-file:
+    shortCut: Ctrl-L
+    description: "Save logs to file"
+    scopes:
+      - pods
+    command: kubectl
+    background: false
+    args:
+      - logs
+      - $NAME
+      - -n
+      - $NAMESPACE
+      - >
+      - /tmp/$NAME.log
+```
+
+## Building a Debugging Runbook
+
+For production incidents, a structured approach saves time:
+
+**Triage checklist**:
+1. Is the pod running? `kubectl get pods -n <namespace>`
+2. If not, what's the status? Pending, CrashLoopBackOff, ImagePullBackOff?
+
+3. If running, check logs for errors
+4. Check events for recent changes
+5. Check service endpoints if connectivity is the issue
+6.
+
+**Escalation patterns**: If you can't resolve in 15 minutes:
+- Check if other services are affected (cluster-wide issue?)
+- Roll back the last deployment: `kubectl rollout undo deployment/<name>`
+- Check cluster-level resources: nodes, DNS, CNI
+
+<Callout type="tip">
+Create a k9s aliases file for namespaces you use frequently. Instead of typing `:pods` and then switching namespaces, you can create shortcuts that jump directly to specific namespaces. This saves seconds per navigation, which adds up during incidents.
+</Callout>
+
+The bottom line: k9s doesn't replace kubectl — it makes you faster at the 80% of debugging that involves navigating between resources and viewing logs. Keep kubectl for scripting and automation, use k9s for interactive triage. Together, they're the most efficient debugging toolkit for Kubernetes.
+
+
