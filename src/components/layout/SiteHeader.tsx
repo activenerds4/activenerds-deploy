@@ -7,7 +7,6 @@ import ThemeToggle from "@/components/ui/ThemeToggle";
 import SearchButton from "@/components/ui/SearchButton";
 import VisuallyHidden from "@/components/ui/VisuallyHidden";
 import MobileNavigation from "./MobileNavigation";
-import { LanguageSelector } from "@/components/i18n/LanguageSelector";
 import { cn } from "@/lib/utils";
 import { navigationConfig, getEnabledNavItems, hasDropdown } from "@/lib/config/navigation";
 import { MegaMenu } from "./MegaMenu";
@@ -100,7 +99,6 @@ const SiteHeader = () => {
               {headerCta.label}
             </Link>
           )}
-          <LanguageSelector />
           <ThemeToggle />
         </div>
 

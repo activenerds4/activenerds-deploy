@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { NavLink } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { LanguageSelector } from "@/components/i18n/LanguageSelector";
 import { getEnabledNavItems, hasDropdown } from "@/lib/config/navigation";
 import type { NavItem, NavMenuGroup } from "@/lib/config/navigation";
 
@@ -178,10 +177,7 @@ const MobileNavigation = ({ open, onClose }: MobileNavigationProps) => {
           ),
         )}
 
-        {/* Language selector */}
-        <div className="mt-3">
-          <LanguageSelector variant="full" />
-        </div>
+
       </nav>
     </div>
   );
