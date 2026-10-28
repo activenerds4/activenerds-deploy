@@ -1,0 +1,39 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "greedy-decoding-repetition-problem"
+order: 57
+level: "beginner"
+format: "article"
+title: "Greedy Decoding's Repetition Problem: Why the 'Most Confident' Choice Backfires"
+description: "Greedy decoding optimizes each token in isolation without ever reconsidering earlier choices, which locks the model into globally suboptimal, often repetitive paths that sampling can escape."
+question: "Why does greedy decoding (always picking the highest-probability token) often produce worse or more repetitive output than sampling-based decoding, even though it looks like the \"most confident\" choice at every step?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "Greedy Decoding", "GreedyDecoding", "Sampling"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Why Greedy Decoding Causes Repetitive Text | LLM Guide"
+metaDescription: "Learn why greedy decoding often produces worse or more repetitive output than sampling, despite always choosing the highest-probability token at each step."
+publishDate: "2026-09-22"
+relatedModules: ["temperature-top-k-top-p-sampling-strategies", "temperature-vs-top-p-production-use-cases"]
+---
+
+## Question
+Why does greedy decoding (always picking the highest-probability token) often produce worse or more repetitive output than sampling-based decoding, even though it looks like the "most confident" choice at every step?
+
+
+## Quick Answer
+**Greedy decoding** picks the single highest-probability token at every step with no ability to reconsider, which locally looks like the "most confident" choice but has no mechanism to escape a self-reinforcing loop once the model starts repeating itself — a trap that sampling-based decoding can avoid simply by not always taking the top pick.
+
+## Detailed Answer
+Greedy decoding is locally optimal but not globally optimal: it maximizes the probability of the *next single token* at every step, with no lookahead and no way to revise a token once it's been emitted. This is a form of **exposure bias** in action — the model was trained on real human text, but at inference time it's now conditioning on its own previous outputs, and if an early choice nudges it into an unusual region of the distribution, greedy decoding has no mechanism to correct course; it just keeps confidently picking the best next step from an already-bad position.
+
+The repetition failure mode has a specific, well-documented cause: once a phrase like "the the the" or a repeated sentence fragment appears in the context, the model's own learned statistics often assign that *same* continuation an extremely high probability again, because "text that repeats a recent phrase" is itself a real, common pattern in training data (stutters, emphasis, list formatting). Greedy decoding then dutifully picks that highest-probability repeated token again, which makes the repeated pattern even more probable next time, compounding into the well-known repetition loops that plain greedy decoding is notorious for, especially in longer generations.
+
+**Sampling-based decoding** — drawing from the probability distribution rather than always taking the argmax — doesn't optimize for the same thing, and that's precisely the point. By occasionally selecting a lower-probability-but-still-reasonable token, it can break out of a loop before it starts self-reinforcing. This isn't about the sampled choice being individually "better" than the greedy pick at that one step (it's usually a bit worse, probability-wise) — it's that avoiding the deterministic lock-step of always picking the top token prevents the model from ever entering the specific high-probability trap that repetition creates in the first place.
+
+**Beam search** is a middle ground worth mentioning: it tracks several candidate sequences in parallel instead of committing to one greedy path, which improves on plain greedy decoding for some tasks (like translation) by exploring more of the search space, but it can still converge on repetitive or generic output for open-ended generation, since it's still fundamentally optimizing for high sequence probability rather than introducing controlled randomness.
+
+<Callout variant="tip" title="Key Takeaways">
+Greedy decoding's flaw isn't overconfidence at any single step — it's the total absence of a mechanism to avoid the self-reinforcing probability traps that its own always-pick-the-top strategy walks straight into.
+</Callout>
+

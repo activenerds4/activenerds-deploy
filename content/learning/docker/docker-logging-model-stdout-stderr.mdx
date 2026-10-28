@@ -1,0 +1,42 @@
+---
+pathSlug: "docker"
+moduleSlug: "docker-logging-model-stdout-stderr"
+order: 24
+level: "beginner"
+format: "article"
+title: "Docker Logging Model: Why stdout/stderr, Not Log Files"
+description: "Docker's logging driver only captures what the container's PID 1 process writes to stdout/stderr. Logs written to a file inside the container are invisible to it."
+question: "A teammate adds application logging to a file inside the container instead of stdout/stderr, then complains `docker logs` shows nothing. Explain the underlying logging model Docker expects and why their approach breaks it."
+domain: "Operations"
+tags: ["Operations", "Logging", "StdoutStderr"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Docker Logging Model: Why stdout/stderr, | Docker Guide"
+metaDescription: "Learn Docker Logging Model: Why stdout/stderr, Not Log Files with architecture patterns, practical configurations, and step-by-step implementation deta"
+publishDate: "2026-07-29"
+relatedModules: ["docker-environment-variables-config-injection"]
+---
+
+## Question
+A teammate adds application logging to a file inside the container instead of stdout/stderr, then complains `docker logs` shows nothing. Explain the underlying logging model Docker expects and why their approach breaks it.
+
+
+## Quick Answer
+`docker logs` only shows what the container's main process writes to **stdout and stderr**. Writing logs to a file inside the container instead sends them to the writable layer, where Docker's logging driver never looks.
+
+## Detailed Answer
+Docker's logging model is deliberately simple: the container runtime attaches to the **stdout and stderr file descriptors of PID 1** inside the container, and whatever the log driver is configured to do (the default `json-file` driver, or `journald`, `syslog`, `fluentd`, etc.) it does with *that stream specifically*. `docker logs` is just reading back what that driver captured — it isn't scanning the container's filesystem for anything that looks like a log.
+
+When application logging is configured to write to a file — say `/var/log/app.log` — those writes go through the normal filesystem I/O path into the container's writable layer, exactly like any other file write. Nothing about that path is connected to the logging driver at all. From Docker's point of view, the process produced no log output, because as far as stdout/stderr are concerned, it didn't — `docker logs` correctly shows nothing, because nothing was ever sent there.
+
+This convention exists because it lets Docker (and anything built on top of it — Kubernetes, ECS, log-shipping sidecars) treat log collection uniformly across every container, regardless of what language or framework produced it, without needing to know an application-specific file path, format, or rotation policy. It's the container-world version of the twelve-factor app principle: *treat logs as an event stream, not a file the app manages itself.*
+
+The fix is one of two changes, both of which keep the application's own logging library unchanged in spirit:
+
+- Configure the application's logger to write to stdout/stderr directly instead of a file.
+- If the library truly can't be reconfigured, symlink the log file path to the stream: `ln -sf /dev/stdout /var/log/app.log` inside the image, so file writes are transparently redirected to the stream Docker is actually watching.
+
+<Callout variant="tip" title="Key Takeaways">
+Docker only sees what PID 1 writes to stdout/stderr — logging to a file inside the container is invisible to `docker logs` no matter how correctly the application itself is logging.
+</Callout>
+

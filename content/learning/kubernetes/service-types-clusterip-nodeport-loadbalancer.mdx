@@ -1,0 +1,84 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "service-types-clusterip-nodeport-loadbalancer"
+order: 66
+level: "beginner"
+format: "article"
+title: "ClusterIP vs. NodePort vs. LoadBalancer vs. ExternalName: Service Type Selection"
+description: "ClusterIP (internal only), NodePort (node-level external access), LoadBalancer (cloud LB per service), ExternalName (DNS alias to external) — use Ingress ins..."
+question: "What are the functional differences and use cases among ClusterIP, NodePort, LoadBalancer, and ExternalName service types, and how does packet routing work for each?"
+domain: "Services & Networking"
+tags: ["Services", "Networking"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "ClusterIP vs. NodePort vs. LoadBalancer vs. E | K8s Guide"
+metaDescription: "Learn ClusterIP vs. NodePort vs. LoadBalancer vs. ExternalName: Service Type Selection with architecture patterns, practical configurations, and step-by-step i"
+publishDate: "2026-05-29"
+relatedModules: ["configmaps-decoupling-application-configuration", "advanced-pod-scheduling-affinity-taints"]
+---
+
+## Question
+What are the functional differences and use cases among ClusterIP, NodePort, LoadBalancer, and ExternalName service types, and how does packet routing work for each?
+
+## Quick Answer
+ClusterIP (internal only), NodePort (node-level external access), LoadBalancer (cloud LB per service), ExternalName (DNS alias to external) — use Ingress instead of LoadBalancer for HTTP services.
+
+
+## Detailed Answer
+| Type | Access | Use Case | Production? |
+|---|---|---|---|
+| **ClusterIP** | Inside cluster only | Microservice-to-microservice | ✅ Default choice |
+| **NodePort** | Node IP + static port | Dev/testing quick access | ⚠️ Avoid in prod |
+| **LoadBalancer** | External via cloud LB | Non-HTTP services (TCP/UDP) | ✅ For L4 only |
+| **ExternalName** | DNS CNAME alias | Route to external services | ✅ For external routing |
+
+```yaml
+# ClusterIP (default) — internal only
+spec:
+  type: ClusterIP
+  clusterIP: 10.96.0.100              # Or omit — auto-assigned
+  # Access: curl http://my-svc:80 from inside cluster
+
+# NodePort — opens port on every node
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 8080
+    nodePort: 30080                   # Range: 30000-32767
+  # Access: curl http://<node-ip>:30080
+
+# LoadBalancer — provisions cloud LB (AWS NLB/ALB)
+spec:
+  type: LoadBalancer
+  # On EKS with AWS Load Balancer Controller:
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+  # Access: curl http://<aws-lb-hostname>
+
+# ExternalName — DNS alias
+spec:
+  type: ExternalName
+  externalName: mydb.us-east-1.rds.amazonaws.com
+  # Access: curl http://my-db-svc → resolves to RDS endpoint
+  # Useful for migrating apps to K8s while DB stays outside
+```
+
+## Decision Tree
+```
+HTTP/HTTPS traffic?
+├── YES → Multiple services? → Use Ingress + ClusterIP
+└── NO  → TCP/UDP direct access?
+          ├── Internal only → ClusterIP
+          ├── External L4  → LoadBalancer
+          └── External routing to outside K8s → ExternalName
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+Use ClusterIP for everything internal, Ingress+ClusterIP for external HTTP, and LoadBalancer only for non-HTTP protocols like databases or game servers.
+</Callout>
+
+---

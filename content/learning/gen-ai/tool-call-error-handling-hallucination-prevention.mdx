@@ -1,0 +1,41 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "tool-call-error-handling-hallucination-prevention"
+order: 141
+level: "intermediate"
+format: "article"
+title: "Tool Call Error Handling: Preventing Hallucinated Results After a Failure"
+description: "The model has no built-in way to distinguish a real tool result from a plausible one it generates itself — error handling has to happen at the orchestration..."
+question: "When a tool call fails or returns an unexpected schema at runtime, what design patterns prevent the model from hallucinating a plausible-looking result instead of correctly reporting the failure back through the conversation?"
+domain: "Agentic Systems"
+tags: ["Agentic Systems", "ErrorHandling", "FunctionCalling"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Tool Call Error Handling: Preventing Halluc | GenAI Guide"
+metaDescription: "Learn the design patterns that stop an LLM agent from hallucinating a plausible tool result instead of reporting a real failure back to the conversation."
+publishDate: "2026-07-13"
+relatedModules: ["function-calling-internals-tool-invocation-decision"]
+---
+
+## Question
+When a tool call fails or returns an unexpected schema at runtime, what design patterns prevent the model from hallucinating a plausible-looking result instead of correctly reporting the failure back through the conversation?
+
+
+## Quick Answer
+Prevention doesn't happen inside the model — it happens in the orchestration layer, by structurally separating "here is a real tool result" from "continue the conversation" so the model is never asked to guess what a missing result should have been.
+
+## Detailed Answer
+Once a tool call is issued, the model's next generation step is conditioned on whatever gets placed back into its context as the "tool result" message. If the orchestration code silently passes through a malformed response, an empty string, or omits the turn entirely, the model will do exactly what it always does: produce the statistically most plausible continuation — which, given a conversation that clearly expected a tool result, is often a **fabricated but plausible-looking value**. The model isn't "lying"; it has no internal flag for "this input is corrupted," so it treats a broken result the same as a legitimate one and completes the pattern.
+
+Effective patterns push validation and failure-signaling **before** the result reaches the model:
+
+- **Explicit, typed error objects** — return a structured `{"error": "..."}` payload distinct in shape from a successful result, so the model's training-time exposure to error-shaped tool outputs (most modern tool-use fine-tuning includes these) kicks in rather than pattern-matching to a success case.
+- **Schema validation on the way in, not just out** — reject and re-prompt before the call executes if arguments don't match the tool's schema, rather than letting a malformed call reach a real system and produce an ambiguous partial result.
+- **Circuit breakers with explicit state** — after N consecutive tool failures, stop retrying silently and surface a hard-coded system message ("this tool is currently unavailable") rather than letting the model attempt an (n+1)th call it might rationalize into a hallucinated success.
+- **Never let empty results look like success** — a tool that returns nothing should return an explicit "no results found" message, since an empty or null payload is exactly the ambiguous case where the model is most likely to fill the gap with invented data.
+
+<Callout variant="tip" title="Key Takeaways">
+An LLM can't distinguish a real failure from a missing signal — your orchestration layer has to make failure loud and structurally distinct from success before the model ever sees it.
+</Callout>
+
+---

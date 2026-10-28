@@ -1,0 +1,48 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "gptq-awq-gguf-quantization-format-comparison"
+order: 87
+level: "intermediate"
+format: "article"
+title: "GPTQ, AWQ, and GGUF: Comparing Weight-Only Quantization Formats Across Hardware"
+description: "GPTQ and AWQ quantize only weights to INT4 while keeping activations in higher precision for GPU-optimized matrix math, whereas GGUF is a flexible container format built for efficient mixed CPU/GPU execution on consumer hardware."
+question: "Compare weight-only quantization techniques (e.g., AWQ, GPTQ) with CPU/GPU hybrid formats like GGUF. What are the key differences in how weights and activations are quantized (e.g., INT4/INT8 vs. FP16), and how do they impact execution speed across edge devices versus data-center GPUs?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "Quantization", "GPTQ", "AWQ", "GGUF"]
+estimatedMinutes: 7
+xpValue: 15
+seoTitle: "GPTQ, AWQ, GGUF: Quantization Formats | LLM Guide"
+metaDescription: "Learn GPTQ, AWQ, and GGUF: Comparing Weight-Only Quantization Formats Across Hardware with practical guidance on edge vs. data-center deployment."
+publishDate: "2026-09-23"
+relatedModules: ["qlora-nf4-double-quantization-4bit-finetuning", "prefix-tuning-vs-lora-kv-cache-cost"]
+---
+
+## Question
+Compare weight-only quantization techniques (e.g., AWQ, GPTQ) with CPU/GPU hybrid formats like GGUF. What are the key differences in how weights and activations are quantized (e.g., INT4/INT8 vs. FP16), and how do they impact execution speed across edge devices versus data-center GPUs?
+
+
+## Quick Answer
+GPTQ and AWQ are **weight-only** quantization methods that compress weights to INT4 while keeping activations in FP16 for GPU-optimized inference; GGUF is a **container format**, not a quantization algorithm itself, designed for flexible, efficient execution split across CPU and GPU, which is why it dominates edge and consumer-hardware deployment.
+
+## Detailed Answer
+**GPTQ** quantizes weights layer-by-layer, using calibration data to solve for INT4 weight values that minimize the *reconstruction error* of that layer's output — essentially asking "what 4-bit weights, when multiplied by real activation data, produce output closest to the original FP16 layer's output?" Activations themselves stay in FP16 during inference; only the weights are compressed, and the matrix multiply upconverts the INT4 weights on the fly.
+
+**AWQ (Activation-aware Weight Quantization)** takes a related but distinct approach: rather than solving a full reconstruction-error optimization per layer, it observes which weight *channels* correspond to the activations with the largest magnitudes (empirically, a small percentage of channels dominate output quality) and protects exactly those channels with extra precision or scaling, quantizing the rest more aggressively. This makes AWQ notably faster to produce than GPTQ (no expensive per-layer optimization) while often matching or exceeding its accuracy, because it targets the channels that actually matter to output quality instead of optimizing uniformly.
+
+Both GPTQ and AWQ share the same core hardware assumption: they're built for GPUs with fast FP16 compute, where the win is purely in *memory bandwidth* — moving 4-bit weights instead of 16-bit ones — while the actual multiply-accumulate happens in higher precision.
+
+**GGUF** solves a different problem. It's a single-file container format (successor to GGML) that bundles quantized weights, tokenizer data, and metadata together, and supports a whole family of quantization schemes within it (from near-lossless Q8 down to aggressive Q2/Q3 variants), chosen per deployment. Its defining feature is designed support for **mixed CPU/GPU execution** — offloading some transformer layers to GPU VRAM and running the rest on CPU RAM when a model doesn't fully fit in available VRAM, which is the dominant constraint on consumer and edge hardware rather than in a data center.
+
+| Format | Quantizes | Precision Kept in FP16 | Primary Target Hardware |
+|--------|-----------|--------------------------|---------------------------|
+| GPTQ | Weights only (INT4) | Activations | Data-center/consumer GPUs |
+| AWQ | Weights only (INT4, activation-aware) | Activations | Data-center/consumer GPUs |
+| GGUF | Weights (configurable INT2–INT8) | Varies by quant level | CPU, consumer GPU, mixed CPU/GPU |
+
+In practice: GPTQ/AWQ shine when the whole model comfortably fits in GPU VRAM and the goal is squeezing out extra throughput at fixed accuracy; GGUF shines when the constraint is "the model doesn't fit in VRAM at all" — a common edge-device and consumer-laptop scenario where the ability to split layers across CPU and GPU matters more than shaving the last bit of GPU-only throughput.
+
+<Callout variant="tip" title="Key Takeaways">
+Choose GPTQ/AWQ for GPU-resident, throughput-focused data-center serving, and GGUF when hardware constraints (limited or no VRAM) require splitting inference across CPU and GPU.
+</Callout>
+
+---

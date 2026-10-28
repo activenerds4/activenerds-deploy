@@ -1,0 +1,57 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "async-hitl-interrupt-pattern-high-risk-tools"
+order: 33
+level: "intermediate"
+format: "article"
+title: "Async Human-in-the-Loop Interrupts: Pausing Agents Without Blocking the Server"
+description: "A high-risk tool call is paused by persisting a checkpoint and returning immediately, not by holding a thread open; the run resumes from that checkpoint once an approval event arrives, so the application server stays free the entire time a human is deciding."
+question: "How do you design an asynchronous Human-in-the-Loop (HITL) interrupt pattern for high-risk tool executions without stalling the underlying application server or losing process context?"
+domain: "Human-in-the-Loop (HITL)"
+tags: ["Human-in-the-Loop (HITL)", "Interrupts", "HITL", "StateTransitions"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Async HITL Interrupts for Agents | AI Agents Guide"
+metaDescription: "Learn Async Human-in-the-Loop Interrupts: Pausing Agents Without Blocking the Server with architecture patterns, practical configurations, and next steps"
+publishDate: "2026-07-01"
+relatedModules: ["reconciling-human-edits-hitl-approval-flows", "state-graph-architectures-checkpointers-persistence"]
+---
+
+## Question
+How do you design an asynchronous Human-in-the-Loop (HITL) interrupt pattern for high-risk tool executions without stalling the underlying application server or losing process context?
+
+
+## Quick Answer
+A high-risk tool call is never blocked on synchronously — the agent's state is checkpointed and the run is marked "paused, awaiting approval" while the request handler returns immediately; a separate approval event (webhook, queue message, or polling callback) later triggers resumption from that exact checkpoint, so no server thread or connection is held open while a human deliberates.
+
+## Detailed Answer
+The naive approach — holding an HTTP request or a worker thread open while waiting for a human to click "approve" — doesn't scale, and it's fragile: a server restart, timeout, or deploy during the wait loses the entire run. The async pattern instead treats a human approval as just another **asynchronous event the graph is waiting on**, structurally identical to waiting on a slow tool call.
+
+Concretely: when the agent proposes a high-risk action (a destructive database write, an external email send, a large financial transaction), the orchestrator checkpoints the full execution state — including everything needed to resume, like the proposed tool call and its arguments — and transitions the run into a `PENDING_APPROVAL` status in persistent storage. The request handler that triggered this returns right away, freeing up the server entirely; there's no thread, socket, or process sitting idle. The pending approval is then surfaced to a human through whatever channel makes sense (a dashboard, a Slack message, an email with approve/deny links), and when they respond, that response arrives as an independent event — a webhook call, a message on a queue, or a row update a poller picks up — which loads the checkpoint by its ID and resumes execution exactly where it left off, injecting the human's decision as the next Observation.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Orchestrator
+    participant Store as Checkpoint Store
+    participant Human
+
+    Agent->>Orchestrator: propose high-risk tool call
+    Orchestrator->>Store: save checkpoint, status=PENDING_APPROVAL
+    Orchestrator-->>Agent: return immediately (no blocking)
+    Store->>Human: surface approval request
+    Human->>Store: approve/deny event
+    Store->>Orchestrator: resume from checkpoint
+    Orchestrator->>Agent: continue with human decision as Observation
+```
+
+## Production Implications
+- Give every pending approval a timeout and a defined fallback (auto-deny, escalate) — a human who never responds shouldn't leave a run stuck forever
+- Make the checkpoint self-contained enough that resumption doesn't depend on any in-memory state from the original request
+- Idempotency-guard the resume path — an approval webhook that fires twice shouldn't execute the tool call twice
+- Log every pause/resume transition with who approved what, since HITL checkpoints are usually the audit trail regulators or reviewers actually care about
+
+<Callout variant="tip" title="Key Takeaways">
+Treat a pending human approval as an async event the graph is checkpointed and waiting on — never as a synchronous block that ties up server resources for however long a person takes to respond.
+</Callout>
+

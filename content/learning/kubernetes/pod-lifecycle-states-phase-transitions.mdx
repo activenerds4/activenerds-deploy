@@ -1,0 +1,72 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "pod-lifecycle-states-phase-transitions"
+order: 48
+level: "beginner"
+format: "article"
+title: "Pod Lifecycle States: Phase Transitions from Pending to Running and Termination"
+description: "A pod moves through: Pending → Running → Succeeded/Failed, with sub-states like CrashLoopBackOff, ImagePullBackOff, and OOMKilled visible in the container st..."
+question: "What are the exact phase transitions a Pod undergoes from Pending to Running or Failed, and what conditions cause a Pod to remain stuck in Pending or CrashLoopBackOff?"
+domain: "Workloads & Scheduling"
+tags: ["Pods", "Lifecycle"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Pod Lifecycle States: Phase Transitions from  | K8s Guide"
+metaDescription: "Learn Pod Lifecycle States: Phase Transitions from Pending to Running and Termination with architecture patterns, practical configurations, and step-by-step im"
+publishDate: "2026-07-08"
+relatedModules: ["init-containers-pre-initialization-patterns"]
+---
+
+## Question
+What are the exact phase transitions a Pod undergoes from Pending to Running or Failed, and what conditions cause a Pod to remain stuck in Pending or CrashLoopBackOff?
+
+## Quick Answer
+A pod moves through: Pending → Running → Succeeded/Failed, with sub-states like CrashLoopBackOff, ImagePullBackOff, and OOMKilled visible in the container status.
+
+
+## Detailed Answer
+```
+Pod Phases (high level):
+├── Pending    — Accepted by API server but not yet running
+│               Reasons: scheduling (no node), image pull, PVC binding
+├── Running    — At least one container is running
+├── Succeeded  — All containers exited with code 0 (Jobs/CronJobs)
+├── Failed     — At least one container exited with non-zero code
+└── Unknown    — Node communication lost (node down)
+
+Container States (granular — inside a running/pending pod):
+├── Waiting    — Not yet running; reason tells you why:
+│   ├── ContainerCreating       — Image being pulled
+│   ├── ImagePullBackOff        — Can't pull image (bad tag, auth failure)
+│   ├── ErrImagePull            — Pull failed
+│   ├── CrashLoopBackOff        — Keeps crashing (exponential backoff)
+│   └── CreateContainerConfigError — Bad env var, missing secret/configmap
+├── Running    — Container is executing
+└── Terminated — Container exited; reason:
+    ├── Completed  — Exit code 0
+    ├── Error      — Non-zero exit code
+    └── OOMKilled  — Exceeded memory limit
+```
+
+```bash
+# See pod phase
+kubectl get pod my-pod -o jsonpath='{.status.phase}'
+
+# See container state and reason
+kubectl get pod my-pod -o jsonpath='{.status.containerStatuses[0].state}'
+
+# Most informative — always check this first
+kubectl describe pod my-pod | tail -30    # Events section at bottom
+```
+
+## Debugging by State
+- **Pending:** `describe pod` → check Events for "Insufficient CPU/memory", "no nodes match selector", "unbound PVC"
+- **CrashLoopBackOff:** `logs --previous` → what was the app printing before it died?
+- **ImagePullBackOff:** Check image name, tag, registry credentials
+
+
+<Callout variant="tip" title="Key Takeaways">
+The container state reason (CrashLoopBackOff, OOMKilled, ImagePullBackOff) is more informative than the pod phase — always look at `kubectl describe pod` Events and `kubectl logs --previous` for root cause.
+</Callout>
+
+---

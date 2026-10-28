@@ -1,0 +1,204 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "scenario-enforce-image-registry-policy"
+order: 24
+level: "expert"
+format: "article"
+title: "Scenario: Enforce Image Registry Policy Cluster-Wide"
+description: "Use OPA Gatekeeper with a `ConstraintTemplate` that checks all container image prefixes against an allowlist, plus a `MutatingWebhookConfiguration` that rewr..."
+question: "How do you implement an admission policy using OPA/Gatekeeper or Kyverno to enforce that all containers deployed to a cluster originate exclusively from approved internal image registries?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Admission", "Security", "Policy"]
+estimatedMinutes: 15
+xpValue: 25
+seoTitle: "Scenario: Enforce Image Registry Policy Clust | K8s Guide"
+metaDescription: "Learn Scenario: Enforce Image Registry Policy Cluster-Wide with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-05-04"
+relatedModules: []
+---
+
+---
+
+## Question
+How do you implement an admission policy using OPA/Gatekeeper or Kyverno to enforce that all containers deployed to a cluster originate exclusively from approved internal image registries?
+
+## Quick Answer
+## Use OPA Gatekeeper with a `ConstraintTemplate` that checks all container image prefixes against an allowlist, plus a `MutatingWebhookConfiguration` that rewrites unqualified images to your internal mirror, and integrate registry scanning (Trivy/Grype) into your CI pipeline.
+---
+
+
+## Detailed Answer
+A production image registry policy has three layers: **prevention** (admission webhook blocks non-approved registries at deploy time), **rewriting** (mutating webhook or image pull secrets redirect to an internal mirror), and **detection** (continuous scanning of running images for CVEs). Using Gatekeeper for the validating layer means the policy is auditable and version-controlled as YAML. For the mutating layer, a custom webhook or a tool like **Kyverno** can rewrite `docker.io/nginx:1.25` to `registry.mycompany.io/mirror/nginx:1.25` transparently.
+
+---
+
+## Deep Dive
+## Full multi-layer implementation
+## Layer 1 — Gatekeeper allowlist (validation)
+```yaml
+# ConstraintTemplate (abbreviated — full Rego from Q4)
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRepos
+metadata:
+  name: allow-internal-registry-only
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["", "apps", "batch"]
+        kinds:
+          - Pod
+          - Deployment
+          - StatefulSet
+          - DaemonSet
+          - Job
+          - CronJob
+    excludedNamespaces:
+      - kube-system
+      - gatekeeper-system
+      - cert-manager
+  parameters:
+    repos:
+      - "registry.mycompany.io/"
+      - "gcr.io/google_containers/"   # allow k8s system images
+      - "registry.k8s.io/"            # allow k8s system images
+```
+
+## Layer 2 — Kyverno mutating policy (image rewrite)
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: rewrite-image-registry
+spec:
+  rules:
+    - name: replace-docker-hub
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{ element.name }}"
+                    image: >-
+                      {{ regex_replace_all(
+                        '^docker.io/(.*)$',
+                        '{{element.image}}',
+                        'registry.mycompany.io/dockerhub-mirror/$1'
+                      ) }}
+          - list: "request.object.spec.initContainers"
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: >-
+                      {{ regex_replace_all(
+                        '^docker.io/(.*)$',
+                        '{{element.image}}',
+                        'registry.mycompany.io/dockerhub-mirror/$1'
+                      ) }}
+```
+
+## Layer 3 — Trivy operator for runtime scanning
+```yaml
+apiVersion: aquasecurity.github.io/v1alpha1
+kind: ClusterVulnerabilityReport
+# Trivy Operator automatically generates these per-workload
+# Install with:
+# helm install trivy-operator aqua/trivy-operator \
+#   --namespace trivy-system \
+#   --set="trivy.ignoreUnfixed=true" \
+#   --set="operator.vulnerabilityScanner.scannerReportTTL=24h"
+```
+
+## Layer 4 — CI pipeline gate (before images reach cluster)
+```yaml
+# GitHub Actions workflow step
+- name: Scan image with Trivy
+  uses: aquasecurity/trivy-action@master
+  with:
+    image-ref: 'registry.mycompany.io/myapp:${{ github.sha }}'
+    format: 'sarif'
+    exit-code: '1'          # fail pipeline on CRITICAL CVEs
+    severity: 'CRITICAL,HIGH'
+    ignore-unfixed: true
+
+- name: Verify image signature (cosign)
+  run: |
+    cosign verify \
+      --certificate-identity=https://github.com/${{ github.repository }}/.github/workflows/build.yml@refs/heads/main \
+      --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+      registry.mycompany.io/myapp:${{ github.sha }}
+```
+
+## Layer 5 — Enforce signed images only (Gatekeeper + cosign)
+```yaml
+# ConstraintTemplate Rego for signature verification
+rego: |
+  package k8srequiredsignedimages
+
+  violation[{"msg": msg}] {
+    container := input.review.object.spec.containers[_]
+    not image_is_signed(container.image)
+    msg := sprintf(
+      "Container image %q is not signed. All images must be signed with cosign.",
+      [container.image]
+    )
+  }
+
+  image_is_signed(image) {
+    # Call external data provider (Ratify/Cosign verifier) 
+    # via Gatekeeper ExternalData feature
+    response := external_data({"provider": "cosign-verifier", "keys": [image]})
+    response.responses[_][0] == image
+    response.responses[_][1] == "valid"
+  }
+```
+
+## End-to-end policy enforcement flow
+```
+Developer pushes code
+       ↓
+CI: Build image → Trivy scan → cosign sign → push to registry.mycompany.io
+       ↓
+kubectl apply (or ArgoCD sync)
+       ↓
+Mutating webhook: rewrite docker.io/* → registry.mycompany.io/mirror/*
+       ↓
+Validating webhook (Gatekeeper):
+  ✓ Image from approved registry?
+  ✓ Image has valid cosign signature?
+  ✓ No CRITICAL CVEs in last scan?
+       ↓
+Pod scheduled and running
+       ↓
+Trivy Operator: continuous background scanning → VulnerabilityReports
+       ↓
+Prometheus alert if new CRITICAL CVE found in running image
+```
+
+> **Production lesson:** The image rewrite mutation should be idempotent — if the image is already pointing to your internal registry, do nothing. Naive regex replacements that run on every UPDATE will cause infinite loops on already-correct images.
+
+> **Common mistake:** Only enforcing at the `Deployment` level. Kubernetes creates Pods from many sources: Jobs, CronJobs, standalone Pods, StatefulSets. Your Gatekeeper Constraint must match `Pod` as the final enforcement point because that's what actually runs. Match Deployments too for early feedback, but `Pod` is the security guarantee.
+
+> **Self-assessment:** Can you explain why enforcing on Pod is more secure than enforcing on Deployment? Can you describe the full chain from `git push` to running Pod with all security checks? Can you write the Kyverno image rewrite policy from memory?
+
+> **Follow-up questions:** Q11 (Pod Security Admission), Q13 (Harden API server), Q16 (RBAC design)
+
+---
+
+## 🟠 SECTION 2: etcd Performance & Operations
+
+This section assumes you know: Raft consensus basics, key-value stores, Linux disk I/O concepts, Kubernetes control plane architecture.
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Pod-Level Enforcement**: Gatekeeper policies must target Pod resources as the ultimate source of truth, not just Deployments, to capture all workload generators.
+- **Idempotent Mutation**: Image registry rewrite rules must be idempotent to prevent infinite mutation loops on already-qualified image paths.
+</Callout>
+

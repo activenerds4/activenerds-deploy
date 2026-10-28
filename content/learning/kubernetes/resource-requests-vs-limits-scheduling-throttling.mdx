@@ -1,0 +1,118 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "resource-requests-vs-limits-scheduling-throttling"
+order: 27
+level: "intermediate"
+format: "article"
+title: "Resource Requests vs. Limits: CPU/Memory Scheduling and Throttling Policies"
+description: "Requests tell the scheduler how much to reserve; limits cap actual usage — without requests, pods land on random nodes causing resource contention; without l..."
+question: "What is the operational difference between CPU/memory resource requests and limits, and how does Kubernetes use requests for scheduling while using limits to enforce throttling and OOM eviction?"
+domain: "Troubleshooting"
+tags: ["Resources", "Scheduling"]
+estimatedMinutes: 4
+xpValue: 15
+seoTitle: "Resource Requests vs. Limits: CPU/Memory Sche | K8s Guide"
+metaDescription: "Learn Resource Requests vs. Limits: CPU/Memory Scheduling and Throttling Policies with architecture patterns, practical configurations, and step-by-step implem"
+publishDate: "2026-06-30"
+relatedModules: ["oomkilled-prevention-memory-limits-cgroups"]
+---
+
+## Question
+What is the operational difference between CPU/memory resource requests and limits, and how does Kubernetes use requests for scheduling while using limits to enforce throttling and OOM eviction?
+
+## Quick Answer
+Requests tell the scheduler how much to reserve; limits cap actual usage — without requests, pods land on random nodes causing resource contention; without limits, one pod can consume all node resources and starve neighbors.
+
+
+## Detailed Answer
+```yaml
+containers:
+- name: app
+  image: myapp:v1
+  resources:
+    requests:
+      cpu: "250m"       # 0.25 CPU cores — used for SCHEDULING decisions
+      memory: "256Mi"   # 256 MiB — used for SCHEDULING decisions
+    limits:
+      cpu: "1000m"      # 1 CPU core — THROTTLED (not killed) if exceeded
+      memory: "512Mi"   # 512 MiB — container KILLED (OOMKilled) if exceeded
+
+# CPU units:
+# 1000m = 1 core = 1 vCPU
+# 500m  = 0.5 cores
+# 250m  = 0.25 cores (quarter core)
+# 100m  = 0.1 cores
+
+# Memory units:
+# Ki = kibibytes (1024 bytes)
+# Mi = mebibytes (1024 Ki)
+# Gi = gibibytes (1024 Mi)
+# 256Mi ≈ 268MB
+```
+
+## What Happens Without Requests/Limits
+```bash
+# Without requests:
+# - Scheduler has no idea how much CPU/memory the pod needs
+# - Pod may be scheduled on an already-busy node
+# - Pod gets BestEffort QoS — evicted FIRST under memory pressure
+# - No guarantee of any CPU/memory allocation
+
+# Without limits:
+# - A memory leak can consume all node memory
+# - Other pods on same node get OOMKilled
+# - A CPU-intensive pod can starve all neighbors
+# - Node may become NotReady (kubelet itself starved)
+
+# Check pods without resource limits (find the dangerous ones)
+kubectl get pods -A -o json | jq -r '
+  .items[] |
+  select(.spec.containers[].resources.limits == null) |
+  [.metadata.namespace, .metadata.name] |
+  @tsv'
+```
+
+## Right-Sizing Strategy
+```bash
+# Step 1: Deploy without limits, measure actual usage for 1 week
+kubectl top pods -n production --containers --sort-by=cpu
+
+# Step 2: Use VPA in recommendation mode
+kubectl describe vpa my-app-vpa | grep -A10 "Recommendation"
+
+# Step 3: Set requests at P50 usage, limits at P99 usage
+# requests = typical usage (scheduler uses this)
+# limits   = peak usage (safety cap)
+
+# Rule of thumb starting points:
+# Web/API service:  cpu request=250m, limit=1000m | memory request=256Mi, limit=512Mi
+# Java/JVM app:     cpu request=500m, limit=2000m | memory request=512Mi, limit=2Gi
+# Node.js:          cpu request=100m, limit=500m  | memory request=128Mi, limit=256Mi
+# Python Flask:     cpu request=100m, limit=500m  | memory request=128Mi, limit=256Mi
+```
+
+## The CPU Limits Controversy
+```yaml
+# CPU throttling is often WORSE than no CPU limit
+# If your app is CPU-throttled, it appears slow/unresponsive
+# even when the node has idle CPU available
+
+# Many production teams omit CPU limits:
+resources:
+  requests:
+    cpu: "250m"         # Keep request — needed for scheduling
+    memory: "256Mi"
+  limits:
+    # No CPU limit — allow bursting on idle nodes
+    memory: "512Mi"     # Always keep memory limit — OOMKill is better than node death
+
+# Monitor with: rate(container_cpu_throttled_seconds_total[5m])
+# If throttling > 25% of time → increase limit or remove it
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+Always set memory limits (OOMKill is recoverable); CPU limits are optional and sometimes harmful — but always set both requests so the scheduler can make intelligent placement decisions.
+</Callout>
+
+---

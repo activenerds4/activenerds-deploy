@@ -1,0 +1,47 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "temperature-top-k-top-p-sampling-strategies"
+order: 15
+level: "beginner"
+format: "article"
+title: "Temperature, Top-K, and Top-P: Tuning LLM Sampling for Deterministic vs. Creative Output"
+description: "Temperature rescales logits before softmax, Top-K keeps only the K highest-probability tokens, and Top-P keeps the smallest set whose probability mass exceeds P."
+question: "How do Temperature, Top-K, and Top-P (Nucleus) sampling mechanically alter the logit probability distribution before token generation, and what combination would you deploy to guarantee deterministic JSON output versus creative text generation?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "Sampling", "Temperature", "TopP", "TopK"]
+estimatedMinutes: 5
+xpValue: 10
+seoTitle: "Temperature, Top-K, Top-P Sampling Explained | LLM Guide"
+metaDescription: "Learn how temperature, Top-K, and Top-P sampling reshape LLM output probabilities, and which settings produce deterministic JSON versus creative text."
+publishDate: "2026-08-11"
+relatedModules: ["logit-bias-sampling-degradation", "scaled-dot-product-attention-sqrt-dk-scaling"]
+---
+
+## Question
+How do Temperature, Top-K, and Top-P (Nucleus) sampling mechanically alter the logit probability distribution before token generation, and what combination would you deploy to guarantee deterministic JSON output versus creative text generation?
+
+
+## Quick Answer
+**Temperature** rescales the logits before softmax to flatten or sharpen the probability distribution, **Top-K** restricts sampling to the K highest-probability tokens, and **Top-P (nucleus)** restricts sampling to the smallest set of tokens whose cumulative probability exceeds P — combining them controls how random or how deterministic generation is.
+
+## Detailed Answer
+All three mechanisms act on the token probability distribution produced by the final softmax layer, but at different stages.
+
+**Temperature** divides each logit by a value $T$ before softmax is applied: $\text{Softmax}(x_i / T)$. A $T < 1$ sharpens the distribution, making already-likely tokens even more dominant; a $T > 1$ flattens it, giving lower-probability tokens more of a chance. $T \to 0$ pushes the distribution toward a hard argmax; $T = 1$ leaves the original distribution untouched.
+
+**Top-K** operates *after* the probabilities are computed: it zeroes out every token outside the K highest-probability candidates, then renormalizes what remains before sampling. This puts a hard ceiling on how many candidates are ever considered, regardless of how the probability mass happens to be distributed among them.
+
+**Top-P (nucleus sampling)** is adaptive rather than fixed-count: it sorts tokens by probability and keeps adding them to the candidate pool until their cumulative probability crosses threshold $P$, then samples only from that pool. Unlike Top-K, the number of candidates varies turn to turn — a very confident next-token prediction might need only 2 tokens to reach $P = 0.9$, while an uncertain one might need 50.
+
+| Setting                         | Effect                          | Use Case                        |
+|----------------------------------|----------------------------------|----------------------------------|
+| Temperature ≈ 0, Top-K = 1       | Greedy, fully deterministic     | Structured JSON, tool calls, code |
+| Temperature ≈ 0.7, Top-P ≈ 0.9   | Moderate variety, mostly coherent | General chat, Q&A                |
+| Temperature ≈ 1.0–1.2, Top-P ≈ 0.95 | High variety, more surprising  | Creative writing, brainstorming  |
+
+To guarantee deterministic output for something like strict JSON generation, set temperature near 0 (or use greedy decoding directly) and Top-K to 1 — this collapses the distribution to always pick the single highest-probability token. For creative generation, a moderate-to-high temperature combined with Top-P sampling gives controlled randomness without letting genuinely low-probability, incoherent tokens slip through.
+
+<Callout variant="tip" title="Key Takeaways">
+Temperature reshapes the probability curve, while Top-K and Top-P decide how much of that curve is even eligible to be sampled from — deterministic output needs both narrowed to their tightest settings.
+</Callout>
+

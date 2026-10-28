@@ -19,7 +19,7 @@ const featuredResources: ResourceCard[] = [
     type: "Cheat Sheet",
     tag: "Kubernetes",
     icon: FileText,
-    href: "/resources/cheatsheets",
+    href: "/learning/cheat-sheets",
   },
   {
     slug: "zero-trust-container-build-checklist",

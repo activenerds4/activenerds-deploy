@@ -1,0 +1,42 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "deterministic-vs-nondeterministic-agent-boundaries"
+order: 9
+level: "beginner"
+format: "article"
+title: "Deterministic vs. Non-Deterministic Boundaries in Agentic Architecture"
+description: "Control flow, validation, execution, and state transitions should stay in a hardcoded state machine; only open-ended reasoning, planning, and language generation should be delegated to the LLM, with a schema or state-machine gate enforcing the line."
+question: "In an agentic architecture, which components must remain strictly deterministic (hardcoded state machine), and which should be delegated to non-deterministic LLM reasoning? How do you enforce this boundary?"
+domain: "Deterministic Execution"
+tags: ["Deterministic Execution", "State Machines", "ControlFlow", "DeterministicVsNonDeterministic", "StateMachines"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Deterministic vs Non-Deterministic Agents | AI Agents Guide"
+metaDescription: "Learn Deterministic vs. Non-Deterministic Boundaries in Agentic Architecture with architecture patterns, practical configurations, and implementation steps"
+publishDate: "2026-06-07"
+relatedModules: ["pre-post-execution-guardrails-tool-calls", "native-vs-prompt-based-tool-calling"]
+---
+
+## Question
+In an agentic architecture, which components must remain strictly deterministic (hardcoded state machine), and which should be delegated to non-deterministic LLM reasoning? How do you enforce this boundary?
+
+
+## Quick Answer
+Anything that must be reliable and auditable — control flow, tool execution, validation, retries, and state transitions — belongs in a hardcoded state machine; only genuinely open-ended work, like reasoning about what to do next or drafting language, should be delegated to the LLM, and the boundary is enforced by never letting model output directly trigger a side effect without passing through deterministic code first.
+
+## Detailed Answer
+An agent isn't one big non-deterministic blob — it's a deterministic **execution engine** that occasionally consults a non-deterministic **reasoning component**. The engine owns things like: which state the agent is currently in, which tool gets invoked once a call is validated, how retries and timeouts are handled, and what the next legal state transition is. None of that should ever be left to the model's discretion, because the same input could otherwise produce a different execution path on every run — which makes agents impossible to test, debug, or reason about in production.
+
+The LLM's job is narrower than it feels: decide *what* to do next (which tool, with what arguments, or whether the task is complete) and *how* to phrase things in natural language. It should never be trusted to directly execute a database write, a shell command, or a file deletion — it proposes an action, and the deterministic layer decides whether that action is even legal in the current state before running it. This is typically enforced with an explicit state machine (or state graph) where each state has a fixed set of allowed transitions, and the LLM's output is treated as a *request* to transition, not a command that's obeyed unconditionally.
+
+| Layer | Owns | Determinism |
+|-------|------|-------------|
+| State machine / orchestrator | Valid transitions, retries, timeouts, execution order | Deterministic |
+| Validation & guardrails | Schema checks, safety bounds, permission checks | Deterministic |
+| LLM reasoning | Choosing next action, drafting arguments, summarizing | Non-deterministic |
+| Tool execution | Running the actual side effect | Deterministic |
+
+<Callout variant="tip" title="Key Takeaways">
+Treat every LLM output as a *proposal* that a deterministic gate must approve — never as a command with direct execution rights.
+</Callout>
+

@@ -1,0 +1,392 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "bluegreen-and-canary-deployments-with"
+order: 27
+level: "advanced"
+format: "article"
+title: "Blue/Green and Canary Deployments with Argo Rollouts: Architecture & Implementation"
+description: "In-depth architectural breakdown and operational implementation for Blue/Green and Canary Deployments with Argo Rollouts: Architecture & Implementation."
+question: "Your e-commerce platform releases features weekly. A bad release last quarter caused 30 minutes of downtime and lost $200K in revenue. Leadership now requires that all releases be validated against 5% of live traffic before full rollout, with automatic rollback if error rates exceed 1%. How do you implement this?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Deployments", "Argo", "Canary", "Blue/Green", "Progressive Delivery"]
+estimatedMinutes: 27
+xpValue: 20
+seoTitle: "Blue/Green and Canary Deployments with Argo R | K8s Guide"
+metaDescription: "Learn Blue/Green and Canary Deployments with Argo Rollouts: Architecture & Implementation with architecture patterns, practical configurations, and step-by-ste"
+publishDate: "2026-06-19"
+relatedModules: ["cluster-resource-exhaustion-monitoring-and", "istio-traffic-management-and-circuit"]
+---
+
+**Prerequisite knowledge:** Deployments, Services, Ingress, readiness probes (Q47)
+
+---
+
+## Question
+Your e-commerce platform releases features weekly. A bad release last quarter caused 30 minutes of downtime and lost $200K in revenue. Leadership now requires that all releases be validated against 5% of live traffic before full rollout, with automatic rollback if error rates exceed 1%. How do you implement this?
+
+
+## Quick Answer
+Use **Argo Rollouts** with a canary strategy integrated with your ingress controller. Define analysis templates that query Prometheus for error rates, and configure automatic rollback thresholds. Traffic is shifted gradually (5% → 25% → 50% → 100%) with automated health analysis at each step.
+
+---
+
+
+## Detailed Answer
+## ️ Architecture Overview
+```
+                    ┌─────────────────────────────────┐
+                    │         Ingress Controller       │
+                    │    (nginx / Istio / Traefik)     │
+                    └──────────┬──────────────────┬────┘
+                               │                  │
+                         95% weight          5% weight
+                               │                  │
+                    ┌──────────▼──────┐  ┌────────▼────────┐
+                    │  Stable Service │  │  Canary Service  │
+                    │  (blue/current) │  │  (green/new)     │
+                    └──────────┬──────┘  └────────┬─────────┘
+                               │                  │
+                    ┌──────────▼──────┐  ┌────────▼─────────┐
+                    │  Stable Pods    │  │  Canary Pods      │
+                    │  (v1.0 - 9pods) │  │  (v2.0 - 1pod)   │
+                    └─────────────────┘  └──────────────────┘
+                               │                  │
+                    ┌──────────▼──────────────────▼─────────┐
+                    │           Prometheus                    │
+                    │   (error rate, latency, throughput)    │
+                    └───────────────────────────────────────-┘
+                               │
+                    ┌──────────▼──────────────────────────────┐
+                    │        Argo Rollouts Controller          │
+                    │  - Queries Prometheus every 60s          │
+                    │  - Promotes if error_rate < 1%           │
+                    │  - Aborts + rolls back if error_rate > 1%│
+                    └─────────────────────────────────────────┘
+```
+
+## ️ Step-by-Step Implementation
+*Step 1: Install Argo Rollouts*
+```bash
+# Install Argo Rollouts controller
+kubectl create namespace argo-rollouts
+kubectl apply -n argo-rollouts \
+  -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+
+# Install kubectl plugin for visibility
+curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+chmod +x kubectl-argo-rollouts-linux-amd64
+mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+# Verify
+kubectl argo rollouts version
+```
+
+*Step 2: Define the Rollout Resource*
+```yaml
+# rollout-ecommerce.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: ecommerce-api
+  namespace: production
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: ecommerce-api
+  template:
+    metadata:
+      labels:
+        app: ecommerce-api
+    spec:
+      containers:
+        - name: ecommerce-api
+          image: registry.mycompany.com/ecommerce-api:v2.0.0
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+  strategy:
+    canary:
+      # Reference to stable and canary services
+      stableService: ecommerce-api-stable
+      canaryService: ecommerce-api-canary
+
+      # Traffic management via NGINX ingress
+      trafficRouting:
+        nginx:
+          stableIngress: ecommerce-api-ingress
+
+      # Automated analysis at each step
+      analysis:
+        templates:
+          - templateName: error-rate-analysis
+        startingStep: 2    # Start analysis from step index 2
+        args:
+          - name: service-name
+            value: ecommerce-api-canary
+
+      # Canary progression steps
+      steps:
+        - setWeight: 5          # Step 0: Send 5% traffic to canary
+        - pause: {duration: 2m} # Step 1: Wait 2 minutes, observe manually
+        - setWeight: 10         # Step 2: Increase to 10%
+        - pause: {duration: 5m} # Step 3: Run analysis for 5 min
+        - setWeight: 25         # Step 4: Increase to 25%
+        - pause: {duration: 5m} # Step 5: Run analysis for 5 min
+        - setWeight: 50         # Step 6: Increase to 50%
+        - pause: {duration: 10m}# Step 7: Extended analysis at half traffic
+        - setWeight: 100        # Step 8: Full promotion
+```
+
+*Step 3: Create Stable and Canary Services*
+```yaml
+# services.yaml
+---
+# Stable service (points to current/blue version)
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-api-stable
+  namespace: production
+spec:
+  selector:
+    app: ecommerce-api
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# Canary service (points to new/green version)
+# Argo Rollouts manages pod selectors automatically
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-api-canary
+  namespace: production
+spec:
+  selector:
+    app: ecommerce-api
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+*Step 4: Define the Ingress*
+```yaml
+# ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-api-ingress
+  namespace: production
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - host: api.mycompany.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ecommerce-api-stable   # Argo manages canary split automatically
+                port:
+                  number: 80
+```
+
+*Step 5: Define the AnalysisTemplate (the heart of automated rollback)*
+```yaml
+# analysis-template.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: error-rate-analysis
+  namespace: production
+spec:
+  args:
+    - name: service-name
+
+  metrics:
+    # Metric 1: HTTP Error Rate (primary rollback trigger)
+    - name: http-error-rate
+      interval: 60s           # Query every 60 seconds
+      count: 5                # Run 5 times total (5 minutes of analysis)
+      failureLimit: 1         # Allow 1 failure before marking as Failed
+
+      # Success condition: error rate must be below 1%
+      successCondition: result[0] < 0.01
+      failureCondition: result[0] >= 0.01
+
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{
+              service="{{args.service-name}}",
+              status=~"5.."
+            }[5m]))
+            /
+            sum(rate(http_requests_total{
+              service="{{args.service-name}}"
+            }[5m]))
+
+    # Metric 2: P99 Latency (secondary health signal)
+    - name: p99-latency
+      interval: 60s
+      count: 5
+      failureLimit: 2         # More tolerant for latency spikes
+
+      # P99 must be under 500ms
+      successCondition: result[0] < 0.5
+      failureCondition: result[0] >= 1.0   # Hard fail at 1 second
+
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_seconds_bucket{
+                service="{{args.service-name}}"
+              }[5m])) by (le)
+            )
+
+    # Metric 3: Success Rate via Datadog (optional - multi-provider)
+    - name: success-rate-datadog
+      interval: 60s
+      count: 5
+      successCondition: result >= 99.0
+      provider:
+        datadog:
+          apiVersion: v1
+          interval: 5m
+          query: |
+            avg:trace.http.request.hits.by_http_status{
+              service:ecommerce-api,
+              http.status_code:2*
+            }.as_rate()
+```
+
+*Step 6: Triggering and Monitoring a Release*
+```bash
+# Trigger a new release by updating the image
+kubectl argo rollouts set image ecommerce-api \
+  ecommerce-api=registry.mycompany.com/ecommerce-api:v2.1.0 \
+  -n production
+
+# Watch the rollout progress in real-time
+kubectl argo rollouts get rollout ecommerce-api \
+  -n production --watch
+
+# Expected output:
+# Name:            ecommerce-api
+# Namespace:       production
+# Status:          ॥ Paused
+# Strategy:        Canary
+#   Step:          1/8
+#   SetWeight:     5
+#   ActualWeight:  5
+# Images:          registry.mycompany.com/ecommerce-api:v2.0.0 (stable)
+#                  registry.mycompany.com/ecommerce-api:v2.1.0 (canary)
+# Replicas:
+#   Desired:       10
+#   Current:       11
+#   Updated:       1
+#   Ready:         11
+#   Available:     11
+
+# Manually promote (skip pause) if you're confident
+kubectl argo rollouts promote ecommerce-api -n production
+
+# Manually abort and roll back
+kubectl argo rollouts abort ecommerce-api -n production
+
+# Undo to previous version
+kubectl argo rollouts undo ecommerce-api -n production
+```
+
+*Step 7: Blue/Green Strategy (Alternative to Canary)*
+```yaml
+# For Blue/Green: swap entire traffic at once, but with preview testing
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: ecommerce-api-bluegreen
+spec:
+  replicas: 10
+  strategy:
+    blueGreen:
+      activeService: ecommerce-api-active       # Production traffic
+      previewService: ecommerce-api-preview     # Internal test traffic only
+
+      # Automatically promote after preview passes analysis
+      autoPromotionEnabled: false               # Require manual promotion
+
+      # Run analysis on the preview (green) environment
+      prePromotionAnalysis:
+        templates:
+          - templateName: error-rate-analysis
+        args:
+          - name: service-name
+            value: ecommerce-api-preview
+
+      # Keep old (blue) version alive for 5 minutes post-promotion
+      # Allows instant rollback if something slips through
+      scaleDownDelaySeconds: 300
+
+      postPromotionAnalysis:
+        templates:
+          - templateName: error-rate-analysis
+        args:
+          - name: service-name
+            value: ecommerce-api-active
+```
+
+---
+
+## ️ Trade-offs & Alternatives
+
+| Approach | Traffic Validation | Rollback Speed | Complexity | Cost |
+|---|---|---|---|---|
+| **Canary (Argo)** | Real traffic, gradual | Instant (weight reset) | Medium | Low (1 extra pod) |
+| **Blue/Green (Argo)** | Preview only | Instant (service swap) | Medium | High (2x replicas) |
+| **Feature Flags** | Per-user targeting | Instant (flag flip) | Low | Low |
+| **Flagger + Linkerd** | Real traffic + mTLS | Instant | High | Medium |
+| **Manual canary** | Real traffic | Slow (manual revert) | Low | Low |
+
+---
+
+## ️ Common Mistakes & Misconceptions
+- **"Argo Rollouts replaces Deployments."** — It is a separate CRD. You migrate from Deployment to Rollout, but they coexist in the same cluster.
+- **"My canary gets exactly 5% of traffic."** — With weight-based routing, traffic distribution is approximate at low replica counts. With 10 pods and 5% weight, you may have 0 or 1 canary pod, not a precise 5%.
+- **"Analysis failure always triggers rollback."** — Only if `failureLimit` is exceeded. Design your thresholds carefully — too strict causes false rollbacks during normal traffic spikes.
+- **"Blue/Green means zero downtime by default."** — It means zero application downtime. DNS propagation and connection draining during the service swap still need to be managed.
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+Argo Rollouts transforms deployments from a binary **all-or-nothing** event into a **controlled, data-driven progression**. The `AnalysisTemplate` is the critical component — it bridges your observability platform (Prometheus, Datadog) with your deployment controller, enabling truly automated progressive delivery. The combination of automated rollback and gradual traffic shifting gives you both safety and speed.
+</Callout>
+
+---
+
+## Self-Assessment Checklist
+- [ ] Can you explain the difference between `stableService` and `canaryService` in Argo Rollouts?
+- [ ] Can you write an AnalysisTemplate that queries Prometheus for error rate?
+- [ ] Can you explain why exact traffic percentages are approximate with pod-count-based weighting?
+- [ ] Can you describe when you'd choose Blue/Green over Canary?
+
+
+---

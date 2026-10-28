@@ -1,0 +1,48 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "fp8-e4m3-vs-e5m2-quantization-formats"
+order: 177
+level: "advanced"
+format: "article"
+title: "FP8 E4M3 vs. E5M2: Choosing the Right Format for Activations and Gradients"
+description: "E4M3 trades exponent range for mantissa precision, making it well suited to the bounded, precision-sensitive values in forward-pass weights and activations, while E5M2's wider exponent range better absorbs the large dynamic swings in gradients."
+question: "Compare the FP8 format variants: `E4M3` (1 sign bit, 4 exponent bits, 3 mantissa bits) vs. `E5M2`. Why is `E4M3` preferred for neural network forward-pass activations/weights while `E5M2` is reserved for gradients?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "FP8", "Quantization", "E4M3", "E5M2"]
+estimatedMinutes: 7
+xpValue: 20
+seoTitle: "FP8 E4M3 vs. E5M2: Weights vs Gradients | LLM Guide"
+metaDescription: "Learn the difference between FP8 E4M3 and E5M2 formats with architecture patterns, practical configurations, and step-by-step implementation details"
+publishDate: "2026-08-14"
+relatedModules: ["kv-cache-memory-bandwidth-bound-decoding", "flashattention-io-aware-tiling-memory-efficiency"]
+---
+
+## Question
+Compare the FP8 format variants: `E4M3` (1 sign bit, 4 exponent bits, 3 mantissa bits) vs. `E5M2`. Why is `E4M3` preferred for neural network forward-pass activations/weights while `E5M2` is reserved for gradients?
+
+
+## Quick Answer
+**E4M3** (4 exponent bits, 3 mantissa bits) offers finer precision within a smaller dynamic range, making it the better fit for forward-pass **weights and activations**, whose values are relatively bounded; **E5M2** (5 exponent bits, 2 mantissa bits) trades precision for a wider dynamic range, which is needed to represent the much larger value swings seen in **gradients** during backpropagation.
+
+## Detailed Answer
+Both FP8 formats use 1 sign bit, but split the remaining 7 bits differently between exponent and mantissa. The **exponent** bits determine dynamic range (how large or small a number the format can represent), and the **mantissa** bits determine precision (how finely values are distinguished within that range). This is a direct trade-off — with only 7 bits total to split, more exponent bits mean fewer mantissa bits, and vice versa.
+
+**E4M3** allocates more bits to the mantissa (3 vs. 2), giving it roughly double the number of representable values at any given exponent — better precision — at the cost of a smaller maximum representable magnitude (roughly ±448 for the standard E4M3 variant) and narrower dynamic range. **Weights and activations** in a well-trained, well-normalized forward pass tend to sit in a comparatively narrow, predictable range (especially with careful scaling), so the extra mantissa precision of E4M3 improves numerical fidelity where it matters most, without frequently needing values E4M3 can't represent.
+
+**E5M2** allocates more bits to the exponent, extending the representable range dramatically (up to roughly ±57344) but at the cost of coarser precision (only 2 mantissa bits). **Gradients** during backpropagation are notorious for having a much wider dynamic range than activations — values can swing over many orders of magnitude across different layers and training steps, and gradient spikes or vanishing gradients are common. A narrower-range format like E4M3 would either overflow (clip large gradients to infinity) or underflow (round small gradients to zero) far more often than E5M2, silently corrupting the training signal.
+
+| Format | Exponent bits | Mantissa bits | Optimized for | Typical use |
+|--------|---------------|----------------|----------------|--------------|
+| E4M3   | 4             | 3              | Precision within bounded range | Weights, activations (forward pass) |
+| E5M2   | 5             | 2              | Wide dynamic range | Gradients (backward pass) |
+
+## Production Implications
+- Mixed FP8 training pipelines typically use **E4M3 for the forward pass** and **E5M2 for gradient tensors specifically**, switching formats between the forward and backward pass rather than using one format throughout.
+- Per-tensor or per-channel **scaling factors** are still needed alongside FP8 to keep values within each format's representable range — FP8 alone doesn't eliminate the need for dynamic range management, it just narrows the problem.
+- Overflow/underflow monitoring (e.g., tracking the fraction of values clipped to the format's max/min, or rounded to zero) during FP8 training catches silent precision loss before it shows up as unexplained loss spikes or divergence.
+- For inference-only quantization (no gradients involved), E4M3 is almost always the right choice since there's no gradient dynamic-range problem to solve.
+
+<Callout variant="tip" title="Key Takeaways">
+E4M3 and E5M2 aren't interchangeable "FP8" — the bit split is a deliberate range-vs-precision trade-off matched to where each format is used in the training pipeline.
+</Callout>
+

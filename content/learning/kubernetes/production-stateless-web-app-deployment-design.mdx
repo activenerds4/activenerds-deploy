@@ -1,0 +1,206 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "production-stateless-web-app-deployment-design"
+order: 3
+level: "intermediate"
+format: "article"
+title: "Production Deployment Design: Stateless Scalable Web Applications with HPA"
+description: "Deployment (3 replicas minimum) + ClusterIP Service + Ingress for external traffic + HPA for autoscaling + PodDisruptionBudget for availability — with resour..."
+question: "How do you architect a production-ready stateless web application deployment in Kubernetes combining Deployments, HPA, PodDisruptionBudgets, and anti-affinity rules for high availability?"
+domain: "Workloads & Scheduling"
+tags: ["Deployments", "Services", "HPA", "Design"]
+estimatedMinutes: 8
+xpValue: 15
+seoTitle: "Production Deployment Design: Stateless Scala | K8s Guide"
+metaDescription: "Learn Production Deployment Design: Stateless Scalable Web Applications with HPA with architecture patterns, practical configurations, and step-by-step impleme"
+publishDate: "2026-05-26"
+relatedModules: ["sidecar-ambassador-adapter-pod-patterns"]
+---
+
+## Question
+How do you architect a production-ready stateless web application deployment in Kubernetes combining Deployments, HPA, PodDisruptionBudgets, and anti-affinity rules for high availability?
+
+## Quick Answer
+Deployment (3 replicas minimum) + ClusterIP Service + Ingress for external traffic + HPA for autoscaling + PodDisruptionBudget for availability — with resource requests, readiness probes, and resource limits on everything.
+
+
+## Detailed Answer
+## Step 1 — Namespace and baseline isolation
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: web-app
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+```
+
+## Step 2 — Deployment with production best practices
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  namespace: web-app
+spec:
+  replicas: 3                         # Minimum for HA
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: web-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0               # Zero-downtime updates
+  template:
+    metadata:
+      labels:
+        app: web-app
+        version: v1.2.3
+    spec:
+      terminationGracePeriodSeconds: 60   # Allow in-flight requests to complete
+      topologySpreadConstraints:          # Spread across AZs
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: web-app
+      containers:
+      - name: web-app
+        image: myrepo/web-app:v1.2.3
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            memory: "512Mi"           # CPU limit intentionally omitted
+        startupProbe:                 # For slow-starting apps
+          httpGet:
+            path: /healthz
+            port: 8080
+          failureThreshold: 30
+          periodSeconds: 10
+        readinessProbe:               # Gates traffic and rolling updates
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:                # Restarts deadlocked containers
+          httpGet:
+            path: /healthz
+            port: 8080
+          periodSeconds: 15
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 5"]  # Drain before SIGTERM
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop: ["ALL"]
+```
+
+## Step 3 — Service and Ingress
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app-svc
+  namespace: web-app
+spec:
+  selector:
+    app: web-app
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-app-ingress
+  namespace: web-app
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - webapp.example.com
+    secretName: webapp-tls
+  rules:
+  - host: webapp.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-app-svc
+            port:
+              number: 80
+```
+
+## Step 4 — Autoscaling
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-app-hpa
+  namespace: web-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web-app
+  minReplicas: 3
+  maxReplicas: 50
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300   # Wait 5 min before scaling down
+```
+
+## Step 5 — Availability protection
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web-app-pdb
+  namespace: web-app
+spec:
+  minAvailable: 2                     # Always keep 2 pods running during disruptions
+  selector:
+    matchLabels:
+      app: web-app
+```
+
+## Common Mistakes to Avoid
+- Single replica in production (no HA)
+- No readiness probe (routes traffic to unready pods)
+- No PDB (node drain kills all pods)
+- No topology spread (all pods land on same AZ)
+- Memory limit same as request (no burst headroom)
+
+
+<Callout variant="tip" title="Key Takeaways">
+A production-ready stateless app deployment requires at minimum: Deployment + Service + Ingress + HPA + PDB + probes + resource limits + topology spread — not just a Deployment.
+</Callout>
+
+---

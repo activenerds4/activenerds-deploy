@@ -1,0 +1,47 @@
+---
+pathSlug: "docker"
+moduleSlug: "docker-environment-variables-config-injection"
+order: 30
+level: "beginner"
+format: "article"
+title: "Environment Variables in Docker: Configuring One Image for Many Environments"
+description: "Environment variables are injected at container start, not build time, so the same image runs in staging and production with different config and no rebuild."
+question: "Your application needs different database URLs in staging versus production, but you want to use the exact same image in both. Explain the mechanism that makes this possible without rebuilding the image, and why baking config into the image is considered an anti-pattern."
+domain: "Operations"
+tags: ["Operations", "Environment Variables", "Environment", "Config"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Environment Variables in Docker: Configuring | Docker Guide"
+metaDescription: "Learn Environment Variables in Docker: Configuring One Image for Many Environments with architecture patterns, practical configurations, and step-by-step"
+publishDate: "2026-08-04"
+relatedModules: ["docker-logging-model-stdout-stderr"]
+---
+
+## Question
+Your application needs different database URLs in staging versus production, but you want to use the exact same image in both. Explain the mechanism that makes this possible without rebuilding the image, and why baking config into the image is considered an anti-pattern.
+
+
+## Quick Answer
+Environment variables (`-e`, `--env-file`, or an orchestrator's config/secret mechanism) are injected into a container **at start time**, not baked in at build time — so the exact same image can run with a staging database URL in one environment and a production one in another.
+
+## Detailed Answer
+The key distinction is *when* configuration gets attached to the container. An image built with `docker build` is a fixed, immutable set of layers — whatever gets written into it during the build (via `ENV` in the Dockerfile, or values `COPY`'d in from a config file) is permanent and identical in every container started from that image, everywhere. Environment variables passed at `docker run` time work completely differently: they're attached to the **container process's environment**, at the moment it starts, and never touch the image at all.
+
+```bash
+# same image, two different environments
+docker run -e DATABASE_URL=postgres://staging-db:5432/app myapp:1.4.2
+docker run -e DATABASE_URL=postgres://prod-db:5432/app myapp:1.4.2
+```
+
+Because the image itself never changes between these two commands, this is the mechanism that makes "build once, deploy everywhere" possible: staging and production run the identical, already-tested artifact, and only the runtime environment differs. Orchestrators build on the same idea — Kubernetes `ConfigMap`s and `Secret`s, Docker Compose's `environment:`/`env_file:`, and ECS task definitions all ultimately inject environment variables (or mounted files) into the container at start time rather than requiring a rebuild.
+
+Baking configuration into the image instead — hardcoding a database URL with `ENV DATABASE_URL=...` in the Dockerfile, or `COPY`-ing an environment-specific config file in — is considered an anti-pattern for a few concrete reasons:
+
+- **It breaks the single-artifact guarantee.** You end up needing a separate image per environment, which means you're no longer testing in staging the exact thing that ships to production.
+- **It couples the image to a deploy target.** The same image can't be reused for a new environment (a second region, a customer's private deployment) without a rebuild.
+- **It risks leaking secrets.** Anything baked into an image layer is recoverable by anyone who can pull that image or inspect its layer history — even if a later layer deletes the file, the value can still exist in an earlier layer.
+
+<Callout variant="tip" title="Key Takeaways">
+Config that varies by environment belongs in the container's runtime environment, injected at start time — not in the image — so one built artifact can move safely through every environment unchanged.
+</Callout>
+

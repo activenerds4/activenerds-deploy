@@ -1,0 +1,43 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "lora-low-rank-decomposition-fine-tuning"
+order: 123
+level: "intermediate"
+format: "article"
+title: "LoRA Fine-Tuning: How Low-Rank Decomposition Cuts Trainable Parameters"
+description: "LoRA freezes the base weight matrix and trains a low-rank pair of matrices approximating the update, cutting trainable parameters while leaving the original weights untouched."
+question: "Mechanically, how does LoRA reduce trainable parameters by decomposing weight updates into low-rank matrices, and why does this approach preserve the base model's original capabilities better than full fine-tuning on a narrow dataset?"
+domain: "Model Training & Fine-Tuning"
+tags: ["Model Training & Fine-Tuning", "LoRA", "PEFT"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "LoRA Fine-Tuning: How Low-Rank Decomposition | LLM Guide"
+metaDescription: "Learn LoRA Fine-Tuning: How Low-Rank Decomposition Cuts Trainable Parameters with architecture patterns, practical configurations, and step-by-step"
+publishDate: "2026-07-24"
+relatedModules: ["qlora-4bit-quantization-paged-optimizers", "lora-rank-selection-overfitting-tradeoffs"]
+---
+
+## Question
+Mechanically, how does LoRA reduce trainable parameters by decomposing weight updates into low-rank matrices, and why does this approach preserve the base model's original capabilities better than full fine-tuning on a narrow dataset?
+
+
+## Quick Answer
+LoRA freezes the original weight matrix entirely and trains a small pair of low-rank matrices whose product approximates the weight update, so only a tiny fraction of parameters are ever touched — and because the base weights never change, the model's original capabilities stay structurally intact.
+
+## Detailed Answer
+Full fine-tuning updates every parameter in a weight matrix `W` (dimensions `d × k`) directly — for a matrix with thousands of rows and columns, that's millions of trainable values per layer, multiplied across every layer being tuned. LoRA replaces that direct update with a **low-rank decomposition**: instead of learning a full `ΔW` of shape `d × k`, it learns two much smaller matrices, `B` (shape `d × r`) and `A` (shape `r × k`), where the rank `r` is deliberately small — typically 8 to 64 — compared to `d` and `k`, which are often in the thousands.
+
+The forward pass becomes:
+
+```
+h = Wx + (B·A)x · scaling
+```
+
+`W` stays frozen throughout training — gradients never touch it. Only `A` and `B` receive gradient updates, and their combined parameter count, `r·(d + k)`, is orders of magnitude smaller than `d·k` for realistic values of `r`. `B` is typically initialized to all zeros (with `A` initialized randomly), so at the start of training `B·A = 0` and the adapted model behaves identically to the unmodified base model — training then gradually grows a small, targeted correction on top of it.
+
+**Why this preserves the base model's capabilities better than full fine-tuning on a narrow dataset:** full fine-tuning lets gradients from a narrow dataset push every parameter in the network, including ones that encode broad, general capabilities that have nothing to do with the fine-tuning task — this is the mechanism behind **catastrophic forgetting**, where a model gets sharper on the new narrow task but measurably worse at things it could previously do well. LoRA constrains every possible update to lie within a low-rank subspace of the full parameter space. That's a much smaller space of functions the model can move into, which acts as a strong implicit regularizer: the adapter can't reshape the model's behavior nearly as freely as full fine-tuning can, so it's far less able to overwrite general capabilities in the process of fitting a narrow dataset. It's also trivially reversible — remove or zero the adapter, and the original base model is recovered exactly, byte-for-byte, since it was never modified.
+
+<Callout variant="tip" title="Key Takeaways">
+LoRA doesn't just save memory — constraining updates to a low-rank subspace is itself a regularizer against catastrophic forgetting, which is why it tends to generalize better than full fine-tuning on small, narrow datasets.
+</Callout>
+

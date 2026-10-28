@@ -1,0 +1,43 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "agent-evals-reproducible-debugging-swebench"
+order: 84
+level: "expert"
+format: "article"
+title: "Evaluating Non-Deterministic Agents: Automated Benchmarks and Reproducible Debugging"
+description: "An automated eval pipeline runs a fixed task suite (like SWE-bench) against sandboxed environments and scores outcomes, not exact transcripts, since two correct runs can legitimately differ step-by-step — reproducible debugging then depends on recording every model call, seed, and tool result so any single run can be replayed exactly."
+question: "How do you build an automated evaluation pipeline for non-deterministic agents (using benchmarks like SWE-bench), and how do you achieve reproducible step-by-step debugging across non-deterministic LLM runs?"
+domain: "Evals & Observability"
+tags: ["Evals & Observability", "Agent Evals", "SWEbench", "AgentEvals", "Observability", "NonDeterministicDebugging"]
+estimatedMinutes: 12
+xpValue: 25
+seoTitle: "Evaluating Non-Deterministic Agents | AI Agents Guide"
+metaDescription: "Learn Evaluating Non-Deterministic Agents: Automated Benchmarks and Reproducible Debugging with observability patterns and implementation details"
+publishDate: "2026-08-21"
+relatedModules: ["opentelemetry-agent-observability-metrics", "circuit-breakers-agent-infinite-loops"]
+---
+
+## Question
+How do you build an automated evaluation pipeline for non-deterministic agents (using benchmarks like SWE-bench), and how do you achieve reproducible step-by-step debugging across non-deterministic LLM runs?
+
+
+## Quick Answer
+An automated eval pipeline runs the agent against a fixed suite of tasks with known correct outcomes (SWE-bench being the standard for code-generation agents), scored by outcome — did the generated patch pass the held-out test suite — not by matching a specific step-by-step trajectory, since two independently correct runs can legitimately take different paths; reproducibility for debugging a *specific* run instead comes from recording every model call, sampling parameters, and tool result so that exact run can be replayed byte-for-byte.
+
+## Detailed Answer
+Evaluating a non-deterministic system forces a distinction most testing frameworks don't need to make: **outcome-based scoring** versus **trajectory matching**. Benchmarks like **SWE-bench** score by outcome — the agent is given a real GitHub issue and a codebase snapshot, produces a patch, and that patch is scored against the repository's actual held-out test suite (does it make the failing tests pass without breaking passing ones). This is the right level to score at precisely *because* the agent is non-deterministic: two runs on the same task can reasonably explore the codebase in different orders, try different intermediate approaches, and still both arrive at a correct patch. Scoring against a fixed "golden trajectory" would penalize equally valid solutions that just took a different path, which isn't the failure mode you actually want to catch.
+
+An eval pipeline built on this needs, at minimum: an isolated, resettable sandbox per task (so runs don't interfere with each other or leave residue affecting later evals), a fixed task suite with an automated pass/fail check (not a human grading each run, which doesn't scale), and enough parallelism to run the full suite in a reasonable window, since agent evals are expensive per-task compared to traditional unit tests.
+
+**Reproducible debugging** is a separate problem from aggregate scoring — when one specific run in the suite fails and you need to understand *why*, non-determinism becomes a liability instead of a feature to score around. The fix is capturing everything needed to replay that exact run: the full sequence of model calls with their exact inputs (including any sampling temperature and random seed used), every tool call's arguments and the exact result returned (not just "the tool succeeded," since external tool results can themselves be a source of non-determinism if not pinned), and the environment snapshot the run started from. With that recorded, a failing run can be replayed deterministically by substituting recorded model outputs and tool results rather than re-invoking a live, potentially-different-this-time model — turning "why did this fail" from re-running a coin flip into inspecting a fixed trace.
+
+## Production Implications
+- Pin sampling temperature and log the seed for eval runs specifically — production runs may want some randomness, but debugging benefits from being able to force determinism when replaying
+- Snapshot tool results at record time for replay, since re-calling a live external API during a debug replay reintroduces the same non-determinism you're trying to eliminate
+- Track pass-rate trends over time per task category, not just an aggregate score — regressions often concentrate in specific task types long before they move the overall number
+- Budget for eval infrastructure cost explicitly — a meaningful benchmark suite run with real sandboxes and real model calls is not cheap at scale, and that cost needs to be planned for, not discovered
+
+<Callout variant="tip" title="Key Takeaways">
+Score aggregate agent performance by outcome, not by matching a specific trajectory — but for debugging one failing run, record everything needed (model calls, seeds, tool results) to replay that exact run deterministically.
+</Callout>
+

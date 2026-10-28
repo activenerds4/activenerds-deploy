@@ -1,0 +1,42 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "rag-context-stuffing-retrieval-quality-tradeoffs"
+order: 144
+level: "intermediate"
+format: "article"
+title: "RAG Context Stuffing: Why More Retrieved Chunks Can Hurt Answer Quality"
+description: "Beyond a point, additional retrieved chunks add irrelevant or contradictory text that dilutes attention and increases the chance the model grounds its answer..."
+question: "Why does naively increasing the number of retrieved chunks fed into the context window not monotonically improve RAG answer quality, and what evaluation methodology (e.g., faithfulness/groundedness scoring) would you use to detect when retrieval is actually hurting generation? *Transformer Internals, FlashAttention, KV Caching, Alignment (DPO/RLHF), Multimodal Architectures, Structured Outputs*"
+domain: "RAG & Data Systems"
+tags: ["RAG & Data Systems", "Evaluation", "RAG", "ContextStuffing"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "RAG Context Stuffing: More Chunks Can Hurt | GenAI Guide"
+metaDescription: "Learn why adding more retrieved chunks to a RAG pipeline doesn't monotonically improve answer quality, and how faithfulness scoring catches retrieval that h"
+publishDate: "2026-07-16"
+relatedModules: ["lost-in-the-middle-long-context-degradation"]
+---
+
+## Question
+Why does naively increasing the number of retrieved chunks fed into the context window not monotonically improve RAG answer quality, and what evaluation methodology (e.g., faithfulness/groundedness scoring) would you use to detect when retrieval is actually hurting generation? *Transformer Internals, FlashAttention, KV Caching, Alignment (DPO/RLHF), Multimodal Architectures, Structured Outputs*
+
+
+## Quick Answer
+Past a certain point, extra retrieved chunks are more likely to be marginally relevant, redundant, or outright contradictory — and the model's attention gets diluted across them, increasing the odds it grounds its answer in the wrong passage instead of the right one.
+
+## Detailed Answer
+A RAG pipeline's retriever ranks chunks by similarity score, but similarity score isn't the same thing as usefulness for the specific question being asked. As you increase `top_k`, the marginal chunks you're adding are, by definition, the ones the retriever was **least confident about** — they're more likely to be tangentially related, from a different section of the source material, or even from a different document entirely that happens to share vocabulary. Feeding these into the context doesn't just waste tokens; it gives the model more opportunities to anchor its answer on the wrong evidence, especially when several chunks discuss a similar-sounding but distinct concept.
+
+There's also a **positional attention effect**: models don't weight all context positions equally, and evidence buried in the middle of a long stuffed context competes for attention against evidence at the start or end — a real chunk relevant to the answer can be functionally invisible if it lands in a weak attention position, even though it's present in the context window.
+
+**Detecting this in practice requires answer-level evaluation, not retrieval-level metrics.** Retrieval recall (did the right chunk get retrieved at all) can look fine while generation quality drops, because the problem isn't whether the right chunk is present — it's whether the model actually used it.
+
+- **Faithfulness / groundedness scoring** — use an LLM-as-judge or NLI-based check to verify each claim in the generated answer is entailed by the retrieved context, not just plausible-sounding.
+- **Ablation sweeps on `top_k`** — run the same eval set at multiple `top_k` values and plot faithfulness against chunk count; the point where faithfulness plateaus or drops is your practical ceiling, and it's often lower than intuition suggests.
+- **Citation-attribution checks** — if your pipeline asks the model to cite which chunk supports each claim, mismatches between the cited chunk and the actual supporting evidence are a direct signal that added context is confusing rather than helping.
+
+<Callout variant="tip" title="Key Takeaways">
+Retrieval recall and generation faithfulness are different metrics — measure both, because a RAG system can retrieve the right chunk and still answer worse once you add too many others around it.
+</Callout>
+
+---

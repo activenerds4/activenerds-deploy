@@ -1,0 +1,39 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "query-key-value-matrices-attention-head"
+order: 48
+level: "beginner"
+format: "article"
+title: "Query, Key, and Value: What Each Matrix Represents in an Attention Head"
+description: "Query asks 'what am I looking for,' Key advertises 'what do I offer,' and their dot product measures alignment between the two, which becomes the relevance score used to weight Value."
+question: "Walk through, at a conceptual level, what the Query, Key, and Value matrices represent in an attention head, and why the dot product between Query and Key is a reasonable way to compute \"relevance\" between tokens."
+domain: "Architecture & Mathematics"
+tags: ["Architecture & Mathematics", "QKV", "AttentionScores"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Query, Key, and Value in Attention Heads | LLM Guide"
+metaDescription: "Learn what Query, Key, and Value matrices conceptually represent in a Transformer attention head, and why their dot product is a reasonable relevance score."
+publishDate: "2026-09-13"
+relatedModules: ["scaled-dot-product-attention-sqrt-dk-scaling", "self-attention-vs-rnn-lstm-scaling"]
+---
+
+## Question
+Walk through, at a conceptual level, what the Query, Key, and Value matrices represent in an attention head, and why the dot product between Query and Key is a reasonable way to compute "relevance" between tokens.
+
+
+## Quick Answer
+**Query** represents "what this token is looking for," **Key** represents "what this token has to offer," and **Value** represents "the actual content this token contributes" — the dot product between Query and Key measures how well one token's need matches another's offering, and that score decides how much of the Value gets passed along.
+
+## Detailed Answer
+Every token's embedding gets projected through three separate learned weight matrices — $W_Q$, $W_K$, $W_V$ — producing three different vectors for the same token: a Query vector, a Key vector, and a Value vector. These aren't three different pieces of information about the token; they're the same underlying representation viewed through three different learned lenses, each specialized for a different role in the attention computation.
+
+A useful analogy is a library search. The **Query** is what you're searching for — the terms you type into the search box. Every book on the shelf has a **Key**, like a catalog entry or set of subject tags describing what that book is about. The system compares your query against every book's key and finds the best matches. Once it knows which books are relevant, it retrieves the actual **Value** — the book's content itself — weighted by how good a match each one was. Note that the *content of the book* (Value) and the *catalog tags describing it* (Key) are related but distinct: a book can be tagged in a way that makes it easy to find without that tag being the book's full content.
+
+The **dot product** between a Query and a Key is a reasonable relevance measure because dot product magnitude increases when two vectors point in similar directions in the learned embedding space — vectors that are well-aligned produce a large positive dot product, orthogonal vectors produce something near zero, and opposed vectors produce a negative value. Since $W_Q$ and $W_K$ are trained end-to-end alongside the rest of the model, the network learns to project tokens into a space where "this token needs information of type X" (a Query) and "this other token offers information of type X" (a Key) actually do align geometrically when they're relevant to each other — the alignment isn't hand-designed, it emerges because it's what minimizes the training loss.
+
+After scaling and softmax turn these dot products into normalized attention weights, each token's output becomes a weighted sum of every other token's **Value** vector, weighted by how relevant that token's Key was to the current token's Query — so highly relevant tokens contribute more of their content to the result, and irrelevant tokens contribute close to nothing.
+
+<Callout variant="tip" title="Key Takeaways">
+Query, Key, and Value split the "what do I need," "what do I offer," and "what do I actually contain" roles apart, letting the dot product act as a learned, content-aware relevance filter rather than a fixed rule.
+</Callout>
+

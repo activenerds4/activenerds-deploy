@@ -1,0 +1,57 @@
+---
+pathSlug: "docker"
+moduleSlug: "images-layers-and-dockerfile-instruction-order"
+order: 2
+level: "beginner"
+format: "article"
+title: "Images, layers, and the Dockerfile instruction order that matters"
+description: "How UnionFS stores image diffs and why ordering copy steps determines build cache efficiency."
+estimatedMinutes: 14
+xpValue: 10
+seoTitle: "Docker Layer Caching & UnionFS Mechanics Explained"
+metaDescription: "Understand UnionFS layer immutability and why Dockerfile instruction order determines build cache efficiency."
+publishDate: "2026-07-01"
+question: "You run `docker build` twice on the same Dockerfile with no changes and notice the second build finishes in under a second. Explain what mechanism makes this possible and what is actually being reused."
+domain: "Image Engineering"
+tags: ["Layers", "UnionFS"]
+---
+
+## Question
+You run `docker build` twice on the same Dockerfile with no changes and notice the second build finishes in under a second. Explain what mechanism makes this possible and what is actually being reused.
+
+
+
+## Quick Answer
+Docker build cache reuses existing immutable layers stored by UnionFS (Overlay2) when the instruction and context checksum match, allowing unchanged rebuilds to finish almost instantly without executing instructions again.
+
+## Detailed Answer
+
+### Layer Immutability and Union Filesystems
+
+Docker images are composed of stacked, read-only layers managed by an overlay filesystem (Overlay2). When a container starts, Docker adds a single thin **read-write container layer** on top.
+
+### The Invalidation Chain
+
+Docker evaluates instructions top-to-bottom. If a layer's checksum matches the cache, Docker skips execution. But as soon as one instruction changes (e.g., source code modification), **every layer defined after it is invalidated** and rebuilt from scratch.
+
+```dockerfile
+# BAD PATTERN: Copying code before installing dependencies
+FROM node:20-alpine
+WORKDIR /app
+COPY . .                   <-- Invalidates cache on every single line of code changed!
+RUN npm install            <-- Re-runs slow dependency download every build!
+
+# OPTIMIZED PATTERN: Separate dependency manifest from source code
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./      <-- Only invalidates when package.json actually changes
+RUN npm ci --only=production
+COPY . .                   <-- Source code changes only invalidate this final fast layer
+```
+
+<Callout variant="tip" title="Key Takeaways">
+- **UnionFS Immutability**: Each Dockerfile instruction produces a cached, read-only layer identified by content checksum.
+- **Invalidation Cascade**: Any modified instruction invalidates all downstream layers, forcing full rebuilds of subsequent steps.
+- **Instruction Ordering**: Always order steps from least frequently changed (dependencies, OS packages) to most frequently changed (source code).
+</Callout>
+

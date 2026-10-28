@@ -1,0 +1,44 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "quantization-accuracy-tradeoffs-int4-reasoning"
+order: 135
+level: "intermediate"
+format: "article"
+title: "Quantization Accuracy Trade-offs: Why INT4 Hurts Reasoning More Than Fluency"
+description: "INT4 quantization compresses weight distributions unevenly — capabilities relying on precise numerical relationships (arithmetic, multi-step reasoning) degra..."
+question: "Why does quantizing a model to lower precision (e.g., INT4) degrade some capabilities (like precise numerical reasoning) more than others (like general fluency), and how would you empirically validate that a quantized model is still fit for your production use case rather than trusting benchmark averages?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "Quantization", "AccuracyTradeoff"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Quantization Accuracy Trade-offs: INT4 | GenAI Guide"
+metaDescription: "Learn why INT4 quantization degrades reasoning more than fluency, and how to validate a quantized model against your production use case, not just benchmark"
+publishDate: "2026-07-07"
+relatedModules: ["kv-cache-bottleneck-mqa-gqa-memory-reduction", "constrained-decoding-grammar-token-level-enforcement"]
+---
+
+## Question
+Why does quantizing a model to lower precision (e.g., INT4) degrade some capabilities (like precise numerical reasoning) more than others (like general fluency), and how would you empirically validate that a quantized model is still fit for your production use case rather than trusting benchmark averages?
+
+
+## Quick Answer
+INT4 quantization compresses weight distributions unevenly — capabilities relying on precise numerical relationships (arithmetic, multi-step reasoning) degrade faster than general fluency because they depend on small differences between weight values that low-bit rounding collapses.
+
+## Detailed Answer
+Quantization maps a wide range of full-precision floating-point weights onto a small number of discrete integer buckets — 16 possible values for INT4. For most weights, this rounding error averages out across the millions of parameters contributing to a token prediction, so **fluency and general coherence** barely move: language modeling is robust to small, uncorrelated perturbations spread across a huge parameter count.
+
+Numerical and multi-step reasoning behave differently. These capabilities often depend on specific **narrow circuits** — small subsets of attention heads and MLP neurons that encode precise relationships (e.g., carrying a digit, comparing magnitudes). Quantization error isn't random noise here; it's a systematic rounding bias that can flip the sign or magnitude of exactly the values a reasoning circuit depends on. A single flipped bit in the right place breaks a multi-step chain of arithmetic even though the same error would be invisible in a sentence about the weather.
+
+This is why aggregate benchmark scores (MMLU, general QA) can look nearly unchanged after quantization while a narrower benchmark (GSM8K-style arithmetic, code correctness) drops sharply — the averaged benchmark is diluting a real, localized capability loss.
+
+**Validating a quantized model for production** means testing against your actual task distribution, not a general leaderboard:
+- Build a held-out eval set from real production traffic samples, weighted toward your highest-value or highest-risk task types.
+- Run side-by-side (full-precision vs. quantized) comparisons on that set, not just perplexity — perplexity is dominated by fluency and will underreport reasoning regressions.
+- Isolate numerical/logical subtasks specifically if your application touches them (calculations, structured extraction, code generation) — these are the canary capabilities that degrade first.
+- Re-run the eval whenever you change quantization method or bit-width, since GPTQ, AWQ, and GGUF calibration data all shift which weights get rounded which way.
+
+<Callout variant="tip" title="Key Takeaways">
+A flat benchmark average after quantization can hide a sharp, localized capability loss — always validate against your own task distribution, especially anything numerical or multi-step, before shipping a quantized model.
+</Callout>
+
+---

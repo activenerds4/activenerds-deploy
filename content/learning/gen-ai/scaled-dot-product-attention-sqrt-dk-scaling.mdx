@@ -1,0 +1,36 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "scaled-dot-product-attention-sqrt-dk-scaling"
+order: 9
+level: "beginner"
+format: "article"
+title: "Scaled Dot-Product Attention: Why Transformers Divide by √d_k"
+description: "Dividing attention scores by the square root of the key dimension keeps the softmax input variance stable, preventing vanishing gradients as model width grows."
+question: "In the standard scaled dot-product attention formula $\\text{Softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V$, why is the dot product scaled by $\\sqrt{d_k}$, and what happens to the gradients during backpropagation if this scaling factor is omitted as $d_k$ grows large?"
+domain: "Architecture & Mathematics"
+tags: ["Architecture & Mathematics", "Self-Attention", "SelfAttention", "TransformerBasics", "MatrixMultiplication"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Scaled Dot-Product Attention: Why √d_k | LLM Guide"
+metaDescription: "Learn why Transformer attention scales QK^T by the square root of d_k, and what happens to gradients if that scaling factor is dropped."
+publishDate: "2026-08-05"
+relatedModules: ["softmax-numerical-stability-max-subtraction", "temperature-top-k-top-p-sampling-strategies"]
+---
+
+## Question
+In the standard scaled dot-product attention formula `Softmax((QK^T) / sqrt(d_k)) * V`, why is the dot product scaled by `sqrt(d_k)`, and what happens to the gradients during backpropagation if this scaling factor is omitted as `d_k` grows large?
+
+## Quick Answer
+The `sqrt(d_k)` scaling factor in `Softmax((QK^T) / sqrt(d_k)) * V` keeps the variance of the raw attention scores roughly constant regardless of the key dimension, preventing the softmax from saturating into a near-one-hot distribution.
+
+## Detailed Answer
+When query and key vectors have components that are independent random variables with mean 0 and variance 1, the dot product `q · k` sums `d_k` such terms, so its variance grows proportionally to `d_k`. As the head dimension gets larger — which happens naturally as models scale up — the raw dot products get larger in magnitude too, purely as a statistical side effect of summing more terms, not because the attention pattern is actually more confident.
+
+Dividing by `sqrt(d_k)` counteracts exactly this growth: since variance scales with `d_k`, dividing by its square root normalizes the variance back down to roughly 1, keeping the scores in a stable, predictable range no matter how wide the attention heads are.
+
+Without this scaling, large dot products push the **softmax** function into its saturated regions, where it behaves almost like an argmax — assigning nearly all probability mass to a single position and near-zero everywhere else. During backpropagation, the **gradient of softmax** is proportional to `p_i * (1 - p_i)` for each output; when `p_i` is pushed close to 0 or 1, that product collapses toward zero. The result is **vanishing gradients**: the attention weights stop receiving meaningful learning signal, and training becomes unstable or stalls entirely, especially in deeper networks with larger `d_k` per head.
+
+<Callout variant="tip" title="Key Takeaways">
+The `sqrt(d_k)` divisor isn't a tuning knob — it's a variance-correction term that keeps softmax gradients alive as attention head dimensions scale up.
+</Callout>
+

@@ -1,0 +1,146 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "persistentvolumes-pvc-storageclasses-persistence"
+order: 24
+level: "intermediate"
+format: "article"
+title: "Storage Persistence: PersistentVolumes, PersistentVolumeClaims, and StorageClasses"
+description: "A PersistentVolume (PV) is actual storage provisioned in the cluster; a PersistentVolumeClaim (PVC) is a pod's request for storage — Kubernetes binds them to..."
+question: "How do PersistentVolumes, PersistentVolumeClaims, and StorageClasses decouple storage consumption from underlying cloud storage infrastructure in Kubernetes?"
+domain: "Storage"
+tags: ["Storage", "PV", "PVC"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "Storage Persistence: PersistentVolumes, Persi | K8s Guide"
+metaDescription: "Learn Storage Persistence: PersistentVolumes, PersistentVolumeClaims, and StorageClasses with architecture patterns, practical configurations, and step-by-step"
+publishDate: "2026-07-26"
+relatedModules: ["resource-requests-vs-limits-scheduling-throttling"]
+---
+
+## Question
+How do PersistentVolumes, PersistentVolumeClaims, and StorageClasses decouple storage consumption from underlying cloud storage infrastructure in Kubernetes?
+
+## Quick Answer
+A PersistentVolume (PV) is actual storage provisioned in the cluster; a PersistentVolumeClaim (PVC) is a pod's request for storage — Kubernetes binds them together based on size, access mode, and storage class.
+
+
+## Detailed Answer
+```
+The storage abstraction chain:
+
+StorageClass (HOW to provision — AWS EBS gp3, EFS, etc.)
+      │
+      │ dynamically provisions
+      ▼
+PersistentVolume (WHAT storage exists — the actual EBS volume)
+      │
+      │ bound 1:1 via claim
+      ▼
+PersistentVolumeClaim (WHO wants storage — namespace-scoped request)
+      │
+      │ mounted into
+      ▼
+Pod (via volumes + volumeMounts)
+```
+
+```yaml
+# StorageClass — defines the provisioner and parameters
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3-encrypted
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  fsType: ext4
+  encrypted: "true"
+  kmsKeyId: arn:aws:kms:us-east-1:123456789012:key/my-key
+reclaimPolicy: Retain               # CRITICAL for prod: Retain | Delete
+volumeBindingMode: WaitForFirstConsumer  # Provision in same AZ as pod
+allowVolumeExpansion: true          # Allow PVC resize without downtime
+
+---
+# PersistentVolumeClaim — what the pod requests
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: production
+spec:
+  accessModes:
+  - ReadWriteOnce                   # RWO: one node at a time
+  storageClassName: gp3-encrypted
+  resources:
+    requests:
+      storage: 100Gi
+  # Optional: bind to specific PV by name
+  # volumeName: pv-postgres-prod
+
+---
+# Pod consuming the PVC
+apiVersion: v1
+kind: Pod
+metadata:
+  name: postgres
+spec:
+  containers:
+  - name: postgres
+    image: postgres:16
+    volumeMounts:
+    - name: data
+      mountPath: /var/lib/postgresql/data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: postgres-data      # References the PVC by name
+```
+
+## PVC Binding Process
+```bash
+# Check PVC status
+kubectl get pvc -n production
+# NAME            STATUS   VOLUME                                     CAPACITY
+# postgres-data   Bound    pvc-a1b2c3d4-...                          100Gi
+
+# STATUS values:
+# Pending → No matching PV yet (dynamic provisioning in progress, or no match)
+# Bound   → Successfully matched and mounted to a PV
+# Lost    → PV was deleted while PVC still exists
+
+# Check what PV was created
+kubectl get pv
+kubectl describe pv pvc-a1b2c3d4-...
+
+# Expand a PVC (StorageClass must have allowVolumeExpansion: true)
+kubectl patch pvc postgres-data \
+  -p '{"spec":{"resources":{"requests":{"storage":"200Gi"}}}}'
+```
+
+## ReclaimPolicy — Critical for Production
+```bash
+# Delete (default for dynamic provisioning):
+# PVC deleted → PV deleted → EBS volume DELETED → DATA LOST
+
+# Retain:
+# PVC deleted → PV status becomes Released → EBS volume KEPT
+# You must manually reclaim: delete PV object, EBS volume persists
+
+# Always use Retain for production databases
+# Change existing StorageClass:
+kubectl patch storageclass gp3 \
+  -p '{"reclaimPolicy":"Retain"}'
+```
+
+## Common Mistakes
+- Using `reclaimPolicy: Delete` for production databases — one `kubectl delete pvc` destroys your data
+- Not setting `volumeBindingMode: WaitForFirstConsumer` — PVC binds in wrong AZ, pod can't mount
+- Using `ReadWriteMany` with EBS — EBS only supports `ReadWriteOnce` (use EFS for RWX)
+
+
+<Callout variant="tip" title="Key Takeaways">
+Always set `reclaimPolicy: Retain` on StorageClasses used for production data — the default `Delete` policy means a mistaken `kubectl delete pvc` permanently destroys your data.
+</Callout>
+
+---

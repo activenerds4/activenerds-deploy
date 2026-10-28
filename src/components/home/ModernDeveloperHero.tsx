@@ -95,7 +95,7 @@ export const ModernDeveloperHero = ({ lead, trending }: ModernDeveloperHeroProps
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-foreground">
-                    {lead.author?.name || "ActiveNerds Team"}
+                    {typeof lead.author === "object" && lead.author ? (lead.author as any).name : lead.author || "ActiveNerds Team"}
                   </p>
                   <p className="text-[11px] text-muted-foreground">Systems & DevSecOps Desk</p>
                 </div>

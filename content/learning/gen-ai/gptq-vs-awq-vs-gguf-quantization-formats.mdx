@@ -1,0 +1,45 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "gptq-vs-awq-vs-gguf-quantization-formats"
+order: 132
+level: "intermediate"
+format: "article"
+title: "GPTQ vs. AWQ vs. GGUF: Choosing a Quantization Format for Your Hardware"
+description: "GPTQ and AWQ are GPU-oriented weight quantization methods that differ in how they protect accuracy; GGUF is a flexible, CPU/edge-friendly file format built for llama.cpp-style inference."
+question: "What are the fundamental differences in approach between GPTQ, AWQ, and GGUF-style quantization, and why would you pick one format over another based on your target hardware (GPU-only server vs. CPU/edge deployment) and acceptable accuracy loss?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "Quantization", "GPTQ", "AWQ", "GGUF"]
+estimatedMinutes: 7
+xpValue: 15
+seoTitle: "GPTQ vs. AWQ vs. GGUF: Choosing a | LLM Guide"
+metaDescription: "Learn GPTQ vs. AWQ vs. GGUF: Choosing a Quantization Format for Your Hardware with architecture patterns, practical configurations, and step-by-step"
+publishDate: "2026-08-02"
+relatedModules: ["qlora-4bit-quantization-paged-optimizers"]
+---
+
+## Question
+What are the fundamental differences in approach between GPTQ, AWQ, and GGUF-style quantization, and why would you pick one format over another based on your target hardware (GPU-only server vs. CPU/edge deployment) and acceptable accuracy loss?
+
+
+## Quick Answer
+GPTQ and AWQ are both GPU-oriented, weight-only quantization methods that differ in how they decide which weights need protecting from error; GGUF isn't a quantization algorithm at all — it's a portable file format, built around the llama.cpp ecosystem, optimized for running quantized models on CPUs and edge hardware without a GPU.
+
+## Detailed Answer
+All three exist to shrink a model's weights (typically to 4-bit) so it needs less memory and bandwidth to run, but they solve different problems and target different hardware.
+
+**GPTQ** is a post-training quantization method that uses approximate second-order information (a Hessian-based approximation of how sensitive the layer's output is to each weight) to quantize a layer's weights while minimizing the reconstruction error of that layer's output. It processes weights layer by layer, solving for the rounding choices that do the least damage to the layer's behavior given everything already quantized before it. It requires GPU-specific inference kernels to get its speed benefits and generally delivers strong accuracy retention, though certain outlier-heavy weight distributions can still degrade noticeably at low bit widths.
+
+**AWQ (Activation-aware Weight Quantization)** starts from a different observation: not all weights matter equally to output quality — a small percentage of weight channels turn out to be disproportionately important, and that importance correlates with the *activation* magnitudes passing through them, not the weight magnitudes themselves. Rather than solving a complex per-layer reconstruction problem like GPTQ, AWQ identifies those salient channels from activation statistics and protects them with a scaling transformation before quantizing, leaving the rest of the weights to standard quantization. This tends to be faster to quantize than GPTQ and often retains accuracy at least as well at the same bit width, and it's likewise a GPU-targeted format with dedicated inference kernels.
+
+**GGUF** is a different kind of thing entirely — a single-file, self-contained serialization format from the llama.cpp project that bundles model weights, tokenizer, and metadata together, and supports a range of quantization schemes within it (from simple round-to-nearest schemes to more refined "k-quant" block-wise variants) rather than being tied to one algorithm. Its defining strength is CPU and edge deployment: it's built around memory-mapped loading and CPU SIMD-optimized kernels, so a GGUF model can run reasonably on a laptop or edge device with no GPU at all, trading some raw throughput for that portability and hardware flexibility.
+
+| Format | Approach | Target hardware | Best fit when |
+|--------|----------|------------------|-----------------|
+| GPTQ | Hessian-based per-layer reconstruction | GPU | Max accuracy at a given bit width on GPU-served workloads |
+| AWQ | Activation-aware channel protection | GPU | Faster quantization, strong accuracy, GPU-served workloads |
+| GGUF | Format wrapping multiple quant schemes | CPU / edge / laptop | No GPU available, single portable file needed, llama.cpp-based serving |
+
+<Callout variant="tip" title="Key Takeaways">
+Pick GPTQ or AWQ when you're serving from a GPU and want the best accuracy at a given bit width; pick GGUF when the deployment target is CPU or edge hardware and portability matters more than squeezing out the last bit of throughput.
+</Callout>
+

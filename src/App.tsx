@@ -29,9 +29,21 @@ const SearchPage = lazy(() => import("@/app/search/page"));
 const ToolsPage = lazy(() => import("@/app/tools/page"));
 const ToolDetailPage = lazy(() => import("@/app/tools/[slug]/page"));
 const ResourcesPage = lazy(() => import("@/app/resources/page"));
-const CheatSheetsPage = lazy(() => import("@/app/resources/cheatsheets/page"));
 const ChecklistsPage = lazy(() => import("@/app/resources/checklists/page"));
 const GuidesPage = lazy(() => import("@/app/resources/guides/page"));
+
+// Deep Learning Pillar Pages
+const DeepLearningPage = lazy(() => import("@/app/learning/page"));
+const LearningPathsPage = lazy(() => import("@/app/learning/paths/page"));
+const LearningPathDetailPage = lazy(() => import("@/app/learning/paths/[slug]/page"));
+const LearningModuleArticlePage = lazy(() => import("@/app/learning/paths/[slug]/[moduleSlug]/page"));
+const ChallengesHubPage = lazy(() => import("@/app/learning/challenges/page"));
+const ChallengeTopicPage = lazy(() => import("@/app/learning/challenges/[topic]/page"));
+const ChallengeSessionPage = lazy(() => import("@/app/learning/challenges/[topic]/[level]/[mode]/page"));
+const GlossaryIndexPage = lazy(() => import("@/app/learning/glossary/page"));
+const GlossaryDetailPage = lazy(() => import("@/app/learning/glossary/[slug]/page"));
+const CheatSheetsPage = lazy(() => import("@/app/learning/cheat-sheets/page"));
+const CheatSheetTopicPage = lazy(() => import("@/app/learning/cheat-sheets/[topic]/page"));
 const FAQPage = lazy(() => import("@/app/faq/page"));
 const ContactPage = lazy(() => import("@/app/contact/page"));
 const SubscribePage = lazy(() => import("@/app/subscribe/page"));
@@ -251,8 +263,117 @@ const App = () => (
                   </ErrorBoundary>
                 }
               />
+              {/* Deep Learning Pillar Routes */}
               <Route
-                path="/resources/cheatsheets"
+                path="/learning"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <DeepLearningPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/learning/paths"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <LearningPathsPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/learning/paths/:slug"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <LearningPathDetailPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/learning/paths/:pathSlug/:moduleSlug"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <LearningModuleArticlePage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/learning/challenges"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <ChallengesHubPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/learning/challenges/:topic"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <ChallengeTopicPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/learning/challenges/:topic/:level/:mode"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <ChallengeSessionPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/learning/glossary"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <GlossaryIndexPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/learning/glossary/:slug"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <GlossaryDetailPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/learning/cheat-sheets"
                 element={
                   <ErrorBoundary FallbackComponent={RouteError}>
                     <SiteShell>
@@ -264,17 +385,21 @@ const App = () => (
                 }
               />
               <Route
-                path="/resources/cheatsheets/:slug"
+                path="/learning/cheat-sheets/:topic"
                 element={
                   <ErrorBoundary FallbackComponent={RouteError}>
                     <SiteShell>
                       <Suspense fallback={<RouteFallback />}>
-                        <MdxSubPage />
+                        <CheatSheetTopicPage />
                       </Suspense>
                     </SiteShell>
                   </ErrorBoundary>
                 }
               />
+
+              {/* Legacy Cheatsheet Redirects */}
+              <Route path="/resources/cheatsheets" element={<Navigate to="/learning/cheat-sheets" replace />} />
+              <Route path="/resources/cheatsheets/*" element={<Navigate to="/learning/cheat-sheets" replace />} />
               <Route
                 path="/resources/checklists"
                 element={

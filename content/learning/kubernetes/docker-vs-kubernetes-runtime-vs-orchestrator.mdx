@@ -1,0 +1,45 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "docker-vs-kubernetes-runtime-vs-orchestrator"
+order: 12
+level: "beginner"
+format: "article"
+title: "Docker vs. Kubernetes: Runtime Engines vs. Cluster Orchestrators"
+description: "Docker builds and runs containers on a single machine; Kubernetes orchestrates containers across many machines. They solve different problems and are complem..."
+question: "Explain the architecture, failure modes, and operational best practices for Docker vs. Kubernetes: Runtime Engines vs. Cluster Orchestrators in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Containers", "Architecture"]
+estimatedMinutes: 2
+xpValue: 10
+seoTitle: "Docker vs. Kubernetes: Runtime Engines vs. Cl | K8s Guide"
+metaDescription: "Learn Docker vs. Kubernetes: Runtime Engines vs. Cluster Orchestrators with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-07-26"
+relatedModules: ["control-plane-vs-worker-nodes-architecture", "etcd-architecture-distributed-key-value-store", "understanding-pods-smallest-deployable-unit"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for Docker vs. Kubernetes: Runtime Engines vs. Cluster Orchestrators in production Kubernetes environments.
+
+## Quick Answer
+Docker builds and runs containers on a single machine; Kubernetes orchestrates containers across many machines. They solve different problems and are complementary, not competing.
+
+
+## Detailed Answer
+Docker is a **container runtime and build tool** — it provides the `docker build`, `docker run`, and `docker push` workflow for creating and running containers locally. Kubernetes is an **orchestration platform** — it decides *where* containers run across a cluster, *how many* run, and *what happens* when they fail. In 2020, Kubernetes deprecated Docker as its runtime in favor of the **Container Runtime Interface (CRI)**, and most clusters now use **containerd** or **CRI-O** directly. This caused confusion, but it doesn't affect developers: you still build images with Docker, push to a registry, and reference them in Kubernetes manifests — K8s just uses containerd to pull and run them.
+
+## Real-World Implication for You
+On EKS today, nodes run containerd, not Docker. If you SSH onto a node, `docker ps` won't work — use `crictl ps` instead.
+
+```bash
+# On an EKS node — use crictl, not docker
+sudo crictl ps
+sudo crictl images
+sudo crictl logs <container-id>
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+Docker builds images; Kubernetes runs them at scale. They're separate tools that work together in the same pipeline.
+</Callout>
+
+---

@@ -1,0 +1,604 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "etcd-performance-optimization"
+order: 12
+level: "expert"
+format: "article"
+title: "etcd Performance Optimization: Architecture & Implementation"
+description: "In-depth architectural breakdown and operational implementation for etcd Performance Optimization: Architecture & Implementation."
+question: "Your 500-node production cluster is experiencing API server latency spikes. Investigation shows etcd is the bottleneck: `etcd_disk_wal_fsync_duration_seconds` P99 is 150ms (should be &lt;10ms), leader elections are happening frequently, and the etcd database size is approaching 8GB. Walk through your complete etcd performance diagnosis and remediation plan."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["etcd", "Performance", "Cluster Internals", "Storage", "Tuning"]
+estimatedMinutes: 45
+xpValue: 25
+seoTitle: "etcd Performance Optimization: Architecture & | K8s Guide"
+metaDescription: "Learn etcd Performance Optimization: Architecture & Implementation with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-06-14"
+relatedModules: []
+---
+
+**Prerequisite knowledge:** etcd Raft consensus, Kubernetes control plane architecture, Linux I/O fundamentals
+
+---
+
+## Question
+Your 500-node production cluster is experiencing API server latency spikes. Investigation shows etcd is the bottleneck: `etcd_disk_wal_fsync_duration_seconds` P99 is 150ms (should be &lt;10ms), leader elections are happening frequently, and the etcd database size is approaching 8GB. Walk through your complete etcd performance diagnosis and remediation plan.
+
+
+## Quick Answer
+The symptoms point to three distinct problems: slow disk I/O (WAL fsync &gt;10ms means etcd storage needs NVMe SSDs with dedicated disks), database bloat requiring compaction and defragmentation, and potential network latency causing leader elections. Fix disk I/O first, then compact/defrag, then tune heartbeat intervals.
+
+---
+
+
+## Detailed Answer
+## ️ etcd Architecture — Why Performance Matters
+```
+Every Kubernetes API write goes through this path:
+
+kubectl apply → API Server → etcd leader
+                                  │
+                              Raft consensus
+                              (must replicate to
+                               majority of members)
+                                  │
+                    ┌─────────────┼─────────────┐
+                    │             │             │
+               etcd-1        etcd-2        etcd-3
+               (leader)      (follower)    (follower)
+                    │
+               WAL write (fsync to disk)
+                    │
+               Response to API Server
+                    │
+               Response to kubectl
+
+If WAL fsync takes 150ms:
+→ Every write takes ≥150ms
+→ API server appears slow
+→ Controllers fall behind
+→ Cluster feels unresponsive
+```
+
+## ️ Diagnosis: Step-by-Step
+*Step 1: Collect etcd Metrics*
+```bash
+# Port-forward to etcd metrics endpoint
+kubectl port-forward -n kube-system etcd-master-01 2381:2381
+
+# Check the critical performance metrics
+curl -s http://localhost:2381/metrics | grep -E \
+  "etcd_disk_wal_fsync|etcd_disk_backend_commit|etcd_server_leader|etcd_mvcc_db_total_size|etcd_network_peer_round_trip"
+
+# Key metrics to examine:
+# etcd_disk_wal_fsync_duration_seconds        → Should be P99 < 10ms
+# etcd_disk_backend_commit_duration_seconds   → Should be P99 < 25ms
+# etcd_server_leader_changes_seen_total       → Should be near 0 (no frequent elections)
+# etcd_mvcc_db_total_size_in_bytes            → Watch for growth toward quota (8GB default)
+# etcd_network_peer_round_trip_time_seconds   → Should be P99 < 50ms between members
+```
+
+```bash
+# Use etcdctl for direct diagnosis
+export ETCDCTL_API=3
+export ETCDCTL_ENDPOINTS="https://127.0.0.1:2379"
+export ETCDCTL_CACERT="/etc/kubernetes/pki/etcd/ca.crt"
+export ETCDCTL_CERT="/etc/kubernetes/pki/etcd/server.crt"
+export ETCDCTL_KEY="/etc/kubernetes/pki/etcd/server.key"
+
+# Check cluster health and leader
+etcdctl endpoint health --cluster
+etcdctl endpoint status --cluster -w table
+
+# Output:
+# ENDPOINT               ID               STATUS   IS LEADER  IS LEARNER  RAFT TERM  RAFT INDEX
+# https://10.0.1.1:2379  8e9e05c52164694d  healthy  true       false       42         1073741824
+# https://10.0.1.2:2379  91bc3c398fb3c146  healthy  false      false       42         1073741824
+# https://10.0.1.3:2379  fd422379fda50e48  healthy  false      false       42         1073741824
+
+# Check database size
+etcdctl endpoint status --cluster -w json | \
+  jq '.[] | {endpoint: .Endpoint, dbSize: (.Status.dbSize / 1024 / 1024 | floor | tostring + " MB")}'
+
+# Check number of keys and revisions
+etcdctl get "" --prefix --keys-only | wc -l    # Total key count
+etcdctl get "" --prefix --count-only           # Key count (faster)
+```
+
+```bash
+# Disk I/O diagnosis — the most common culprit
+# Check disk type and performance on etcd nodes
+ssh etcd-node-01
+
+# Check if etcd is on SSD or spinning disk
+lsblk -d -o NAME,ROTA,TYPE,SIZE,MODEL
+# ROTA=0 means SSD, ROTA=1 means HDD (bad for etcd!)
+
+# Measure actual disk latency
+fio --name=etcd-test \
+    --ioengine=sync \
+    --rw=write \
+    --bs=2300 \           # etcd WAL write size
+    --size=22m \
+    --nrfiles=1 \
+    --runtime=60 \
+    --numjobs=1 \
+    --filename=/var/lib/etcd/test-write \
+    --output-format=json | \
+  jq '.jobs[0].write | {
+    iops: .iops,
+    latency_p99_us: .lat_ns.percentile."99.000000" / 1000,
+    latency_p99_ms: .lat_ns.percentile."99.000000" / 1000000
+  }'
+
+# Target: P99 write latency < 10ms (10,000 microseconds)
+# NVMe SSD: ~100-500µs  ✅ Excellent
+# SATA SSD:  ~1-5ms     ✅ Good
+# Network SSD (EBS gp3): ~1-5ms  ⚠️  Acceptable with io2
+# HDD:       ~10-20ms   ❌ Too slow
+# EBS gp2:   ~5-20ms    ❌ Unpredictable, avoid
+
+# Check if etcd WAL and data are on the same disk (bad) or separate (good)
+ls -la /var/lib/etcd/
+# Ideally: WAL on one dedicated NVMe, data on another
+```
+
+*Step 2: Database Compaction and Defragmentation*
+```bash
+# Step 2a: Compact old revisions
+# etcd keeps all historical revisions by default — this grows forever
+
+# Get the current revision number
+REVISION=$(etcdctl endpoint status --cluster -w json | \
+  jq -r '.[0].Status.header.revision')
+
+echo "Current revision: $REVISION"
+
+# Compact all revisions older than current
+# This marks old data as reclaimable but doesn't free disk space yet
+etcdctl compact $REVISION
+# Compacted revision 1073741824
+
+# Step 2b: Defragment each member (DO ONE AT A TIME — takes the member offline briefly)
+# Defragmentation actually reclaims the disk space from compaction
+
+for ENDPOINT in \
+  "https://10.0.1.1:2379" \
+  "https://10.0.1.2:2379" \
+  "https://10.0.1.3:2379"; do
+  echo "Defragmenting $ENDPOINT..."
+  etcdctl defrag --endpoints=$ENDPOINT
+  echo "Done. Sleeping 30s before next member..."
+  sleep 30
+done
+
+# Verify size reduction
+etcdctl endpoint status --cluster -w table
+# DB SIZE should decrease significantly (e.g., 8GB → 2GB)
+```
+
+```bash
+# Step 2c: Set up automatic compaction to prevent future bloat
+# Add to etcd startup flags:
+
+# Option A: Periodic compaction (compact every 1 hour)
+--auto-compaction-mode=periodic
+--auto-compaction-retention=1h
+
+# Option B: Revision-based compaction (keep last 1000 revisions)
+--auto-compaction-mode=revision
+--auto-compaction-retention=1000
+
+# For most production clusters, periodic with 1h retention is recommended
+# It balances history preservation with storage management
+```
+
+*Step 3: Tuning etcd Configuration*
+```yaml
+# /etc/kubernetes/manifests/etcd.yaml (static pod manifest)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: etcd
+  namespace: kube-system
+spec:
+  containers:
+    - name: etcd
+      image: registry.k8s.io/etcd:3.5.10-0
+      command:
+        - etcd
+
+        # Identity
+        - --name=etcd-01
+        - --data-dir=/var/lib/etcd
+
+        # Separate WAL onto dedicated disk (most impactful change)
+        - --wal-dir=/var/lib/etcd-wal    # Mount a dedicated NVMe here
+
+        # Cluster configuration
+        - --initial-cluster-state=existing
+        - --initial-cluster=etcd-01=https://10.0.1.1:2380,etcd-02=https://10.0.1.2:2380,etcd-03=https://10.0.1.3:2380
+
+        # Heartbeat and election tuning
+        # Default: heartbeat=100ms, election=1000ms
+        # For cross-datacenter (higher latency): increase these
+        - --heartbeat-interval=250        # ms — increase if network RTT > 100ms
+        - --election-timeout=2500         # ms — should be 10x heartbeat-interval
+
+        # Quota: increase from 2GB default to avoid "etcdserver: mvcc: database space exceeded"
+        - --quota-backend-bytes=8589934592  # 8GB
+
+        # Auto-compaction (prevents unbounded growth)
+        - --auto-compaction-mode=periodic
+        - --auto-compaction-retention=1h
+
+        # Snapshot tuning
+        - --snapshot-count=10000          # Snapshot every 10k commits (default 100k)
+                                          # Lower = more frequent snapshots = faster recovery
+                                          # Higher = fewer I/O spikes from snapshotting
+
+        # TLS configuration
+        - --cert-file=/etc/kubernetes/pki/etcd/server.crt
+        - --key-file=/etc/kubernetes/pki/etcd/server.key
+        - --trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt
+        - --peer-cert-file=/etc/kubernetes/pki/etcd/peer.crt
+        - --peer-key-file=/etc/kubernetes/pki/etcd/peer.key
+        - --peer-trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt
+        - --client-cert-auth=true
+        - --peer-client-cert-auth=true
+
+      # Resource limits for the etcd container itself
+      resources:
+        requests:
+          cpu: "2"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "16Gi"
+
+      volumeMounts:
+        - mountPath: /var/lib/etcd
+          name: etcd-data
+        - mountPath: /var/lib/etcd-wal
+          name: etcd-wal        # Dedicated WAL disk mount
+
+  volumes:
+    - name: etcd-data
+      hostPath:
+        path: /var/lib/etcd
+        type: DirectoryOrCreate
+    - name: etcd-wal
+      hostPath:
+        path: /var/lib/etcd-wal   # Backed by dedicated NVMe
+        type: DirectoryOrCreate
+```
+
+*Step 4: OS-Level Tuning for etcd Nodes*
+```bash
+# Priority: etcd must not be CPU-starved or memory-swapped
+
+# 1. Disable swap (memory pressure causes etcd latency spikes)
+swapoff -a
+sed -i '/swap/d' /etc/fstab
+
+# 2. Set CPU governor to performance mode
+for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+  echo performance > $cpu
+done
+
+# 3. Increase file descriptor limits
+cat >> /etc/security/limits.conf << EOF
+* soft nofile 65536
+* hard nofile 65536
+* soft nproc 65536
+* hard nproc 65536
+EOF
+
+# 4. Tune I/O scheduler for NVMe (use none/mq-deadline, not cfq)
+echo "none" > /sys/block/nvme0n1/queue/scheduler
+# OR for SATA SSD:
+echo "mq-deadline" > /sys/block/sda/queue/scheduler
+
+# 5. Tune kernel network parameters for etcd peer communication
+cat >> /etc/sysctl.conf << EOF
+# Increase TCP buffer sizes for etcd peer traffic
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.ipv4.tcp_rmem = 4096 87380 134217728
+net.ipv4.tcp_wmem = 4096 65536 134217728
+
+# Reduce TCP keepalive for faster detection of dead peers
+net.ipv4.tcp_keepalive_time = 60
+net.ipv4.tcp_keepalive_intvl = 10
+net.ipv4.tcp_keepalive_probes = 6
+EOF
+sysctl -p
+
+# 6. Give etcd process higher I/O priority using ionice
+ETCD_PID=$(pgrep etcd)
+ionice -c 1 -n 0 -p $ETCD_PID   # Real-time I/O class, highest priority
+```
+
+*Step 5: Prometheus Alerts for etcd Health*
+```yaml
+# etcd-alerts.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: etcd-performance-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: etcd.performance
+      rules:
+        # Alert: WAL fsync too slow
+        - alert: EtcdHighFsyncDuration
+          expr: |
+            histogram_quantile(0.99,
+              rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])
+            ) > 0.01
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "etcd WAL fsync P99 > 10ms on {{ $labels.instance }}"
+            description: |
+              etcd WAL fsync duration is {{ $value | humanizeDuration }}.
+              This directly impacts API server write latency.
+              Check disk I/O performance on the etcd node.
+
+        # Alert: Frequent leader elections
+        - alert: EtcdHighLeaderChanges
+          expr: |
+            increase(etcd_server_leader_changes_seen_total[1h]) > 3
+          labels:
+            severity: critical
+          annotations:
+            summary: "etcd leader changed {{ $value }} times in the last hour"
+            description: |
+              Frequent leader elections indicate network instability or
+              resource contention. Check network latency between etcd
+              members and CPU/memory pressure on etcd nodes.
+
+        # Alert: Database size approaching quota
+        - alert: EtcdDatabaseSpaceWarning
+          expr: |
+            etcd_mvcc_db_total_size_in_bytes
+            / etcd_server_quota_backend_bytes * 100 > 75
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "etcd database at {{ $value }}% of quota"
+            description: |
+              etcd database is filling up. Run compaction and
+              defragmentation before it hits 100% and the cluster
+              enters read-only mode.
+
+        # Alert: Database exceeds quota (CRITICAL — cluster goes read-only)
+        - alert: EtcdDatabaseSpaceCritical
+          expr: |
+            etcd_mvcc_db_total_size_in_bytes
+            / etcd_server_quota_backend_bytes * 100 > 95
+          for: 1m
+          labels:
+            severity: critical
+            page: "true"
+          annotations:
+            summary: "etcd database at {{ $value }}% of quota — IMMEDIATE ACTION REQUIRED"
+            description: |
+              etcd will enter read-only mode at 100%. The Kubernetes
+              control plane will stop accepting writes. Run compaction
+              and defragmentation IMMEDIATELY.
+              Runbook: https://wiki.mycompany.com/runbooks/etcd-quota-exceeded
+
+        # Alert: Slow peer network
+        - alert: EtcdHighNetworkPeerLatency
+          expr: |
+            histogram_quantile(0.99,
+              rate(etcd_network_peer_round_trip_time_seconds_bucket[5m])
+            ) > 0.15
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "etcd peer network P99 > 150ms on {{ $labels.instance }}"
+            description: |
+              High inter-peer latency causes slow consensus and may
+              trigger leader elections. Check network between etcd nodes.
+              Current P99: {{ $value | humanizeDuration }}
+
+        # Alert: Backend commit duration too slow
+        - alert: EtcdHighCommitDuration
+          expr: |
+            histogram_quantile(0.99,
+              rate(etcd_disk_backend_commit_duration_seconds_bucket[5m])
+            ) > 0.025
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "etcd backend commit P99 > 25ms on {{ $labels.instance }}"
+            description: |
+              Slow backend commits indicate disk saturation or
+              fragmentation. Consider defragmentation.
+```
+
+*Step 6: etcd Backup and Recovery Runbook*
+```bash
+#!/bin/bash
+# etcd-backup.sh — Run as a CronJob daily
+
+set -euo pipefail
+
+BACKUP_DIR="/backup/etcd"
+DATE=$(date +%Y%m%d-%H%M%S)
+BACKUP_FILE="$BACKUP_DIR/etcd-snapshot-$DATE.db"
+S3_BUCKET="s3://mycompany-etcd-backups"
+RETENTION_DAYS=30
+
+# Take snapshot
+ETCDCTL_API=3 etcdctl snapshot save "$BACKUP_FILE" \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key
+
+# Verify snapshot integrity
+ETCDCTL_API=3 etcdctl snapshot status "$BACKUP_FILE" -w table
+if [ $? -ne 0 ]; then
+  echo "ERROR: Snapshot verification failed!"
+  exit 1
+fi
+
+# Upload to S3
+aws s3 cp "$BACKUP_FILE" "$S3_BUCKET/$(basename $BACKUP_FILE)"
+
+# Remove local files older than 7 days
+find "$BACKUP_DIR" -name "etcd-snapshot-*.db" -mtime +7 -delete
+
+# Remove S3 files older than retention period
+aws s3 ls "$S3_BUCKET/" | \
+  awk '{print $4}' | \
+  while read file; do
+    file_date=$(echo "$file" | grep -oP '\d{8}')
+    cutoff=$(date -d "-${RETENTION_DAYS} days" +%Y%m%d)
+    if [[ "$file_date" < "$cutoff" ]]; then
+      aws s3 rm "$S3_BUCKET/$file"
+    fi
+  done
+
+echo "Backup complete: $BACKUP_FILE"
+```
+
+```bash
+# etcd-restore.sh — Disaster recovery procedure
+# WARNING: This replaces ALL cluster state
+
+set -euo pipefail
+
+SNAPSHOT_FILE=$1   # Path to snapshot file
+CLUSTER_NAME="production"
+
+if [ -z "$SNAPSHOT_FILE" ]; then
+  echo "Usage: $0 <snapshot-file>"
+  exit 1
+fi
+
+echo "=== etcd Restore Procedure ==="
+echo "Snapshot: $SNAPSHOT_FILE"
+echo "WARNING: This will replace all cluster data. Press Ctrl+C to abort."
+sleep 10
+
+# Step 1: Stop the API server on all control plane nodes
+# (Prevents new writes during restore)
+for node in master-01 master-02 master-03; do
+  ssh $node "mv /etc/kubernetes/manifests/kube-apiserver.yaml /tmp/"
+  ssh $node "mv /etc/kubernetes/manifests/etcd.yaml /tmp/"
+done
+
+sleep 10  # Wait for pods to stop
+
+# Step 2: Restore snapshot on EACH etcd member
+# Must be done on all members simultaneously with same cluster config
+
+for i in 1 2 3; do
+  NODE="etcd-0$i"
+  IP="10.0.1.$i"
+
+  ssh $NODE "
+    # Remove old data
+    rm -rf /var/lib/etcd/*
+
+    # Restore from snapshot
+    ETCDCTL_API=3 etcdctl snapshot restore $SNAPSHOT_FILE \
+      --name etcd-0$i \
+      --initial-cluster 'etcd-01=https://10.0.1.1:2380,etcd-02=https://10.0.1.2:2380,etcd-03=https://10.0.1.3:2380' \
+      --initial-cluster-token etcd-cluster-production \
+      --initial-advertise-peer-urls https://$IP:2380 \
+      --data-dir /var/lib/etcd
+
+    echo 'Restore complete on $NODE'
+  "
+done
+
+# Step 3: Restart etcd on all nodes
+for node in master-01 master-02 master-03; do
+  ssh $node "mv /tmp/etcd.yaml /etc/kubernetes/manifests/"
+done
+
+sleep 30  # Wait for etcd cluster to form
+
+# Step 4: Verify etcd cluster is healthy
+ETCDCTL_API=3 etcdctl endpoint health --cluster
+ETCDCTL_API=3 etcdctl endpoint status --cluster -w table
+
+# Step 5: Restart API server
+for node in master-01 master-02 master-03; do
+  ssh $node "mv /tmp/kube-apiserver.yaml /etc/kubernetes/manifests/"
+done
+
+echo "=== Restore complete. Verify cluster state with: kubectl get nodes ==="
+```
+
+---
+
+## Performance Benchmarks: What Good Looks Like
+
+| Metric | Target | Warning | Critical |
+|---|---|---|---|
+| **WAL fsync P99** | &lt; 10ms | 10–25ms | &gt; 25ms |
+| **Backend commit P99** | &lt; 25ms | 25–50ms | &gt; 50ms |
+| **Peer RTT P99** | &lt; 50ms | 50–150ms | &gt; 150ms |
+| **Leader changes/hour** | 0–1 | 2–3 | &gt; 3 |
+| **DB size vs quota** | &lt; 50% | 50–75% | &gt; 75% |
+| **Snapshot duration** | &lt; 30s | 30–120s | &gt; 120s |
+| **Request latency P99** | &lt; 100ms | 100–500ms | &gt; 500ms |
+
+---
+
+## ️ Trade-offs & Alternatives
+
+| Decision | Option A | Option B | Recommendation |
+|---|---|---|---|
+| **etcd storage** | Local NVMe (fastest) | Network SSD (io2) | Local NVMe for production |
+| **WAL placement** | Same disk as data | Dedicated disk | Dedicated disk eliminates contention |
+| **Compaction mode** | Periodic (1h) | Revision-based | Periodic for predictability |
+| **Cluster size** | 3 members | 5 members | 3 for most; 5 for AZ redundancy |
+| **Heartbeat interval** | 100ms (default) | 250ms (cross-DC) | Match to actual network RTT |
+| **Quota** | 2GB (default) | 8GB | 8GB for large clusters |
+
+---
+
+## ️ Common Mistakes & Misconceptions
+- **"etcd can run on shared nodes with workloads."** — etcd is latency-sensitive and should run on **dedicated nodes** with no other workloads. A noisy neighbor doing disk I/O will cause fsync spikes and trigger leader elections.
+- **"I can defragment all members simultaneously."** — Defragmentation takes a member offline briefly. Defragmenting all members at once will take your etcd cluster down. Always defragment **one member at a time**.
+- **"Compaction frees disk space."** — Compaction only marks old revisions as reclaimable. **Defragmentation** actually reclaims the disk space. You need both steps.
+- **"More etcd members means more reliability."** — More members means more consensus overhead and slower writes. A 5-member cluster tolerates 2 failures but writes slower than a 3-member cluster. 7+ members are almost never beneficial.
+- **"I can restore etcd on just one member."** — Restoring from snapshot must be done on **all members simultaneously** with the same cluster token. Restoring only one member will cause split-brain.
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+etcd performance is the **foundation of Kubernetes control plane health**. The single most impactful improvement in most production clusters is moving etcd to **dedicated NVMe SSDs with the WAL on a separate disk**. Database compaction and defragmentation must be treated as regular operational tasks, not emergency procedures. Automate both with scheduled jobs and alert on quota usage long before it becomes critical — a cluster whose etcd hits 100% quota enters read-only mode and stops accepting any API writes, effectively halting all operations.
+</Callout>
+
+---
+
+## Self-Assessment Checklist
+- [ ] Can you explain the difference between compaction and defragmentation?
+- [ ] Can you describe why WAL fsync latency directly impacts API server response time?
+- [ ] Can you explain why defragmenting all etcd members simultaneously is dangerous?
+- [ ] Can you write the etcdctl commands to compact and defragment a cluster?
+- [ ] Can you explain what happens when etcd quota is exceeded?
+- [ ] Can you describe the correct restore procedure for a 3-member etcd cluster?
+
+
+---
+
+<a name="scenarios"></a>
+## 🟢 SCENARIO-BASED QUESTIONS — Real-World Design Problems
+
+*These questions cut across all difficulty levels and test your ability to synthesize multiple concepts into coherent solutions.*
+
+---

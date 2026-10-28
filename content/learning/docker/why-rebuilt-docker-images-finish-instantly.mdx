@@ -1,0 +1,36 @@
+---
+pathSlug: "docker"
+moduleSlug: "why-rebuilt-docker-images-finish-instantly"
+order: 2
+level: "beginner"
+format: "article"
+title: "Docker Layer Caching: Why Unchanged Rebuilds Finish Instantly"
+description: "Docker builds images as a stack of read-only layers, and each layer is cached by a hash of its instruction plus its parent layer's hash — so if nothing chan..."
+question: "You run `docker build` twice on the same Dockerfile with no changes and notice the second build finishes in under a second. Explain what mechanism makes this possible and what is actually being reused."
+domain: "Image Engineering"
+tags: ["Image Engineering", "Layers", "UnionFS"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Docker Layer Caching: Why Rebuilds Are Instant | Docker Guide"
+metaDescription: "Learn how Docker's layer cache makes unchanged rebuilds instant, with build optimization patterns and step-by-step implementation details for real Dockerfile"
+publishDate: "2026-06-01"
+relatedModules: ["fixing-slow-docker-builds-with-cache-ordering", "multi-stage-builds-for-smaller-images"]
+---
+
+## Question
+You run `docker build` twice on the same Dockerfile with no changes and notice the second build finishes in under a second. Explain what mechanism makes this possible and what is actually being reused.
+
+
+## Quick Answer
+Docker builds an image as a stack of read-only layers, and each layer is cached by a hash of its build instruction plus its parent layer's cache key — if nothing in that chain changed, Docker reuses the existing layer instead of re-executing the instruction.
+
+
+## Detailed Answer
+Think of a Dockerfile as a recipe where **each instruction produces one immutable, content-addressed layer** stacked on the layer before it. Before running an instruction, the builder computes a cache key from that instruction's exact text and the cache key of everything above it in the stack. If a layer with that exact key already exists locally, Docker skips re-execution entirely and reuses the cached layer's filesystem contents. This is why the *order* of instructions matters so much: the moment one instruction's cache key misses (because a file it copies changed, or a prior layer changed), every instruction **after** it in the file is forced to rebuild too, even if those later instructions haven't changed at all — cache validity flows one-directionally down the stack.
+
+
+<Callout variant="tip" title="Key Takeaways">
+Docker isn't "smart" about what changed inside your code — it only knows whether an instruction and everything above it hashes the same as last time, so ordering your Dockerfile from least-to-most frequently changed is what actually earns you fast rebuilds.
+</Callout>
+
+---

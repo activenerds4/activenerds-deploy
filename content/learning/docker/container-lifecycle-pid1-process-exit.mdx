@@ -1,0 +1,38 @@
+---
+pathSlug: "docker"
+moduleSlug: "container-lifecycle-pid1-process-exit"
+order: 33
+level: "beginner"
+format: "article"
+title: "Container Lifecycle and PID 1: Why Containers Exit When Their Main Process Stops"
+description: "A container's lifecycle is tied to its PID 1 process — when that process exits, the container stops immediately, regardless of any background jobs still running."
+question: "A container running a simple shell script exits immediately after starting, even though the script \"runs forever\" when tested locally. What container lifecycle rule explains this behavior?"
+domain: "Architecture"
+tags: ["Architecture", "PID1", "ProcessModel"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Container Lifecycle and PID 1: Why | Docker Guide"
+metaDescription: "Learn Container Lifecycle and PID 1: Why Containers Exit When Their Main Process Stops with architecture patterns and practical configuration details."
+publishDate: "2026-08-03"
+relatedModules: ["depends-on-container-readiness-docker-compose", "docker-compose-healthcheck-application-readiness"]
+---
+
+## Question
+A container running a simple shell script exits immediately after starting, even though the script "runs forever" when tested locally. What container lifecycle rule explains this behavior?
+
+
+## Quick Answer
+A container's lifecycle is bound to its **PID 1 process**: the container runs exactly as long as that one process runs, and exits the instant it does — independent of whether the script "worked" when run locally in a full OS.
+
+## Detailed Answer
+On a normal machine, a shell script you run in a terminal is a child of your login shell, which is itself a descendant of `init` (PID 1) — a whole process tree keeps the terminal session alive. A container doesn't have that surrounding tree. The **entrypoint process Docker starts becomes PID 1 inside the container's own PID namespace**, and the container's lifecycle is a direct reflection of that single process's lifecycle.
+
+This matters in a specific, common way: if your "runs forever" script is actually a wrapper that spawns a background process and then exits (e.g. `some-daemon &` followed by the script naturally reaching its end, or a supervisor script that forks and detaches), PID 1 exits as soon as the parent script finishes — even though the daemon is technically still running as an orphaned child. Docker sees PID 1 exit and tears the container down, killing every other process in that namespace along with it, background jobs included.
+
+There's a second-order issue tied to the same rule: PID 1 also has special responsibilities in Linux that ordinary processes don't — it's expected to **reap zombie processes** (children whose exit status hasn't been collected) and correctly forward signals like `SIGTERM`. Many simple scripts and language runtimes were never written to do either, which is why they can leave zombies behind or ignore `docker stop` until the timeout forces a `SIGKILL`.
+
+<Callout variant="tip" title="Key Takeaways">
+Whatever process you specify as the container's entrypoint must run in the foreground for the life of the container — background it, exit early, or exec another process improperly, and the container exits with it.
+</Callout>
+
+---

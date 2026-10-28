@@ -1,0 +1,37 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "token-streaming-eos-sse-utf8-buffering"
+order: 30
+level: "beginner"
+format: "article"
+title: "Token Streaming and EOS Detection: Handling SSE Output and UTF-8 Buffering"
+description: "An inference server checks each generated token against EOS and stop sequences after every step, streaming partial output over SSE while buffering incomplete UTF-8 byte sequences."
+question: "How does an inference server handle token generation termination signals (e.g., `<|endoftext|>` or custom stop sequences) during Server-Sent Events (SSE) streaming, and why do multi-byte UTF-8 characters require client-side buffer management?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "Streaming", "EOSToken", "SSE"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Token Streaming, EOS Detection, and SSE | LLM Guide"
+metaDescription: "Learn how inference servers detect EOS and stop sequences during SSE streaming, and why multi-byte UTF-8 characters need client-side buffer handling."
+publishDate: "2026-08-26"
+relatedModules: ["left-padding-batch-inference-decoder-models"]
+---
+
+## Question
+How does an inference server handle token generation termination signals (e.g., `<|endoftext|>` or custom stop sequences) during Server-Sent Events (SSE) streaming, and why do multi-byte UTF-8 characters require client-side buffer management?
+
+
+## Quick Answer
+An inference server checks the newly generated token against the model's **EOS token** and any user-provided **stop sequences** after every single decoding step, halting generation the moment a match is found, while streaming partial text to the client over **Server-Sent Events (SSE)** as each token is produced.
+
+## Detailed Answer
+Autoregressive generation produces one token at a time. After each forward pass, the server compares the sampled token ID to the model's end-of-sequence token (often something like `<|endoftext|>` or a model-specific ID) and to any custom stop strings the caller specified. If a match occurs, generation stops immediately — no further tokens are produced, and the server sends a final SSE event signaling completion (commonly `data: [DONE]` or a structured `finish_reason` field). Custom stop sequences are trickier than the EOS token because they can span multiple tokens, so the server has to buffer recent output and check whether the tail of the generated text matches the stop string, not just the single latest token.
+
+Streaming itself works by pushing each new token's decoded text as a separate SSE `data:` event as soon as it's generated, rather than waiting for the full response — this is what lets a chat UI render text incrementally instead of showing nothing until generation finishes.
+
+The **UTF-8 buffering** problem comes from a mismatch between how the model generates and how text is actually encoded. Tokenizers operate on subword units that don't necessarily align with byte or character boundaries — a single Unicode character (especially outside the ASCII range: emoji, CJK characters, accented letters) can be split across the *byte-level* representation used internally, meaning a partially generated token might represent only half of a multi-byte UTF-8 character. If a client tries to decode and display that partial byte sequence immediately, it gets a decoding error or a broken replacement character. To handle this correctly, both the server (or client, depending on implementation) has to hold back incomplete byte sequences in a small buffer and only flush accumulated bytes to the display once they form one or more complete, valid UTF-8 characters.
+
+<Callout variant="tip" title="Key Takeaways">
+Streaming correctness requires two independent checks on every token: has generation reached a stop condition, and does the buffered output so far form complete, displayable UTF-8 text.
+</Callout>
+

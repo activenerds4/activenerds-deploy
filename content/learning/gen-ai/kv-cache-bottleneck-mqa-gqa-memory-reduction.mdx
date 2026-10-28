@@ -1,0 +1,46 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "kv-cache-bottleneck-mqa-gqa-memory-reduction"
+order: 150
+level: "advanced"
+format: "article"
+title: "KV Cache Memory Bottleneck: How MQA and GQA Reduce Inference Footprint"
+description: "The KV cache grows linearly with sequence length, batch size, and layer count, turning decoding into a memory-bandwidth-bound problem — MQA and GQA shrink it..."
+question: "Explain the memory bottleneck introduced by the Key-Value (KV) Cache during the autoregressive decoding phase. How do Multi-Query Attention (MQA) and Grouped-Query Attention (GQA) trade off parameter overhead and retrieval quality to alleviate KV cache memory footprints?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "KVCache", "MemoryBandwidth", "LLMInference"]
+estimatedMinutes: 9
+xpValue: 20
+seoTitle: "KV Cache Bottleneck: MQA vs. GQA | GenAI Guide"
+metaDescription: "Learn why the KV cache dominates LLM inference memory, and how Multi-Query and Grouped-Query Attention trade quality for memory savings during decoding."
+publishDate: "2026-07-22"
+relatedModules: ["flashattention-tiling-online-softmax-memory", "quantization-accuracy-tradeoffs-int4-reasoning"]
+---
+
+## Question
+Explain the memory bottleneck introduced by the Key-Value (KV) Cache during the autoregressive decoding phase. How do Multi-Query Attention (MQA) and Grouped-Query Attention (GQA) trade off parameter overhead and retrieval quality to alleviate KV cache memory footprints?
+
+
+## Quick Answer
+The KV cache stores every previous token's Key and Value vectors across all layers and heads so decoding doesn't recompute them — it grows linearly with sequence length and batch size, and at scale it consumes far more GPU memory bandwidth than the actual matrix multiplications do, which is exactly the constraint MQA and GQA are designed to relax.
+
+## Detailed Answer
+During autoregressive decoding, each new token's attention computation needs the Key and Value vectors of every prior token. Recomputing them from scratch at every step would be wasteful, so inference engines cache them — but that cache has to be stored **per layer, per attention head, per token, per sequence in the batch**. For a standard Multi-Head Attention (MHA) model, cache size scales as `2 × layers × heads × head_dim × sequence_length × batch_size` (the 2 accounts for storing both K and V). For a 70B-parameter-class model serving long contexts at meaningful batch sizes, this cache alone can consume tens of gigabytes — often more than the model's own weights.
+
+This turns decoding into a **memory-bandwidth-bound** problem rather than a compute-bound one: generating each new token requires reading the entire accumulated KV cache back from HBM, and the GPU's compute units sit idle waiting on that read, because the actual matrix multiply per new token is small compared to the volume of cache being streamed. Since KV cache size directly caps how many concurrent sequences (batch size) fit in GPU memory at once, it becomes the dominant constraint on serving throughput and concurrency — not raw FLOPs.
+
+Multi-Query Attention (MQA) and Grouped-Query Attention (GQA) reduce this by sharing Key/Value projections across multiple query heads instead of giving every head its own:
+
+| Attention Variant | KV Heads | Cache Size vs. MHA | Quality Trade-off |
+|---|---|---|---|
+| Multi-Head Attention (MHA) | One KV head per query head | Baseline (largest) | Best quality, highest memory cost |
+| Grouped-Query Attention (GQA) | One KV head shared per group of query heads | Reduced proportionally to group size | Small quality loss, tunable via group count |
+| Multi-Query Attention (MQA) | Single shared KV head for all query heads | Smallest (heads/1) | Largest cache savings, largest quality risk |
+
+GQA is the middle ground most production models converge on: by grouping, say, 8 query heads per shared KV head, cache size drops roughly 8x while the shared-key representation still carries enough distinct information across groups to preserve most of MHA's quality — unlike MQA's single shared head, which pushes all query heads to attend through one representational bottleneck and shows a more noticeable quality gap on tasks requiring fine-grained per-head specialization.
+
+<Callout variant="tip" title="Key Takeaways">
+KV cache size, not raw compute, is usually the real ceiling on how many concurrent requests a model can serve — MQA and GQA trade a small amount of per-head expressiveness for a large, direct reduction in that ceiling.
+</Callout>
+
+---

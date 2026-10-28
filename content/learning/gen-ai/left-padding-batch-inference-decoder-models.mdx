@@ -1,0 +1,44 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "left-padding-batch-inference-decoder-models"
+order: 36
+level: "beginner"
+format: "article"
+title: "Left-Padding vs. Right-Padding: Why Batched Decoder Inference Requires Left-Padding"
+description: "Right-padding places filler tokens after real content, so the last real token no longer sits at the sequence's final position, corrupting next-token prediction and positional alignment."
+question: "Why must batch inference for autoregressive decoder-only models strictly utilize left-padding instead of right-padding, and how does incorrect padding placement corrupt positional embedding calculations?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "Batching", "LeftPadding", "DecoderOnly"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Left-Padding vs. Right-Padding for LLM Batches | LLM Guide"
+metaDescription: "Learn why batched autoregressive inference requires left-padding instead of right-padding, and how incorrect padding corrupts positional embeddings."
+publishDate: "2026-09-01"
+relatedModules: ["token-streaming-eos-sse-utf8-buffering"]
+---
+
+## Question
+Why must batch inference for autoregressive decoder-only models strictly utilize left-padding instead of right-padding, and how does incorrect padding placement corrupt positional embedding calculations?
+
+
+## Quick Answer
+Batched autoregressive inference requires **left-padding** because the model always generates its next token by attending to whatever sits at the *final* position of the sequence — right-padding would put filler tokens there instead of the actual last real token, breaking generation.
+
+## Detailed Answer
+When multiple prompts of different lengths are batched together for efficient parallel processing, every sequence in the batch has to be padded to the length of the longest one. A **decoder-only** model generates its next token by looking at the representation at the sequence's current final position — that's the position whose output logits determine what comes next.
+
+If padding is added on the **right** (after the real tokens), the actual last meaningful token no longer sits at the final position for any sequence shorter than the batch maximum — it's the pad token that occupies that spot. The model would then be predicting "what comes after a pad token," which is meaningless and produces garbage continuations for every shorter sequence in the batch.
+
+**Left-padding** solves this by putting the filler tokens *before* the real content, so every sequence in the batch — regardless of its original length — ends with its actual last real token at the final position. Generation then proceeds correctly and uniformly across the whole batch.
+
+| Padding side | Position of last real token | Result for generation |
+|---------------|------------------------------|--------------------------|
+| Right-padding | Not at sequence end (for shorter items) | Model predicts from a pad token — broken |
+| Left-padding  | Always at sequence end | Model predicts from real content — correct |
+
+The other half of the fix is the **attention mask** combined with correctly recomputed **positional embeddings**. Naively, left-padding would shift every real token's absolute position index later in the sequence — a short prompt padded to match a longer one would suddenly have its first real token appear at position 10 instead of position 0, which is wrong if the model expects positions to start at 0. Correct implementations use the attention mask (which flags pad positions) to recompute position IDs so that padding tokens are excluded from the position count, letting the first real token stay at position 0 regardless of how much left-padding precedes it, while also ensuring the attention mask itself prevents any real token from attending to the pad tokens at all.
+
+<Callout variant="tip" title="Key Takeaways">
+Left-padding keeps every sequence's real content anchored to the final position the model actually predicts from — get the position IDs and attention mask right alongside it, or the fix is only half-applied.
+</Callout>
+

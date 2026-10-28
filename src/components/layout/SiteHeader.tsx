@@ -61,12 +61,7 @@ const SiteHeader = () => {
           aria-label={`${siteConfig.name} home`}
         >
           <ActiveNerdsMark title={`${siteConfig.name} logo`} className="h-7 w-7 transition-transform group-hover:scale-105" />
-          <div className="flex items-center gap-2">
-            <span>{siteConfig.name}</span>
-            <span className="hidden sm:inline-flex items-center rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider text-accent">
-              DevHub
-            </span>
-          </div>
+          <span>{siteConfig.name}</span>
         </Link>
 
         {/* Desktop nav — config-driven */}

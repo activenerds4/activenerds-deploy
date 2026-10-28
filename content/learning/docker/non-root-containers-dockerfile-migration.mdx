@@ -1,0 +1,49 @@
+---
+pathSlug: "docker"
+moduleSlug: "non-root-containers-dockerfile-migration"
+order: 60
+level: "intermediate"
+format: "article"
+title: "Running Containers as Non-Root: Dockerfile Changes and the Trade-Offs They Introduce"
+description: "Banning UID 0 means adding a dedicated user in the Dockerfile and chowning app files to it, which then surfaces secondary issues with low ports, file ownership, and package installation that each need their own fix."
+question: "Your security team mandates that no production container may run as UID 0. Walk through what changes are required in the Dockerfile and what operational issues (port binding, file permissions, package installs) commonly break as a result \u2014 and how to resolve each."
+domain: "Security"
+tags: ["Security", "Non-Root User", "NonRootUser", "Dockerfile"]
+estimatedMinutes: 7
+xpValue: 15
+seoTitle: "Running Containers as Non-Root: | Docker Guide"
+metaDescription: "Learn Running Containers as Non-Root: Dockerfile Changes and the Trade-Offs They Introduce with practical fixes for port binding, permissions, and installs."
+publishDate: "2026-08-30"
+relatedModules: ["docker-uid-mapping-bind-mount-root-ownership", "depends-on-container-readiness-docker-compose"]
+---
+
+## Question
+Your security team mandates that no production container may run as UID 0. Walk through what changes are required in the Dockerfile and what operational issues (port binding, file permissions, package installs) commonly break as a result — and how to resolve each.
+
+
+## Quick Answer
+Enforcing "no UID 0" means creating a dedicated non-root user in the Dockerfile, `chown`-ing the application files to it, and switching to it with `USER` — which then commonly breaks low-port binding, file writes, and package installation until each is explicitly re-permissioned.
+
+## Detailed Answer
+The baseline Dockerfile change is straightforward: create an unprivileged user and group, give them ownership of the application directory, and switch to that user before the entrypoint runs:
+
+```dockerfile
+RUN addgroup --system app && adduser --system --ingroup app appuser
+WORKDIR /app
+COPY --chown=appuser:app . .
+USER appuser
+ENTRYPOINT ["node", "server.js"]
+```
+
+That single change then surfaces three categories of breakage that were previously invisible because root can do anything:
+
+## Production Implications
+- **Binding to ports below 1024.** Linux reserves ports 1–1023 for privileged processes; a non-root user can't `bind()` to port 80 or 443 directly. Fix: have the application listen on an unprivileged port (e.g. 8080) and let a reverse proxy or the container platform's port mapping (`-p 80:8080`) handle the external-facing port instead.
+- **Writing to directories created by earlier root-run instructions.** Any `RUN` instruction executed before `USER appuser` runs as root, so files and directories it creates default to root ownership. If the application later needs to write logs, cache files, or temp data to one of those paths, it will get a permission-denied error. Fix: explicitly `chown` any runtime-writable directories to the app user during the build, or create them after the `USER` switch.
+- **Installing packages or writing to system paths at runtime.** `apt-get install`, writing to `/etc`, or modifying files outside the app directory all require root. If any of this needs to happen at container start (not build time), it either has to move into the image build itself, or the process needs a narrowly scoped exception (e.g. `setcap` on a specific binary) rather than reverting to a full root user.
+
+<Callout variant="tip" title="Key Takeaways">
+Dropping to a non-root user is a one-line `USER` change, but shipping it cleanly requires auditing every place the Dockerfile and application assumed root privileges implicitly.
+</Callout>
+
+---

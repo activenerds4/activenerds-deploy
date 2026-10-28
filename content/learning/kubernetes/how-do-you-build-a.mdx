@@ -1,0 +1,335 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "how-do-you-build-a"
+order: 18
+level: "expert"
+format: "article"
+title: "How Do You Build a Custom Admission Webhook from Scratch?: Architecture & Implementation"
+description: "Build a TLS-secured HTTPS server that handles `AdmissionReview` JSON requests, register it with a `MutatingWebhookConfiguration` or `ValidatingWebhookConfigu..."
+question: "How do you construct and deploy a custom Kubernetes Admission Webhook from scratch, and what TLS certificate requirements must be satisfied for the API server to communicate with it securely?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Admission", "API", "Security"]
+estimatedMinutes: 20
+xpValue: 25
+seoTitle: "How Do You Build a Custom Admission Webhook f | K8s Guide"
+metaDescription: "Learn How Do You Build a Custom Admission Webhook from Scratch?: Architecture & Implementation with architecture patterns, practical configurations, and step-b"
+publishDate: "2026-05-10"
+relatedModules: []
+---
+
+---
+
+## Question
+How do you construct and deploy a custom Kubernetes Admission Webhook from scratch, and what TLS certificate requirements must be satisfied for the API server to communicate with it securely?
+
+## Quick Answer
+## Build a TLS-secured HTTPS server that handles `AdmissionReview` JSON requests, register it with a `MutatingWebhookConfiguration` or `ValidatingWebhookConfiguration`, and deploy it as a Pod inside the cluster with a cert-manager-managed certificate.
+---
+
+
+## Detailed Answer
+A custom admission webhook is a standard HTTPS web server that receives `AdmissionReview` objects from the Kubernetes API server, processes them, and returns an `AdmissionReview` response with `allowed: true/false` (plus an optional JSON Patch for mutating webhooks). **The four key requirements are:** TLS (the API server only calls HTTPS endpoints), correct `AdmissionReview` API version handling, a `caBundle` in the webhook registration that matches your server's TLS certificate, and low latency (the API server has a configurable timeout, defaulting to 10 seconds, but you should target under 200ms). The easiest production path uses **cert-manager** to issue and rotate the webhook's TLS certificate automatically.
+
+---
+
+## Deep Dive
+## Full project structure
+```
+webhook/
+├── main.go
+├── handler.go
+├── cert/
+│   └── tls.go
+├── Dockerfile
+├── deploy/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── certificate.yaml        # cert-manager Certificate
+│   └── webhookconfig.yaml
+```
+
+## Step 1 — The webhook server (main.go)
+```go
+package main
+
+import (
+    "context"
+    "crypto/tls"
+    "log"
+    "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
+)
+
+func main() {
+    mux := http.NewServeMux()
+    mux.HandleFunc("/validate", validateHandler)
+    mux.HandleFunc("/mutate",   mutateHandler)
+    mux.HandleFunc("/healthz",  func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+    })
+
+    cert, err := tls.LoadX509KeyPair(
+        "/etc/webhook/certs/tls.crt",
+        "/etc/webhook/certs/tls.key",
+    )
+    if err != nil {
+        log.Fatalf("failed to load TLS keypair: %v", err)
+    }
+
+    server := &http.Server{
+        Addr:    ":8443",
+        Handler: mux,
+        TLSConfig: &tls.Config{
+            Certificates: []tls.Certificate{cert},
+            MinVersion:   tls.VersionTLS13,
+        },
+        ReadTimeout:  5 * time.Second,
+        WriteTimeout: 10 * time.Second,
+        IdleTimeout:  60 * time.Second,
+    }
+
+    // Graceful shutdown
+    go func() {
+        log.Println("Webhook server listening on :8443")
+        if err := server.ListenAndServeTLS("", ""); err != nil &&
+            err != http.ErrServerClosed {
+            log.Fatalf("server error: %v", err)
+        }
+    }()
+
+    sig := make(chan os.Signal, 1)
+    signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+    <-sig
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    server.Shutdown(ctx)
+}
+```
+
+## Step 2 — Validating handler (handler.go)
+```go
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "io"
+    "net/http"
+
+    admissionv1 "k8s.io/api/admission/v1"
+    appsv1      "k8s.io/api/apps/v1"
+    metav1      "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+func validateHandler(w http.ResponseWriter, r *http.Request) {
+    body, err := io.ReadAll(r.Body)
+    if err != nil {
+        http.Error(w, "failed to read body", http.StatusBadRequest)
+        return
+    }
+
+    var review admissionv1.AdmissionReview
+    if err := json.Unmarshal(body, &review); err != nil {
+        http.Error(w, "failed to decode AdmissionReview", http.StatusBadRequest)
+        return
+    }
+
+    response := validateDeployment(review.Request)
+    review.Response = response
+    review.Response.UID = review.Request.UID
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(review)
+}
+
+func validateDeployment(req *admissionv1.AdmissionRequest) *admissionv1.AdmissionResponse {
+    var deploy appsv1.Deployment
+    if err := json.Unmarshal(req.Object.Raw, &deploy); err != nil {
+        return deny(fmt.Sprintf("failed to parse Deployment: %v", err))
+    }
+
+    // Rule 1: Require resource limits on all containers
+    for _, c := range deploy.Spec.Template.Spec.Containers {
+        if c.Resources.Limits == nil {
+            return deny(fmt.Sprintf(
+                "container %q must define resource limits (CPU and memory)",
+                c.Name,
+            ))
+        }
+        if _, ok := c.Resources.Limits[corev1.ResourceCPU]; !ok {
+            return deny(fmt.Sprintf("container %q missing CPU limit", c.Name))
+        }
+        if _, ok := c.Resources.Limits[corev1.ResourceMemory]; !ok {
+            return deny(fmt.Sprintf("container %q missing memory limit", c.Name))
+        }
+    }
+
+    // Rule 2: Require team label
+    if _, ok := deploy.Labels["team"]; !ok {
+        return deny("Deployment must have a 'team' label")
+    }
+
+    // Rule 3: Disallow latest tag
+    for _, c := range deploy.Spec.Template.Spec.Containers {
+        if strings.HasSuffix(c.Image, ":latest") || !strings.Contains(c.Image, ":") {
+            return deny(fmt.Sprintf(
+                "container %q uses 'latest' tag — pin to a specific digest or version",
+                c.Name,
+            ))
+        }
+    }
+
+    return allow()
+}
+
+func allow() *admissionv1.AdmissionResponse {
+    return &admissionv1.AdmissionResponse{Allowed: true}
+}
+
+func deny(reason string) *admissionv1.AdmissionResponse {
+    return &admissionv1.AdmissionResponse{
+        Allowed: false,
+        Result: &metav1.Status{
+            Code:    403,
+            Message: reason,
+        },
+    }
+}
+```
+
+## Step 3 — cert-manager Certificate (deploy/certificate.yaml)
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: webhook-tls
+  namespace: platform
+spec:
+  secretName: webhook-tls-secret
+  duration: 8760h   # 1 year
+  renewBefore: 720h # renew 30 days before expiry
+  dnsNames:
+    - webhook-svc.platform.svc
+    - webhook-svc.platform.svc.cluster.local
+  issuerRef:
+    name: cluster-ca-issuer
+    kind: ClusterIssuer
+```
+
+## Step 4 — Deployment with cert volume mount
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admission-webhook
+  namespace: platform
+spec:
+  replicas: 2   # HA — never run a single replica webhook
+  selector:
+    matchLabels:
+      app: admission-webhook
+  template:
+    metadata:
+      labels:
+        app: admission-webhook
+    spec:
+      # Webhook must stay up — use high-priority class
+      priorityClassName: system-cluster-critical
+      containers:
+        - name: webhook
+          image: mycompany/admission-webhook:v1.2.3
+          ports:
+            - containerPort: 8443
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/webhook/certs
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: webhook-tls-secret
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: admission-webhook
+```
+
+## Step 5 — Webhook registration with caBundle injection
+```yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: deployment-policy
+  annotations:
+    # cert-manager injects the caBundle automatically
+    cert-manager.io/inject-ca-from: platform/webhook-tls
+webhooks:
+  - name: validate.deployments.mycompany.io
+    admissionReviewVersions: ["v1"]
+    clientConfig:
+      service:
+        name: webhook-svc
+        namespace: platform
+        path: /validate
+        port: 443
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        resources: ["deployments"]
+    # Exempt the webhook itself to prevent deadlock
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["platform", "kube-system"]
+    failurePolicy: Fail
+    sideEffects: None
+    timeoutSeconds: 5
+```
+
+## Performance benchmarks to target
+| Metric | Target | Alert Threshold |
+|---|---|---|
+| p50 response latency | &lt; 5ms | &gt; 50ms |
+| p99 response latency | &lt; 50ms | &gt; 500ms |
+| Error rate | &lt; 0.1% | &gt; 1% |
+| Webhook pod CPU | &lt; 100m | &gt; 300m |
+| Replicas | ≥ 2 | &lt; 2 |
+
+> **Production lesson:** Always add `namespaceSelector` to exclude `kube-system` and your webhook's own namespace. A webhook that intercepts its own Pod's creation and fails creates a deadlock — your webhook Pod can't start, so the webhook is down, so nothing can be admitted, including the fix.
+
+> **Common mistake:** Running a single replica webhook. If that Pod is rescheduled, all API requests that match your webhook rules are blocked (with `failurePolicy: Fail`) until the Pod is back. Always run 2+ replicas with `topologySpreadConstraints`.
+
+> **Self-assessment:** Can you implement this from scratch without referencing docs? Can you explain the caBundle requirement? Can you describe what happens when `failurePolicy: Fail` and your webhook is down?
+
+> **Follow-up questions:** Q4 (OPA/Gatekeeper), Q5 (Enforce image registry policy)
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **High Availability**: Always run at least 2 webhook replicas with topology spread constraints so cluster scheduling is never blocked during node maintenance.
+- **Deadlock Prevention**: Exclude kube-system and the webhook own namespace via namespaceSelector to prevent circular admission dependency deadlocks.
+</Callout>
+

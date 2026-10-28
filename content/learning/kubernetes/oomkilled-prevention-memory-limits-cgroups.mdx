@@ -1,0 +1,102 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "oomkilled-prevention-memory-limits-cgroups"
+order: 15
+level: "intermediate"
+format: "article"
+title: "OOMKilled Prevention: Container Memory Limits, Cgroups, and Linux OOM Killer"
+description: "OOMKilled means the container exceeded its memory limit and was killed by the Linux OOM killer — fix by increasing the memory limit, finding and fixing the m..."
+question: "What kernel mechanisms trigger an OOMKilled exit status for a container, and how do you configure container memory requests and cgroups limits to prevent out-of-memory container crashes?"
+domain: "Troubleshooting"
+tags: ["Resources", "Troubleshooting"]
+estimatedMinutes: 4
+xpValue: 15
+seoTitle: "OOMKilled Prevention: Container Memory Limits | K8s Guide"
+metaDescription: "Learn OOMKilled Prevention: Container Memory Limits, Cgroups, and Linux OOM Killer with architecture patterns, practical configurations, and step-by-step imple"
+publishDate: "2026-05-31"
+relatedModules: []
+---
+
+## Question
+What kernel mechanisms trigger an OOMKilled exit status for a container, and how do you configure container memory requests and cgroups limits to prevent out-of-memory container crashes?
+
+## Quick Answer
+OOMKilled means the container exceeded its memory limit and was killed by the Linux OOM killer — fix by increasing the memory limit, finding and fixing the memory leak, or using VPA to right-size requests.
+
+
+## Detailed Answer
+```bash
+# Detect OOMKilled
+kubectl describe pod my-pod | grep -i oom
+# Last State: Terminated
+#   Reason:    OOMKilled
+#   Exit Code: 137
+
+# Check current memory limits
+kubectl get pod my-pod \
+  -o jsonpath='{.spec.containers[0].resources}'
+# {"limits":{"memory":"256Mi"},"requests":{"memory":"128Mi"}}
+
+# Monitor actual memory usage (requires metrics-server)
+kubectl top pod my-pod --containers
+
+# Check historical memory usage in Prometheus
+# container_memory_working_set_bytes{pod="my-pod"} — actual usage
+# container_spec_memory_limit_bytes{pod="my-pod"} — the limit
+```
+
+## Memory Limit Strategy
+```yaml
+resources:
+  requests:
+    memory: "256Mi"               # What scheduler uses for placement
+  limits:
+    memory: "512Mi"               # 2x request — gives burst headroom
+                                  # OOMKill happens when usage hits THIS value
+
+# For Java apps (JVM doesn't respect cgroup limits by default):
+# Use JVM flags to stay within container limits:
+env:
+- name: JAVA_OPTS
+  value: "-XX:MaxRAMPercentage=75.0 -XX:+UseContainerSupport"
+# This tells JVM to use max 75% of the container's memory limit
+```
+
+## Right-sizing with VPA (Vertical Pod Autoscaler)
+```yaml
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: my-app-vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+  updatePolicy:
+    updateMode: "Off"             # Recommendation only — don't auto-change
+  resourcePolicy:
+    containerPolicies:
+    - containerName: app
+      minAllowed:
+        memory: "128Mi"
+      maxAllowed:
+        memory: "2Gi"
+
+# Check VPA recommendations after running for a while:
+kubectl describe vpa my-app-vpa
+# Recommendation:
+#   Container Recommendations:
+#     Container Name: app
+#     Target: Memory: 384Mi      ← Use this as your new request/limit
+```
+
+## Common Mistake
+Setting memory limit equal to memory request. This creates a **Guaranteed** QoS pod (which is good for priority) but leaves zero headroom for traffic spikes — a single burst OOMKills the pod. Set limits at 1.5–2x requests for most apps.
+
+
+<Callout variant="tip" title="Key Takeaways">
+OOMKilled means your memory limit is too low for actual usage — either increase the limit, fix the leak, or use VPA recommendations to right-size based on real usage data.
+</Callout>
+
+---

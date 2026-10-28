@@ -1,0 +1,43 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "context-compaction-algorithms-token-budget"
+order: 54
+level: "advanced"
+format: "article"
+title: "Context Compaction at Scale: Semantic Truncation, Rolling Summarization, and KV Dropping"
+description: "As an execution trace nears the context limit, rolling summarization preserves the most tool-planning utility per token by compressing aged turns into a running summary, while raw truncation and key-value dropping are cheaper but risk discarding details a later step still needs."
+question: "As an agent execution trace approaches the model's maximum context length, what context compaction algorithms (e.g., semantic truncation, rolling summarization, key-value dropping) preserve the highest utility for tool planning while keeping token costs bounded?"
+domain: "Context & Budget Management"
+tags: ["Context & Budget Management", "Context Compaction", "ContextCompaction", "TokenBudget", "Summarization"]
+estimatedMinutes: 9
+xpValue: 20
+seoTitle: "Context Compaction Algorithms for Agents | AI Agents Guide"
+metaDescription: "Learn Context Compaction at Scale: Semantic Truncation, Rolling Summarization, and KV Dropping with architecture patterns and step-by-step guidance"
+publishDate: "2026-07-22"
+relatedModules: ["react-loop-token-usage-context-growth", "dual-layer-agent-memory-episodic-semantic"]
+---
+
+## Question
+As an agent execution trace approaches the model's maximum context length, what context compaction algorithms (e.g., semantic truncation, rolling summarization, key-value dropping) preserve the highest utility for tool planning while keeping token costs bounded?
+
+
+## Quick Answer
+Rolling summarization — periodically compressing aged turns into a running natural-language summary while keeping recent turns raw — preserves the most tool-planning utility per token of any of the common strategies, though it costs extra model calls; semantic truncation and key-value dropping are cheaper but risk silently discarding a detail a later step still needed.
+
+## Detailed Answer
+**Semantic truncation** drops or shortens individual observations based on relevance scoring rather than simple recency — an embedding-based relevance check against the current goal decides what stays close to full length and what gets cut down or removed. It's cheaper than summarization (no extra generation call) and works well when most tool output really is noise relative to the task, but its failure mode is real: a detail that scores low on relevance to the *current* sub-goal can turn out to matter for a *later* one the agent hasn't reached yet, and once truncated, it's gone.
+
+**Rolling summarization** keeps a fixed window of the most recent turns verbatim, and periodically folds everything older than that window into a single running summary (itself periodically re-summarized as it grows). This generally preserves the most *useful-for-planning* information per token, because a well-written summary retains the shape of what happened — what was tried, what worked, what didn't — rather than either the full noisy detail or an arbitrary cut. The cost is real: producing a good summary is itself a model call, adding latency and expense to the loop, and a summary is lossy by nature — if a downstream step needs an exact value that got summarized away ("the API returned exactly this JSON"), it's not recoverable without re-fetching.
+
+**Key-value dropping** targets specific fields within structured observations rather than whole turns — keeping the parts of a tool result that matter (an ID, a status) while dropping large payloads (full response bodies, verbose logs) that are rarely needed again. It's the cheapest option computationally and works well when tool outputs are large but the model only ever needs a small slice of each, but it requires knowing in advance which fields are safe to drop, which isn't always predictable for a general-purpose agent.
+
+| Strategy | Cost | Utility preserved | Best fit |
+|----------|------|--------------------|----------|
+| Semantic truncation | Low (scoring only) | Medium — risks dropping future-relevant detail | Mostly-noisy tool output, single clear current goal |
+| Rolling summarization | Higher (extra model calls) | High — retains overall shape of the run | Long, multi-phase tasks where "what happened" matters |
+| Key-value dropping | Lowest | Depends heavily on field selection | Large structured payloads with a known small useful subset |
+
+<Callout variant="tip" title="Key Takeaways">
+There's no free lunch on context compaction — rolling summarization usually preserves the most planning-relevant signal per token, but budget for the extra model calls it costs to get there.
+</Callout>
+

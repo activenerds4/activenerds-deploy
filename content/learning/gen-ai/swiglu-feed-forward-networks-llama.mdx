@@ -1,0 +1,37 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "swiglu-feed-forward-networks-llama"
+order: 27
+level: "beginner"
+format: "article"
+title: "SwiGLU Feed-Forward Networks: Why Modern LLMs Replaced ReLU and GELU"
+description: "SwiGLU replaces a single activation function with a gated product of two learned linear projections, improving gradient flow at the cost of an extra weight matrix."
+question: "In modern Transformer architectures (e.g., LLaMA), why was the standard ReLU/GELU Feed-Forward Network replaced by SwiGLU, and how does adding a gated linear unit alter the parameter distribution and activation footprint?"
+domain: "Architecture & Mathematics"
+tags: ["Architecture & Mathematics", "SwiGLU", "FFN", "ParameterCount"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "SwiGLU Feed-Forward Networks Explained | LLM Guide"
+metaDescription: "Learn why LLaMA-style Transformers replaced the standard ReLU/GELU feed-forward network with SwiGLU, and how the gating changes parameter count."
+publishDate: "2026-08-23"
+relatedModules: ["causal-masking-decoder-only-transformers"]
+---
+
+## Question
+In modern Transformer architectures (e.g., LLaMA), why was the standard ReLU/GELU Feed-Forward Network replaced by SwiGLU, and how does adding a gated linear unit alter the parameter distribution and activation footprint?
+
+
+## Quick Answer
+**SwiGLU** replaces a single activation function applied to one linear projection with a **gated** structure — the output of one linear layer, passed through the Swish activation, multiplies elementwise against a second, separate linear projection — which empirically improves training quality at the cost of a third weight matrix in the feed-forward block.
+
+## Detailed Answer
+A standard Transformer **feed-forward network (FFN)** applies one linear layer, a nonlinearity (ReLU or GELU), and a second linear layer: $\text{FFN}(x) = W_2 \cdot \text{Activation}(W_1 x)$. This works, but the nonlinearity has no way to selectively suppress or amplify different input features relative to each other — every unit passes through the same fixed function shape.
+
+**GLU (Gated Linear Unit)** variants introduce a second, independent linear projection whose output acts as a per-element **gate**: $\text{GLU}(x) = \text{Activation}(W_1 x) \odot (W_3 x)$, where $\odot$ is elementwise multiplication. **SwiGLU** specifically uses the **Swish/SiLU** activation ($\text{Swish}(x) = x \cdot \sigma(x)$) as that activation function: $\text{SwiGLU}(x) = \text{Swish}(W_1 x) \odot (W_3 x) \cdot W_2$. Empirically, across several model families including LLaMA, this gating structure produced measurably better downstream task performance than plain ReLU or GELU FFNs at equivalent compute budgets, likely because the gate lets the network learn input-dependent, feature-specific scaling rather than a single fixed nonlinear shape applied uniformly.
+
+The trade-off shows up directly in **parameter count**: a standard FFN needs two weight matrices ($W_1$, $W_2$), while SwiGLU needs three ($W_1$, $W_2$, $W_3$). To keep total FFN parameters roughly comparable to a non-gated FFN of the same hidden size, implementations typically shrink each individual matrix's inner dimension — commonly to about $\frac{2}{3}$ of what a two-matrix FFN would use — so the three smaller matrices land close to the same total parameter budget as two larger ones, while the activation footprint (the intermediate tensors held in memory during the forward pass) grows slightly because there are now two projections of the input to keep around simultaneously before the elementwise multiply.
+
+<Callout variant="tip" title="Key Takeaways">
+SwiGLU trades one extra weight matrix for a learned gating mechanism, and in practice that trade has consistently paid off in model quality across modern open LLM architectures.
+</Callout>
+

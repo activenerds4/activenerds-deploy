@@ -1,0 +1,35 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "react-loop-token-usage-context-growth"
+order: 15
+level: "beginner"
+format: "article"
+title: "ReAct Token Growth: Why Full-History Replay Gets Expensive Fast"
+description: "Appending every Thought, Action, and Observation to the prompt on each turn makes input length grow roughly linearly with turn count, and since every turn re-sends that whole history, cumulative token cost grows quadratically — mitigated at the basic loop level by truncation, summarization, or windowing."
+question: "In a naive ReAct loop implementation, why does appending the entire history of `Thought -> Action -> Observation` back into the prompt on every turn lead to exponential token consumption, and how is this mitigated at the basic loop level?"
+domain: "Core Loop Primitives"
+tags: ["Core Loop Primitives", "Token Usage", "StateLoop", "PromptEngineering", "TokenUsage"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "ReAct Loop Token Usage & Context Growth | AI Agents Guide"
+metaDescription: "Learn ReAct Token Growth: Why Full-History Replay Gets Expensive Fast with architecture patterns, practical configurations, and step-by-step implementation"
+publishDate: "2026-06-13"
+relatedModules: ["react-loop-thought-action-observation-state", "tool-calling-json-schema-translation"]
+---
+
+## Question
+In a naive ReAct loop implementation, why does appending the entire history of `Thought -> Action -> Observation` back into the prompt on every turn lead to exponential token consumption, and how is this mitigated at the basic loop level?
+
+
+## Quick Answer
+Because a naive ReAct loop has no memory of its own, every turn re-sends the entire transcript so far — so the prompt for turn *N* includes all *N-1* prior turns, and since the model is called once per turn, total tokens processed across a run grow roughly with the square of the number of turns, not linearly.
+
+## Detailed Answer
+Each ReAct turn is a fresh completion call, and the only way the model "remembers" what happened before is if it's literally re-reading it in the prompt. So turn 1 sends a short prompt, turn 2 sends turn 1's Thought/Action/Observation plus the new request, turn 3 sends turns 1 and 2 plus the new request, and so on. The *input length* of a single call grows roughly linearly with turn count — but because you're paying for that growing input on *every single call*, the cumulative tokens processed over an *N*-turn run is closer to quadratic (proportional to *N²*), not linear. A loop that would be cheap at 5 turns can become dramatically more expensive at 30, well before hitting any hard context-window limit.
+
+At the basic loop level, this is mitigated a few ways, roughly in order of how commonly they show up in minimal implementations: **truncating** older Observations to a fixed length rather than keeping raw tool output verbatim; **windowing** the transcript so only the last *k* turns (plus the original task) are kept in full; and **summarizing** older turns into a compact running summary that replaces the raw exchanges once they age out of the window. None of these require a full memory architecture — they're just discipline applied to what gets re-appended before the next call, which is enough to keep a simple loop's cost roughly linear instead of quadratic.
+
+<Callout variant="tip" title="Key Takeaways">
+In a naive ReAct loop, cost grows with the *square* of turn count unless something actively prunes the transcript — truncation or windowing at the basic loop level is the cheapest fix before reaching for a real memory system.
+</Callout>
+

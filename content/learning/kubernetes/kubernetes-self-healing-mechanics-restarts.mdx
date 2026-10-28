@@ -1,0 +1,88 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "kubernetes-self-healing-mechanics-restarts"
+order: 75
+level: "beginner"
+format: "article"
+title: "Kubernetes Self-Healing Mechanics: Automatic Restarts and Pod Rescheduling"
+description: "When a pod crashes, the ReplicaSet controller detects the count has dropped below desired and creates a replacement pod — this happens automatically within s..."
+question: "How does the Kubelet enforce self-healing mechanics through container restart policies and health probes, and how does the control plane reschedule Pods when a node dies?"
+domain: "Workloads & Scheduling"
+tags: ["Self-healing", "Deployments"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Kubernetes Self-Healing Mechanics: Automatic  | K8s Guide"
+metaDescription: "Learn Kubernetes Self-Healing Mechanics: Automatic Restarts and Pod Rescheduling with architecture patterns, practical configurations, and step-by-step impleme"
+publishDate: "2026-07-11"
+relatedModules: ["pod-lifecycle-states-phase-transitions"]
+---
+
+## Question
+How does the Kubelet enforce self-healing mechanics through container restart policies and health probes, and how does the control plane reschedule Pods when a node dies?
+
+## Quick Answer
+When a pod crashes, the ReplicaSet controller detects the count has dropped below desired and creates a replacement pod — this happens automatically within seconds without human intervention.
+
+
+## Detailed Answer
+```
+Pod crashes (exit code non-zero)
+        │
+        ▼
+kubelet on node detects container stopped
+        │
+        ▼
+kubelet attempts restart (respects restartPolicy)
+        │
+        ├── restartPolicy: Always  → Restart immediately
+        │   (exponential backoff: 10s, 20s, 40s... → CrashLoopBackOff)
+        │
+        ├── restartPolicy: OnFailure → Restart only if exit code != 0
+        │
+        └── restartPolicy: Never   → Don't restart (use for Jobs)
+
+If node dies entirely:
+        │
+        ▼
+Node controller detects node NotReady (after ~40s)
+        │
+        ▼
+After pod-eviction-timeout (default 5 min):
+ReplicaSet controller reschedules pods to healthy nodes
+        │
+        ▼
+Scheduler assigns pods to available nodes
+        │
+        ▼
+kubelet on new node starts replacement pods
+```
+
+## CrashLoopBackOff Explained
+```bash
+# CrashLoopBackOff means the container keeps crashing
+# K8s uses exponential backoff to avoid hammering a broken service:
+# Attempt 1: restart immediately
+# Attempt 2: wait 10s
+# Attempt 3: wait 20s
+# Attempt 4: wait 40s
+# Attempt 5: wait 80s
+# Attempt 6+: wait 300s (5 min max)
+
+# Debug CrashLoopBackOff
+kubectl logs my-pod --previous         # Logs from the crashed container
+kubectl describe pod my-pod            # Check events for crash reason
+kubectl get pod my-pod -o jsonpath=\
+  '{.status.containerStatuses[0].lastState.terminated.reason}'
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+Self-healing is the most powerful operational feature of Kubernetes — but CrashLoopBackOff is Kubernetes telling you "I keep trying but your app keeps failing" — fix the app, not the K8s config.
+</Callout>
+
+---
+
+# 🟡 INTERMEDIATE LEVEL — Questions 26–100
+### Practical Application & Real-World Scenarios
+
+---

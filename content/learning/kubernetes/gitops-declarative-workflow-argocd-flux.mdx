@@ -1,0 +1,131 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "gitops-declarative-workflow-argocd-flux"
+order: 6
+level: "advanced"
+format: "article"
+title: "GitOps Workflow: Declarative Infrastructure Management with ArgoCD and Flux"
+description: "GitOps treats Git as the single source of truth for cluster state — changes happen via Git commits (not kubectl), and a controller continuously reconciles cl..."
+question: "How does the GitOps pull-based architecture (using ArgoCD or Flux) differ from traditional push-based CI/CD pipelines, and how does it detect and reconcile cluster state drift automatically?"
+domain: "Workloads & Scheduling"
+tags: ["GitOps", "ArgoCD", "Flux"]
+estimatedMinutes: 5
+xpValue: 20
+seoTitle: "GitOps Workflow: Declarative Infrastructure M | K8s Guide"
+metaDescription: "Learn GitOps Workflow: Declarative Infrastructure Management with ArgoCD and Flux with architecture patterns, practical configurations, and step-by-step implem"
+publishDate: "2026-06-01"
+relatedModules: ["gitlab-cicd-kubernetes-integration-pipeline", "networkpolicies-microsegmentation-pod-traffic"]
+---
+
+## Question
+How does the GitOps pull-based architecture (using ArgoCD or Flux) differ from traditional push-based CI/CD pipelines, and how does it detect and reconcile cluster state drift automatically?
+
+## Quick Answer
+GitOps treats Git as the single source of truth for cluster state — changes happen via Git commits (not kubectl), and a controller continuously reconciles cluster state to match Git, giving you audit trails, rollbacks, and drift detection for free.
+
+
+## Detailed Answer
+| Dimension | Traditional CI/CD | GitOps |
+|---|---|---|
+| **Deployment trigger** | CI pipeline runs kubectl | Git commit detected by controller |
+| **Direction** | Push (CI pushes to cluster) | Pull (controller pulls from Git) |
+| **Cluster credentials** | CI server holds kubeconfig | Controller runs inside cluster |
+| **Audit trail** | CI logs (ephemeral) | Git history (permanent) |
+| **Rollback** | Re-run old pipeline | `git revert` → auto-synced |
+| **Drift detection** | None by default | Continuous — alerts on drift |
+| **Security** | Wide blast radius (kubeconfig in CI) | Narrow (controller has scoped RBAC) |
+
+## GitOps Principles (OpenGitOps)
+```
+1. Declarative  — Entire system described declaratively in Git
+2. Versioned    — Git is the single source of truth, versioned and immutable
+3. Pulled       — Approved changes auto-applied by software agents (not pushed)
+4. Continuous   — Software agents continuously reconcile desired vs actual state
+```
+
+## ArgoCD vs Flux Comparison
+| Feature | ArgoCD | Flux |
+|---|---|---|
+| **UI** | Rich built-in web UI | CLI-first (Weave GitOps UI separate) |
+| **Multi-tenancy** | AppProjects for strong isolation | Tenancy via namespace + RBAC |
+| **Architecture** | Centralized server + agents | Distributed controllers per cluster |
+| **Helm support** | First-class | First-class |
+| **Kustomize support** | First-class | First-class |
+| **Notifications** | Plugin-based | Notification controller built-in |
+| **Best for** | Teams wanting visibility + UI | GitOps-native, modular approach |
+
+## Implementing GitOps Workflow
+```bash
+# Developer workflow with GitOps:
+
+# 1. Create feature branch
+git checkout -b feature/update-config
+
+# 2. Make changes to K8s manifests
+vim overlays/production/kustomization.yaml
+# Change: newTag: v1.2.3 → newTag: v1.3.0
+
+# 3. Open Merge Request — triggers CI validation
+# CI runs: kubectl diff, kube-score, trivy manifest scan, conftest policy check
+
+# 4. Team reviews and approves MR
+# 5. Merge to main
+# 6. ArgoCD detects change within 3 minutes (or via webhook instantly)
+# 7. ArgoCD syncs cluster to new state
+# 8. ArgoCD reports sync status (healthy/degraded) back to GitLab commit status
+
+# Rollback is just a git revert:
+git revert HEAD
+git push origin main
+# ArgoCD detects revert → re-applies previous state automatically
+```
+
+## Drift Detection and Self-Healing
+```yaml
+# ArgoCD self-heal — reverts manual kubectl changes automatically
+syncPolicy:
+  automated:
+    selfHeal: true          # Revert any kubectl edit/patch in the cluster
+    prune: true             # Delete resources removed from Git
+
+# What happens when someone runs kubectl edit deployment in production:
+# 1. Change applied immediately to cluster
+# 2. ArgoCD detects drift within 3 minutes
+# 3. ArgoCD reverts to Git state (if selfHeal: true)
+# 4. Slack/PagerDuty notification: "Out of sync detected on production"
+# 5. Engineer must make change via Git MR instead
+```
+
+## Notification Setup
+```yaml
+# ArgoCD Notifications — alert on sync failures
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  trigger.on-sync-failed: |
+    - when: app.status.operationState.phase in ['Error', 'Failed']
+      send: [slack-notification]
+  template.slack-notification: |
+    message: |
+      Application {{.app.metadata.name}} sync {{.app.status.operationState.phase}}
+      Cluster: {{.app.spec.destination.server}}
+      Revision: {{.app.status.sync.revision}}
+      {{if .app.status.operationState.syncResult.resources}}
+      Failed resources:
+      {{range .app.status.operationState.syncResult.resources}}
+        - {{.kind}}/{{.name}}: {{.message}}
+      {{end}}{{end}}
+  service.slack: |
+    token: $slack-token
+    channel: "#deployments"
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+GitOps eliminates the "who deployed what and when?" question permanently — every production change is a Git commit with an author, timestamp, and diff, making auditing, rollbacks, and compliance effortless.
+</Callout>
+
+---

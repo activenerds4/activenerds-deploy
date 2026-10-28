@@ -1,0 +1,290 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "gitlab-cicd-kubernetes-integration-pipeline"
+order: 3
+level: "advanced"
+format: "article"
+title: "GitLab CI/CD Integration: Automated Container Builds and Manifest Deployments"
+description: "The modern pattern is push-based CI (GitLab builds + tests + pushes image) combined with pull-based CD (ArgoCD detects config changes and syncs to cluster) —..."
+question: "How do you configure a GitLab CI/CD pipeline to build container images, update Kubernetes manifests, and execute secure deployments to a Kubernetes cluster using ServiceAccounts?"
+domain: "Workloads & Scheduling"
+tags: ["CI/CD", "GitLab", "GitOps"]
+estimatedMinutes: 8
+xpValue: 20
+seoTitle: "GitLab CI/CD Integration: Automated Container | K8s Guide"
+metaDescription: "Learn GitLab CI/CD Integration: Automated Container Builds and Manifest Deployments with architecture patterns, practical configurations, and step-by-step impl"
+publishDate: "2026-07-03"
+relatedModules: ["gitops-declarative-workflow-argocd-flux", "networkpolicies-microsegmentation-pod-traffic"]
+---
+
+## Question
+How do you configure a GitLab CI/CD pipeline to build container images, update Kubernetes manifests, and execute secure deployments to a Kubernetes cluster using ServiceAccounts?
+
+## Quick Answer
+The modern pattern is push-based CI (GitLab builds + tests + pushes image) combined with pull-based CD (ArgoCD detects config changes and syncs to cluster) — separating build concerns from deployment concerns.
+
+
+## Detailed Answer
+## Architecture Overview
+```
+Developer pushes code
+        │
+        ▼
+GitLab CI Pipeline
+├── build:    docker build + push to ECR
+├── test:     unit tests, integration tests
+├── scan:     trivy image scan, SAST
+├── publish:  tag image with commit SHA
+└── update:   bump image tag in config repo
+        │
+        ▼
+Config Repo (k8s-configs)
+└── ArgoCD detects change (polls every 3 min or webhook)
+        │
+        ▼
+ArgoCD syncs to cluster
+├── Applies new Deployment manifest
+├── Monitors rollout health
+└── Auto-rollback if health checks fail
+```
+
+```yaml
+# .gitlab-ci.yml — Complete pipeline
+stages:
+  - build
+  - test
+  - scan
+  - publish
+  - deploy
+
+variables:
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+  IMAGE_TAG: $CI_COMMIT_SHA
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+
+# ── BUILD ───────────────────────────────────────────────────────
+build:
+  stage: build
+  image: docker:24-dind
+  services:
+  - docker:24-dind
+  variables:
+    DOCKER_BUILDKIT: "1"
+  before_script:
+  - aws ecr get-login-password --region $AWS_REGION |
+      docker login --username AWS --password-stdin $ECR_REGISTRY
+  script:
+  - |
+    docker build \
+      --cache-from $ECR_REGISTRY/my-app:latest \
+      --build-arg BUILDKIT_INLINE_CACHE=1 \
+      --tag $ECR_REGISTRY/my-app:$IMAGE_TAG \
+      --tag $ECR_REGISTRY/my-app:latest \
+      .
+  - docker push $ECR_REGISTRY/my-app:$IMAGE_TAG
+  - docker push $ECR_REGISTRY/my-app:latest
+  only:
+  - main
+  - merge_requests
+
+# ── TEST ────────────────────────────────────────────────────────
+unit-test:
+  stage: test
+  image: $ECR_REGISTRY/my-app:$IMAGE_TAG
+  script:
+  - pytest tests/unit/ --junitxml=report.xml
+  artifacts:
+    reports:
+      junit: report.xml
+  only:
+  - main
+  - merge_requests
+
+integration-test:
+  stage: test
+  image: $ECR_REGISTRY/my-app:$IMAGE_TAG
+  services:
+  - name: postgres:16
+    alias: postgres
+  variables:
+    POSTGRES_DB: testdb
+    POSTGRES_PASSWORD: testpassword
+  script:
+  - pytest tests/integration/ --junitxml=integration-report.xml
+  only:
+  - main
+
+# ── SECURITY SCAN ───────────────────────────────────────────────
+trivy-scan:
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+  - |
+    trivy image \
+      --exit-code 1 \
+      --severity HIGH,CRITICAL \
+      --no-progress \
+      --format table \
+      $ECR_REGISTRY/my-app:$IMAGE_TAG
+  allow_failure: false              # Fail pipeline on HIGH/CRITICAL vulns
+  only:
+  - main
+
+# ── DEPLOY (GitOps pattern — update config repo) ─────────────────
+update-staging:
+  stage: deploy
+  image: alpine/git:latest
+  before_script:
+  - git config --global user.email "gitlab-ci@company.com"
+  - git config --global user.name "GitLab CI"
+  script:
+  - |
+    git clone https://oauth2:$CONFIG_REPO_TOKEN@gitlab.com/myorg/k8s-configs.git
+    cd k8s-configs
+
+    # Update image tag in staging overlay
+    sed -i "s|newTag:.*|newTag: $IMAGE_TAG|" \
+      overlays/staging/kustomization.yaml
+
+    git add .
+    git commit -m "chore: update my-app to $IMAGE_TAG [skip ci]
+
+    Pipeline: $CI_PIPELINE_URL
+    Commit: $CI_COMMIT_URL
+    Author: $GITLAB_USER_EMAIL"
+
+    git push origin main
+  environment:
+    name: staging
+  only:
+  - main
+
+update-production:
+  stage: deploy
+  image: alpine/git:latest
+  script:
+  - |
+    git clone https://oauth2:$CONFIG_REPO_TOKEN@gitlab.com/myorg/k8s-configs.git
+    cd k8s-configs
+    sed -i "s|newTag:.*|newTag: $IMAGE_TAG|" \
+      overlays/production/kustomization.yaml
+    git add .
+    git commit -m "chore: promote my-app $IMAGE_TAG to production [skip ci]"
+    git push origin main
+  environment:
+    name: production
+  when: manual                      # Require manual approval for production
+  only:
+  - main
+```
+
+## Config Repo Structure (k8s-configs)
+```
+k8s-configs/
+├── base/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── hpa.yaml
+│   └── kustomization.yaml
+├── overlays/
+│   ├── staging/
+│   │   ├── kustomization.yaml      # newTag: abc123 (updated by CI)
+│   │   ├── replica-patch.yaml      # replicas: 2
+│   │   └── resource-patch.yaml     # smaller resources
+│   └── production/
+│       ├── kustomization.yaml      # newTag: def456 (updated by CI)
+│       ├── replica-patch.yaml      # replicas: 5
+│       └── resource-patch.yaml     # full resources
+└── argocd/
+    ├── staging-app.yaml
+    └── production-app.yaml
+```
+
+## ArgoCD Application Definitions
+```yaml
+# argocd/staging-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-app-staging
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: staging
+  source:
+    repoURL: https://gitlab.com/myorg/k8s-configs
+    targetRevision: main
+    path: overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+    - CreateNamespace=true
+    - ApplyOutOfSyncOnly=true
+    - PrunePropagationPolicy=foreground
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  # Health checks — ArgoCD monitors these after sync
+  ignoreDifferences:
+  - group: apps
+    kind: Deployment
+    jsonPointers:
+    - /spec/replicas                # Ignore HPA-managed replica count
+
+---
+# ArgoCD Project — scopes what staging app can access
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: staging
+  namespace: argocd
+spec:
+  description: Staging environment applications
+  sourceRepos:
+  - https://gitlab.com/myorg/k8s-configs
+  destinations:
+  - namespace: staging
+    server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+  - group: ""
+    kind: Namespace
+  namespaceResourceWhitelist:
+  - group: "*"
+    kind: "*"
+  roles:
+  - name: developer
+    description: Developers can sync but not delete
+    policies:
+    - p, proj:staging:developer, applications, sync, staging/*, allow
+    - p, proj:staging:developer, applications, get, staging/*, allow
+    groups:
+    - frontend-team
+    - backend-team
+```
+
+## Common Mistakes to Avoid
+- Running `kubectl apply` directly from CI — creates drift ArgoCD can't track
+- Using `latest` image tag — ArgoCD can't detect changes if tag doesn't change
+- Storing kubeconfig in CI variables — use IRSA or ArgoCD's own sync instead
+- Not separating app repo from config repo — mixing concerns makes rollbacks harder
+- Forgetting `[skip ci]` in config repo commits — causes infinite CI loops
+
+
+<Callout variant="tip" title="Key Takeaways">
+Separate your CI (build/test/push) from your CD (deploy/sync) — CI is push-based and triggered by code changes; CD is pull-based via ArgoCD watching the config repo, giving you a complete audit trail and drift detection.
+</Callout>
+
+---

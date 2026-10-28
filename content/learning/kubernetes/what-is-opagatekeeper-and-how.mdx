@@ -1,0 +1,184 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "what-is-opagatekeeper-and-how"
+order: 21
+level: "expert"
+format: "article"
+title: "What Is OPA/Gatekeeper and How Does It Extend Admission Control?: Architecture & Implementation"
+description: "OPA Gatekeeper is a Kubernetes-native policy engine that replaces hand-written admission webhooks with declarative policies written in Rego, using CRDs (`Con..."
+question: "What is OPA/Gatekeeper, how does it integrate with Kubernetes Validating Admission Webhooks, and how do ConstraintTemplates define declarative cluster governance policies?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Security", "Policy", "OPA"]
+estimatedMinutes: 15
+xpValue: 25
+seoTitle: "What Is OPA/Gatekeeper and How Does It Extend | K8s Guide"
+metaDescription: "Learn What Is OPA/Gatekeeper and How Does It Extend Admission Control?: Architecture & Implementation with architecture patterns, practical configurations, and"
+publishDate: "2026-07-13"
+relatedModules: []
+---
+
+---
+
+## Question
+What is OPA/Gatekeeper, how does it integrate with Kubernetes Validating Admission Webhooks, and how do ConstraintTemplates define declarative cluster governance policies?
+
+## Quick Answer
+**OPA Gatekeeper is a Kubernetes-native policy engine that replaces hand-written admission webhooks with declarative policies written in Rego**, using CRDs (`ConstraintTemplate` + `Constraint`) so policies can be applied, versioned, and audited without writing or deploying webhook server code.
+
+---
+
+
+## Detailed Answer
+Gatekeeper installs itself as a `ValidatingWebhookConfiguration` and a `MutatingWebhookConfiguration`, then intercepts all relevant API requests and evaluates them against `Constraint` objects. **A `ConstraintTemplate` defines the Rego policy logic and registers a new CRD kind** (e.g., `K8sRequiredLabels`). A `Constraint` is an instance of that CRD specifying where and how the policy applies (e.g., "all Deployments in the `prod` namespace must have a `team` label"). This separation of *policy logic* from *policy scope* is Gatekeeper's key architectural advantage. Additionally, Gatekeeper can run in **audit mode** — scanning existing resources and reporting violations on Constraint status — without blocking anything, which makes adoption gradual.
+
+---
+
+## Deep Dive
+## Architecture overview
+```
+kubectl apply Deployment
+       ↓
+Gatekeeper ValidatingWebhook
+       ↓
+OPA evaluates Rego against all matching Constraints
+       ↓
+Any violation → deny with message from Rego
+       ↓
+Audit controller scans existing resources → updates Constraint.status.violations
+```
+
+## ConstraintTemplate — define Rego policy + CRD
+```yaml
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            labels:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+
+        violation[{"msg": msg}] {
+          # Get list of required labels from constraint parameters
+          required := {label | label := input.parameters.labels[_]}
+          # Get labels present on the object
+          provided := {label | input.review.object.metadata.labels[label]}
+          # Find missing labels
+          missing := required - provided
+          count(missing) > 0
+          msg := sprintf(
+            "Missing required labels: %v (provided: %v)",
+            [missing, provided]
+          )
+        }
+```
+
+## Constraint — apply the policy with scope
+```yaml
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: require-team-and-env-labels
+spec:
+  enforcementAction: deny    # or "warn" for soft enforcement
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+    namespaces: ["prod", "staging"]
+    excludedNamespaces: ["kube-system", "gatekeeper-system"]
+  parameters:
+    labels: ["team", "environment", "cost-center"]
+```
+
+## Advanced Rego — image registry allowlist
+```yaml
+# ConstraintTemplate for allowed registries
+rego: |
+  package k8sallowedrepos
+
+  violation[{"msg": msg}] {
+    container := input.review.object.spec.containers[_]
+    not starts_with_allowed(container.image)
+    msg := sprintf(
+      "Container %q uses disallowed registry. Image: %q. Allowed: %v",
+      [container.name, container.image, input.parameters.repos]
+    )
+  }
+
+  # Also check initContainers
+  violation[{"msg": msg}] {
+    container := input.review.object.spec.initContainers[_]
+    not starts_with_allowed(container.image)
+    msg := sprintf(
+      "initContainer %q uses disallowed registry: %q",
+      [container.name, container.image]
+    )
+  }
+
+  starts_with_allowed(image) {
+    repo := input.parameters.repos[_]
+    startswith(image, repo)
+  }
+```
+
+## Checking audit violations (existing resources)
+```bash
+# See all violations on a constraint
+kubectl get k8srequiredlabels require-team-and-env-labels \
+  -o jsonpath='{.status.violations}' | jq .
+
+# Output:
+# [
+#   {
+#     "enforcementAction": "deny",
+#     "group": "apps",
+#     "kind": "Deployment",
+#     "message": "Missing required labels: {\"team\"}",
+#     "name": "legacy-api",
+#     "namespace": "prod",
+#     "version": "v1"
+#   }
+# ]
+```
+
+## Gatekeeper vs. hand-written webhook
+| Feature | Custom Webhook | OPA Gatekeeper |
+|---|---|---|
+| Policy language | Go/Python/any | Rego (declarative) |
+| Audit existing resources | Manual | Built-in |
+| Adding new policy | Deploy new code | Apply new YAML |
+| Testing policies | Unit tests in code | `opa test` CLI |
+| Policy versioning | Git + CI/CD | Kubernetes YAML |
+| Mutation support | Full | Limited (alpha) |
+| Dry-run / warn mode | Manual | `enforcementAction: warn` |
+| Operational complexity | High | Medium |
+
+> **Production lesson:** Start with `enforcementAction: warn` for all new policies. This lets you see violations in `kubectl describe constraint` without blocking deployments, giving you a safe adoption window. Switch to `deny` only after you've confirmed zero violations across all namespaces in audit results.
+
+> **Common mistake:** Writing Rego that only checks `spec.containers` and forgetting `spec.initContainers` and `spec.ephemeralContainers`. A security bypass is trivially easy if your registry policy only covers main containers.
+
+> **Self-assessment:** Can you write a ConstraintTemplate from scratch? Can you explain the difference between a ConstraintTemplate and a Constraint? Can you describe how audit mode works and why it matters for brownfield clusters?
+
+> **Follow-up questions:** Q5 (Enforce image registry policy scenario), Q11 (Pod Security Admission)
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Safe Rollouts**: Introduce new Gatekeeper constraints in warn mode to audit violations before promoting to deny.
+- **Comprehensive Scope**: Ensure Rego rules inspect spec.initContainers and spec.ephemeralContainers alongside standard application containers.
+</Callout>
+

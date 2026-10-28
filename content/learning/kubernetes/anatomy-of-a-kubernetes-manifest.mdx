@@ -1,0 +1,68 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "anatomy-of-a-kubernetes-manifest"
+order: 42
+level: "beginner"
+format: "article"
+title: "Anatomy of a Kubernetes Manifest: The Four Essential Structure Fields"
+description: "A manifest is a YAML file describing a desired Kubernetes object. Every manifest requires: `apiVersion`, `kind`, `metadata`, and `spec`."
+question: "Explain the architecture, failure modes, and operational best practices for Anatomy of a Kubernetes Manifest: The Four Essential Structure Fields in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["YAML", "Manifests"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Anatomy of a Kubernetes Manifest: The Four Es | K8s Guide"
+metaDescription: "Learn Anatomy of a Kubernetes Manifest: The Four Essential Structure Fields with architecture patterns, practical configurations, and step-by-step implementati"
+publishDate: "2026-06-21"
+relatedModules: ["labels-vs-annotations-metadata-selectors", "liveness-readiness-startup-probes-guide", "statefulsets-vs-deployments-stateful-apps"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for Anatomy of a Kubernetes Manifest: The Four Essential Structure Fields in production Kubernetes environments.
+
+## Quick Answer
+A manifest is a YAML file describing a desired Kubernetes object. Every manifest requires: `apiVersion`, `kind`, `metadata`, and `spec`.
+
+
+## Detailed Answer
+```yaml
+# These four fields are REQUIRED in every Kubernetes manifest
+apiVersion: apps/v1        # Which API group/version defines this kind
+                           # v1 = core (Pod, Service, ConfigMap, Secret)
+                           # apps/v1 = Deployment, StatefulSet, DaemonSet
+                           # networking.k8s.io/v1 = Ingress, NetworkPolicy
+
+kind: Deployment           # The object type — must match what apiVersion supports
+
+metadata:                  # Object identity
+  name: my-app             # Required — unique within namespace
+  namespace: production    # Optional — defaults to 'default'
+  labels:                  # Optional but critical — used for selectors
+    app: my-app
+    version: v1
+  annotations:             # Optional — metadata for tools, not selectors
+    description: "Main application deployment"
+
+spec:                      # Desired state — structure varies by kind
+  replicas: 3
+  # ... rest of spec
+
+# The API server also adds 'status' — you never write this, K8s manages it
+status:                    # Current actual state (managed by K8s)
+  availableReplicas: 3
+  readyReplicas: 3
+```
+
+## Finding the Right apiVersion
+```bash
+kubectl api-resources | grep deployment    # Shows: apps  true  Deployment
+kubectl api-versions | grep apps           # Shows: apps/v1
+kubectl explain deployment                 # Shows apiVersion, kind, fields
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+The `spec` declares desired state; `status` reflects actual state — the gap between them is what Kubernetes controllers work to close.
+</Callout>
+
+---

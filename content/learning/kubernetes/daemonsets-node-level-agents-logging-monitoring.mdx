@@ -1,0 +1,128 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "daemonsets-node-level-agents-logging-monitoring"
+order: 39
+level: "intermediate"
+format: "article"
+title: "DaemonSets: Running Node-Level Daemon Agents for Logging and Monitoring"
+description: "A DaemonSet ensures exactly one pod runs on every node (or a subset of nodes) — use it for node-level infrastructure concerns like log collection, monitoring..."
+question: "Explain the architecture, failure modes, and operational best practices for DaemonSets: Running Node-Level Daemon Agents for Logging and Monitoring in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["DaemonSets"]
+estimatedMinutes: 3
+xpValue: 15
+seoTitle: "DaemonSets: Running Node-Level Daemon Agents  | K8s Guide"
+metaDescription: "Learn DaemonSets: Running Node-Level Daemon Agents for Logging and Monitoring with architecture patterns, practical configurations, and step-by-step implementa"
+publishDate: "2026-06-01"
+relatedModules: ["statefulsets-vs-deployments-stateful-apps"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for DaemonSets: Running Node-Level Daemon Agents for Logging and Monitoring in production Kubernetes environments.
+
+## Quick Answer
+A DaemonSet ensures exactly one pod runs on every node (or a subset of nodes) — use it for node-level infrastructure concerns like log collection, monitoring agents, and network plugins.
+
+
+## Detailed Answer
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluentbit
+  namespace: logging
+spec:
+  selector:
+    matchLabels:
+      app: fluentbit
+  updateStrategy:
+    type: RollingUpdate             # RollingUpdate | OnDelete
+    rollingUpdate:
+      maxUnavailable: 1             # Update one node at a time
+  template:
+    metadata:
+      labels:
+        app: fluentbit
+    spec:
+      # Run on control plane nodes too (they're tainted by default)
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        effect: NoSchedule
+      - key: node.kubernetes.io/not-ready
+        effect: NoExecute
+        tolerationSeconds: 300
+
+      # Host access required for log collection
+      hostNetwork: false
+      hostPID: false
+
+      containers:
+      - name: fluentbit
+        image: fluent/fluent-bit:3.0
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            memory: "256Mi"
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+          readOnly: true
+        - name: containers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: config
+          mountPath: /fluent-bit/etc/
+
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: containers
+        hostPath:
+          path: /var/lib/docker/containers
+      - name: config
+        configMap:
+          name: fluentbit-config
+
+      # Ensure DaemonSet pods don't get evicted easily
+      priorityClassName: system-node-critical
+```
+
+## Common DaemonSet Use Cases
+| Use Case | Example Tools |
+|---|---|
+| **Log collection** | Fluent Bit, Fluentd, Filebeat |
+| **Metrics collection** | Datadog agent, Prometheus node-exporter |
+| **Security scanning** | Falco, Twistlock, Sysdig |
+| **Network plugin (CNI)** | Calico, Cilium, Weave |
+| **Storage plugin** | Ceph, GlusterFS node agents |
+| **Node local DNS cache** | NodeLocal DNSCache |
+| **GPU device plugin** | NVIDIA device plugin |
+
+```bash
+# DaemonSet operations
+kubectl get daemonset -A
+kubectl rollout status daemonset/fluentbit -n logging
+kubectl rollout history daemonset/fluentbit -n logging
+kubectl rollout undo daemonset/fluentbit -n logging
+
+# Run DaemonSet only on specific nodes (subset)
+# Use nodeSelector or nodeAffinity in pod spec:
+nodeSelector:
+  role: worker                      # Only run on nodes labeled role=worker
+
+# Check how many pods DaemonSet created vs desired
+kubectl describe daemonset fluentbit -n logging
+# Desired Number of Nodes Scheduled: 5
+# Current Number of Nodes Scheduled: 5
+# Number Ready: 5
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+DaemonSets are for infrastructure concerns that must run everywhere — they automatically add pods to new nodes as the cluster scales and remove them when nodes are drained.
+</Callout>
+
+---

@@ -118,11 +118,38 @@ export const navigationConfig: NavigationConfig = {
         : {}),
     },
     {
+      id: "deep-learning",
+      label: "Deep Learning",
+      href: "/learning",
+      enabled: true,
+      children: [
+        {
+          label: "Learning Paths",
+          href: "/learning/paths",
+          description: "Curated roadmaps: Docker, Kubernetes, Gen AI, Agentic AI",
+        },
+        {
+          label: "Q&A Challenges",
+          href: "/learning/challenges",
+          description: "Interactive mechanism puzzles with Flashcards, Scenarios, and Quizzes",
+        },
+        {
+          label: "Glossary",
+          href: "/learning/glossary",
+          description: "Mechanism-first definitions with failure modes and mental models",
+        },
+        {
+          label: "Cheat Sheets",
+          href: "/learning/cheat-sheets",
+          description: "High-density terminal and architecture reference cards",
+        },
+      ],
+    },
+    {
       id: "tools",
       label: "Tools",
       href: "/tools",
       enabled: true,
-      badge: { text: "New", variant: "new" },
       cascade: true,
       groups: [
         {
@@ -250,12 +277,7 @@ export const navigationConfig: NavigationConfig = {
             {
               label: "All Resources",
               href: "/resources",
-              description: "Main hub — every cheat sheet, guide & reference",
-            },
-            {
-              label: "Cheat Sheets",
-              href: "/resources/cheatsheets",
-              description: "Quick-reference cards, grouped by topic",
+              description: "Main hub — guides, checklists & directories",
             },
             {
               label: "Checklists",
@@ -273,31 +295,6 @@ export const navigationConfig: NavigationConfig = {
               description: "KubeCon, AI conferences, hackathons",
             },
             { label: "FAQ", href: "/faq", description: "Common questions answered" },
-          ],
-        },
-        {
-          label: "Cheat Sheet Collections",
-          items: [
-            {
-              label: "AI & LLM Engineering",
-              href: "/resources/cheatsheets?category=ai-llm-engineering",
-              description: "Training, inference, fine-tuning & MLOps",
-            },
-            {
-              label: "Kubernetes & Containers",
-              href: "/resources/cheatsheets?category=kubernetes-containers",
-              description: "kubectl, YAML patterns & troubleshooting",
-            },
-            {
-              label: "Cloud & DevSecOps",
-              href: "/resources/cheatsheets?category=cloud-devsecops",
-              description: "Hardening, policy-as-code & supply chain",
-            },
-            {
-              label: "Ergonomics & Active Tech",
-              href: "/resources/cheatsheets?category=ergonomics-active-tech",
-              description: "Desk setup, micro-exercises & movement",
-            },
           ],
         },
         {

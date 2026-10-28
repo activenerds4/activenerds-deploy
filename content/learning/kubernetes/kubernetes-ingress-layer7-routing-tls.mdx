@@ -1,0 +1,163 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "kubernetes-ingress-layer7-routing-tls"
+order: 18
+level: "intermediate"
+format: "article"
+title: "Kubernetes Ingress Controllers: Layer 7 HTTP Routing and SSL/TLS Termination"
+description: "Deploy an Ingress controller (nginx or AWS ALB), create a ClusterIP Service for your pods, then create an Ingress resource that defines routing rules from ex..."
+question: "How does an Ingress Controller manage Layer 7 HTTP/HTTPS traffic routing and SSL/TLS termination, and how does it differ from a NodePort or LoadBalancer Service?"
+domain: "Services & Networking"
+tags: ["Ingress", "Networking"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "Kubernetes Ingress Controllers: Layer 7 HTTP  | K8s Guide"
+metaDescription: "Learn Kubernetes Ingress Controllers: Layer 7 HTTP Routing and SSL/TLS Termination with architecture patterns, practical configurations, and step-by-step imple"
+publishDate: "2026-05-28"
+relatedModules: ["service-types-clusterip-nodeport-loadbalancer", "advanced-pod-scheduling-affinity-taints"]
+---
+
+## Question
+How does an Ingress Controller manage Layer 7 HTTP/HTTPS traffic routing and SSL/TLS termination, and how does it differ from a NodePort or LoadBalancer Service?
+
+## Quick Answer
+Deploy an Ingress controller (nginx or AWS ALB), create a ClusterIP Service for your pods, then create an Ingress resource that defines routing rules from external hostnames/paths to that Service.
+
+
+## Detailed Answer
+```bash
+# Step 1: Install an Ingress controller (one-time cluster setup)
+# Option A: nginx ingress controller
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --create-namespace \
+  --set controller.service.type=LoadBalancer
+
+# Option B: AWS Load Balancer Controller (for EKS — creates ALB)
+helm install aws-load-balancer-controller \
+  eks/aws-load-balancer-controller \
+  --namespace kube-system \
+  --set clusterName=my-cluster \
+  --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=\
+    arn:aws:iam::123456789012:role/AmazonEKSLoadBalancerControllerRole
+```
+
+```yaml
+# Step 2: Create ClusterIP Service for your app
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app-svc
+  namespace: production
+spec:
+  selector:
+    app: web-app
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: ClusterIP               # Internal — Ingress routes to this
+
+---
+# Step 3: Create Ingress with routing rules
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-app-ingress
+  namespace: production
+  annotations:
+    # For nginx controller:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+
+    # For AWS ALB controller:
+    # kubernetes.io/ingress.class: alb
+    # alb.ingress.kubernetes.io/scheme: internet-facing
+    # alb.ingress.kubernetes.io/target-type: ip
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:...
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - webapp.example.com
+    - api.example.com
+    secretName: webapp-tls           # TLS cert — use cert-manager to automate
+  rules:
+  # Rule 1: Host-based routing
+  - host: webapp.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-app-svc
+            port:
+              number: 80
+
+  # Rule 2: Path-based routing on same or different host
+  - host: api.example.com
+    http:
+      paths:
+      - path: /v1                    # Route /v1/* to v1 service
+        pathType: Prefix
+        backend:
+          service:
+            name: api-v1-svc
+            port:
+              number: 80
+      - path: /v2                    # Route /v2/* to v2 service
+        pathType: Prefix
+        backend:
+          service:
+            name: api-v2-svc
+            port:
+              number: 80
+```
+
+```bash
+# Verify Ingress is working
+kubectl get ingress -n production
+# NAME              CLASS   HOSTS                  ADDRESS          PORTS   AGE
+# web-app-ingress   nginx   webapp.example.com     203.0.113.10     80,443  5m
+
+# ADDRESS should show the external IP/hostname of your load balancer
+# If ADDRESS is empty — Ingress controller may not be running
+kubectl get pods -n ingress-nginx
+
+# Test from outside
+curl -H "Host: webapp.example.com" https://203.0.113.10/
+```
+
+## Automate TLS with cert-manager
+```yaml
+# ClusterIssuer for Let's Encrypt
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: ops@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+
+# Then in Ingress annotations — cert-manager auto-provisions cert:
+annotations:
+  cert-manager.io/cluster-issuer: "letsencrypt-prod"
+```
+
+## Common Mistake
+Creating an Ingress without an Ingress controller installed. The Ingress resource is just a config object — without a controller watching for it and provisioning the actual load balancer, nothing happens. Always verify the controller is running first.
+
+
+<Callout variant="tip" title="Key Takeaways">
+An Ingress controller is the actual implementation; an Ingress resource is just the routing configuration — you need both, and most clusters should have exactly one shared controller serving all Ingress resources.
+</Callout>
+
+---

@@ -1,0 +1,179 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "how-do-validating-vs-mutating"
+order: 51
+level: "advanced"
+format: "article"
+title: "How Do Validating vs. Mutating Admission Webhooks Differ?"
+description: "Mutating webhooks run first and can modify the incoming object (e.g., inject sidecars, set defaults); validating webhooks run second and can only accept or r..."
+question: "How do Mutating and Validating Admission Webhooks differ in execution order and purpose during an API server request, and how do you prevent webhooks from blocking cluster operations if they fail?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Admission", "Security"]
+estimatedMinutes: 10
+xpValue: 20
+seoTitle: "How Do Validating vs. Mutating Admission Webh | K8s Guide"
+metaDescription: "Learn How Do Validating vs. Mutating Admission Webhooks Differ? with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-05-05"
+relatedModules: []
+---
+
+---
+
+## Question
+How do Mutating and Validating Admission Webhooks differ in execution order and purpose during an API server request, and how do you prevent webhooks from blocking cluster operations if they fail?
+
+## Quick Answer
+**Mutating webhooks run first and can modify the incoming object** (e.g., inject sidecars, set defaults); **validating webhooks run second and can only accept or reject** — they cannot mutate.
+
+---
+
+
+## Detailed Answer
+Every API request to Kubernetes passes through an **admission chain** in this order: Authentication → Authorization → Mutating Admission → Object Schema Validation → Validating Admission → etcd write. **Mutating webhooks** receive the object, can modify it (returning a JSON Patch), and pass it along — this is how sidecar injectors (like Istio's) work. **Validating webhooks** receive the (potentially already-mutated) object and return a simple allow/deny decision, optionally with a user-facing message. **Because mutating runs before validating**, a mutating webhook can fill in defaults that your validating webhook then enforces.
+
+---
+
+## Deep Dive
+## Admission Chain Architecture
+```
+kubectl apply → API Server Auth/AuthZ
+                     ↓
+         [MutatingAdmissionWebhook]   ← can modify object
+                     ↓
+         Schema Validation (OpenAPI)
+                     ↓
+         [ValidatingAdmissionWebhook] ← allow or deny only
+                     ↓
+              Write to etcd
+```
+
+## MutatingWebhookConfiguration example (sidecar injector)
+```yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: sidecar-injector
+webhooks:
+  - name: inject.sidecar.mycompany.io
+    admissionReviewVersions: ["v1"]
+    clientConfig:
+      service:
+        name: sidecar-injector-svc
+        namespace: platform
+        path: /mutate
+      caBundle: <base64-CA>
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    # Only inject if namespace has this label
+    namespaceSelector:
+      matchLabels:
+        sidecar-injection: enabled
+    # Skip pods that opt out
+    objectSelector:
+      matchExpressions:
+        - key: sidecar.mycompany.io/inject
+          operator: NotIn
+          values: ["false"]
+    failurePolicy: Fail   # Reject if webhook is down
+    sideEffects: None
+    timeoutSeconds: 5
+```
+
+## Webhook server handler (Go) — mutating
+```go
+func mutatePod(w http.ResponseWriter, r *http.Request) {
+    body, _ := io.ReadAll(r.Body)
+    
+    var review admissionv1.AdmissionReview
+    json.Unmarshal(body, &review)
+    
+    pod := &corev1.Pod{}
+    json.Unmarshal(review.Request.Object.Raw, pod)
+    
+    // Build JSON patch to inject sidecar container
+    patch := []map[string]interface{}{
+        {
+            "op":    "add",
+            "path":  "/spec/containers/-",
+            "value": corev1.Container{
+                Name:  "logging-agent",
+                Image: "mycompany/log-agent:v2.1",
+                Resources: corev1.ResourceRequirements{
+                    Requests: corev1.ResourceList{
+                        corev1.ResourceCPU:    resource.MustParse("10m"),
+                        corev1.ResourceMemory: resource.MustParse("32Mi"),
+                    },
+                    Limits: corev1.ResourceList{
+                        corev1.ResourceCPU:    resource.MustParse("50m"),
+                        corev1.ResourceMemory: resource.MustParse("64Mi"),
+                    },
+                },
+            },
+        },
+    }
+    patchBytes, _ := json.Marshal(patch)
+    patchType := admissionv1.PatchTypeJSONPatch
+    
+    review.Response = &admissionv1.AdmissionResponse{
+        UID:       review.Request.UID,
+        Allowed:   true,
+        Patch:     patchBytes,
+        PatchType: &patchType,
+    }
+    
+    json.NewEncoder(w).Encode(review)
+}
+```
+
+## ValidatingWebhookConfiguration example
+```yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: policy-enforcer
+webhooks:
+  - name: validate.policy.mycompany.io
+    admissionReviewVersions: ["v1"]
+    clientConfig:
+      service:
+        name: policy-server
+        namespace: platform
+        path: /validate
+      caBundle: <base64-CA>
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        resources: ["deployments"]
+    failurePolicy: Fail
+    sideEffects: None
+```
+
+## Key differences table
+| Property | Mutating | Validating |
+|---|---|---|
+| Can modify object | ✅ Yes (JSON Patch) | ❌ No |
+| Execution order | First | Second |
+| Can reject requests | ✅ | ✅ |
+| Side effects allowed | Configurable | Must be None/NoneOnDryRun |
+| Idempotency requirement | Critical | N/A |
+| Common use case | Inject sidecars, set defaults | Enforce policy, validate labels |
+
+> **Production lesson:** Always set `failurePolicy: Fail` for security-critical webhooks and `failurePolicy: Ignore` for optional features. A misconfig that takes your webhook down shouldn't make `kubectl apply` work differently depending on webhook availability.
+
+> **Common mistake:** Not setting `sideEffects: None` on webhooks that don't have side effects. This breaks `kubectl apply --dry-run` because the API server will skip webhooks marked as having side effects during dry runs.
+
+> **Self-assessment:** Can you draw the admission chain from memory? Can you explain why mutating must run before validating? Can you write the JSON patch format for adding a container?
+
+> **Follow-up questions:** Q3 (Build a webhook), Q4 (OPA/Gatekeeper)
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Execution Order**: Mutating webhooks execute first and can modify objects via JSON patch; validating webhooks execute second and enforce binary allow/deny decisions.
+- **Idempotency & Deadlock Prevention**: Mutating webhooks must be idempotent to prevent infinite update loops, and should always exclude their own namespace.
+</Callout>
+

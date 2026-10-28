@@ -1,0 +1,38 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "constrained-decoding-grammar-token-level-enforcement"
+order: 159
+level: "advanced"
+format: "article"
+title: "Constrained Decoding: How Grammar Engines Enforce JSON Schema at the Token Level"
+description: "Structured output engines compile a JSON Schema or CFG into a finite-state machine over the model's vocabulary, then mask invalid-next-token logits to zero..."
+question: "How do structured output engines (e.g., Outlines, Guidance) enforce JSON Schema or Context-Free Grammar (CFG) constraints at the token level during the forward pass logits calculation without retries or post-processing?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "StructuredOutputs", "GrammarGuarantees", "BNF"]
+estimatedMinutes: 8
+xpValue: 20
+seoTitle: "Constrained Decoding: Grammar at Token Level | GenAI Guide"
+metaDescription: "Learn how structured output engines like Outlines and Guidance enforce JSON Schema or CFG constraints at the logit level during generation without retries."
+publishDate: "2026-07-31"
+relatedModules: ["quantization-accuracy-tradeoffs-int4-reasoning", "kv-cache-bottleneck-mqa-gqa-memory-reduction"]
+---
+
+## Question
+How do structured output engines (e.g., Outlines, Guidance) enforce JSON Schema or Context-Free Grammar (CFG) constraints at the token level during the forward pass logits calculation without retries or post-processing?
+
+
+## Quick Answer
+Structured output engines compile a JSON Schema or grammar into a finite-state machine over the model's token vocabulary ahead of time, then at every decoding step mask the logits of any token that would violate the grammar down to negative infinity — so sampling can only ever select a token that keeps the output valid, with no possibility of an invalid result to retry.
+
+## Detailed Answer
+Before generation starts, the engine converts the target schema (a JSON Schema, or a general context-free grammar) into an equivalent **finite-state machine (FSM)** or pushdown automaton whose states correspond to valid partial-output positions and whose transitions correspond to which tokens are legal next. Because a model's vocabulary is made of subword tokens rather than characters, this compilation step has to solve a non-trivial problem: for every vocabulary token, determine which FSM states it's a valid transition from, so that during decoding the engine can answer "given the current FSM state, which subset of the ~50k-100k vocabulary tokens are legal right now" in constant or near-constant time.
+
+During generation, at each decoding step the engine takes the model's raw output logits and applies a **logit mask**: every token not corresponding to a valid FSM transition from the current state is set to negative infinity before the softmax and sampling step run. This guarantees the sampled token is always grammar-valid — the model's probability distribution is renormalized over only the legal subset, so whatever sampling strategy (temperature, top-p) you'd normally use still operates, just on a constrained candidate set. After a token is emitted, the FSM state advances, and the process repeats. Because invalidity is architecturally impossible rather than caught after the fact, there's no retry loop, no re-prompting, and no wasted generation — a meaningful advantage over an unconstrained-generation-plus-validation approach where a schema violation means throwing away tokens and starting over.
+
+The performance cost is real but bounded: computing the valid-token mask at every step adds overhead proportional to vocabulary size and FSM complexity, though production implementations (Outlines, `llama.cpp` grammars, vLLM's guided decoding) precompute as much of the token-to-transition mapping as possible so the per-step cost is a lookup rather than a fresh computation. The overhead is generally small compared to the forward pass itself, but it does add latency versus fully unconstrained decoding, and very complex or deeply recursive grammars can increase FSM state-space size enough to matter at high throughput.
+
+<Callout variant="tip" title="Key Takeaways">
+Constrained decoding guarantees valid structure by making invalid tokens literally unselectable at sampling time — it's a logit-masking technique, not a post-hoc validator, which is exactly why it eliminates retries.
+</Callout>
+
+---

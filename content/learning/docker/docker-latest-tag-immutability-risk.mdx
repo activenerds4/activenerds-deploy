@@ -1,0 +1,40 @@
+---
+pathSlug: "docker"
+moduleSlug: "docker-latest-tag-immutability-risk"
+order: 36
+level: "beginner"
+format: "article"
+title: "Docker Image Tagging: Why the latest Tag Breaks Reproducible Deployments"
+description: "The latest tag is just a mutable pointer that gets reassigned to whatever was pushed most recently, so 'not changing anything' can still mean pulling a different image."
+question: "Your team deploys using the `latest` tag and occasionally ends up with different code running on different hosts despite \"not changing anything.\" Explain why tag-based deployment without immutable references is risky in production."
+domain: "Image Engineering"
+tags: ["Image Engineering", "Immutability", "Tagging"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Docker Image Tagging: Why latest Breaks | Docker Guide"
+metaDescription: "Learn Docker Image Tagging: Why the latest Tag Breaks Reproducible Deployments with practical configurations and image versioning best practices."
+publishDate: "2026-08-06"
+relatedModules: ["multi-stage-builds-go-image-size-reduction", "docker-layer-caching-copy-order-optimization"]
+---
+
+## Question
+Your team deploys using the `latest` tag and occasionally ends up with different code running on different hosts despite "not changing anything." Explain why tag-based deployment without immutable references is risky in production.
+
+
+## Quick Answer
+`latest` is not a version — it's a **mutable label** that gets reassigned to whichever image was most recently pushed with that tag, so two hosts that pulled at different times can silently end up running different code.
+
+## Detailed Answer
+A Docker tag like `myapp:latest` isn't a fixed reference to a specific set of layers; it's a **human-readable alias** that points at an image ID, and that pointer can be moved. Every `docker push myapp:latest` reassigns the tag to the new image, without deleting or invalidating the old one — the old image still exists in the registry, just under no name you can easily find it by anymore.
+
+This creates two separate failure modes teams run into:
+- **Time-of-pull drift** — Host A pulled `myapp:latest` on Monday and got build #42. Host B pulled it Wednesday, after a new push, and got build #45. Nobody explicitly deployed a new version to either host; the tag simply meant something different depending on when it was resolved.
+- **Cache masking** — If a host already has an image cached locally under the tag `myapp:latest`, `docker run` may not even attempt a pull, silently continuing to use a stale image while other hosts fetch the current one.
+
+Neither host is wrong about what `latest` pointed to — the tag genuinely referred to different image IDs at different points in time. That's the core problem: `latest` describes recency, not identity.
+
+<Callout variant="tip" title="Key Takeaways">
+Deploy by **immutable reference** — a content-addressable digest (`myapp@sha256:...`) or an explicit version tag (`myapp:1.4.2`) — so every host resolves to the exact same image regardless of when it pulls.
+</Callout>
+
+---

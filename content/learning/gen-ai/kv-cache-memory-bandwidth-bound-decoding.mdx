@@ -1,0 +1,57 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "kv-cache-memory-bandwidth-bound-decoding"
+order: 189
+level: "advanced"
+format: "article"
+title: "KV Cache and Memory Bandwidth: Why Decoding Becomes Bandwidth-Bound at Scale"
+description: "Caching past keys and values avoids recomputing them each step, but generating one token now means reading the entire growing KV cache from HBM — a cache that scales with batch size, sequence length, layer count, and hidden dimension, making memory bandwidth the real ceiling on serving concurrency."
+question: "Explain why KV caching turns autoregressive decoding from a compute-bound problem into a memory-bandwidth-bound problem, and quantify (conceptually) how KV cache size scales with batch size, sequence length, number of layers, and hidden dimension \u2014 and why this becomes the dominant constraint on serving concurrency."
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "KV Cache", "Memory Bandwidth", "KVCache", "MemoryBandwidth"]
+estimatedMinutes: 8
+xpValue: 20
+seoTitle: "KV Cache: Why Decoding Is Bandwidth-Bound | LLM Guide"
+metaDescription: "Learn why KV caching makes autoregressive decoding memory-bandwidth-bound with architecture patterns, practical configurations, and details"
+publishDate: "2026-08-26"
+relatedModules: ["mqa-vs-gqa-kv-cache-tradeoffs", "sliding-window-attention-kv-cache-bound", "flashattention-io-aware-tiling-memory-efficiency"]
+---
+
+## Question
+Explain why KV caching turns autoregressive decoding from a compute-bound problem into a memory-bandwidth-bound problem, and quantify (conceptually) how KV cache size scales with batch size, sequence length, number of layers, and hidden dimension — and why this becomes the dominant constraint on serving concurrency.
+
+
+## Quick Answer
+Without KV caching, generating each new token would recompute keys and values for the entire sequence so far, making decoding compute-bound; with KV caching, that recomputation is avoided, but every step now has to **read the entire cached KV tensor from HBM** just to compute one token, and the cache scales with batch size, sequence length, layers, and hidden dimension — so at scale, moving that data becomes the bottleneck, not the arithmetic.
+
+## Detailed Answer
+During autoregressive generation, computing attention for the newest token requires the keys and values of every prior token. **Without caching**, this means recomputing K and V projections for the entire sequence-so-far at every single decoding step — wasteful, since those projections don't change once computed, but the cost scales with actual FLOPs performed, keeping the workload compute-bound (dominated by matrix multiplication throughput).
+
+**KV caching** stores each token's computed keys and values the first time they're produced, so subsequent steps only need to compute K/V for the *new* token and append it to the cache. This eliminates the redundant recomputation — but it introduces a new cost: at every decoding step, the model has to **read the full accumulated KV cache from HBM** into compute units to run attention against it. As the cache grows, this read dominates the per-token time, while the actual new computation (one new token's worth of Q/K/V and output) stays comparatively tiny. The workload has shifted from "not enough compute per FLOP needed" to "spending most of the step's time moving cached data rather than computing on it" — the textbook definition of **memory-bandwidth-bound**.
+
+**Cache size scaling** follows directly from what's stored — one key and one value vector per token, per layer, per attention head:
+
+`KV cache size ≈ 2 × batch_size × sequence_length × num_layers × hidden_dim × bytes_per_value`
+
+(the leading 2 accounts for storing both K and V). Each factor compounds independently: doubling batch size doubles the cache; doubling sequence length doubles it again; more layers or a larger hidden dimension both scale it linearly as well. This is why the cache footprint can dwarf the model's own weight memory for long sequences and large batches — a 70B-parameter model's weights are fixed, but its KV cache at 32K context and batch size 32 can require tens of gigabytes on its own.
+
+| Factor | Effect on KV cache size |
+|--------|---------------------------|
+| Batch size | Linear |
+| Sequence length | Linear |
+| Number of layers | Linear |
+| Hidden dimension | Linear |
+| Precision (bytes/value) | Linear (FP16 vs FP8 vs INT4 halves/quarters it) |
+
+Because GPU HBM capacity is finite, and every concurrent request needs its own KV cache slice, **the KV cache — not the model weights — is usually what limits how many requests a server can batch together simultaneously**. This is the direct link between KV cache growth and serving concurrency: more memory consumed per request means fewer requests fit in the same GPU memory budget, capping throughput independent of how much raw compute is available.
+
+## Production Implications
+- **Continuous batching / paged attention** systems (e.g., vLLM-style) manage KV cache as fixed-size pages rather than contiguous per-request blocks specifically to reduce fragmentation and fit more concurrent requests into the same HBM budget.
+- **KV cache quantization** (storing keys/values in FP8 or INT8 rather than FP16) directly attacks the bytes-per-value term, roughly halving cache memory with often-modest quality impact.
+- **GQA/MQA** attack the num_heads dimension implicit in hidden_dim (see the related article) — fewer distinct KV projections means smaller cache per token.
+- When capacity-planning a serving deployment, model the KV cache footprint per request *before* setting a max-batch-size — a naive plan based only on model weight size will overestimate achievable concurrency.
+
+<Callout variant="tip" title="Key Takeaways">
+KV caching trades a compute problem for a memory-bandwidth problem — and because cache size scales linearly across four independent dimensions at once, it's usually the cache, not the model weights, that decides how many requests a GPU can actually serve concurrently.
+</Callout>
+

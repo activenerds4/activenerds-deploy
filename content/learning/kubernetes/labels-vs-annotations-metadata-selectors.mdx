@@ -1,0 +1,67 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "labels-vs-annotations-metadata-selectors"
+order: 45
+level: "beginner"
+format: "article"
+title: "Labels vs. Annotations: Resource Selectors vs. Operational Metadata"
+description: "Labels are key-value pairs used for selection and grouping (Services use them to find pods); annotations store arbitrary metadata for tools and humans but ar..."
+question: "What is the structural and functional difference between Labels and Annotations in Kubernetes, and why should operational metadata never be used in label selectors?"
+domain: "Workloads & Scheduling"
+tags: ["Labels", "Metadata"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Labels vs. Annotations: Resource Selectors vs | K8s Guide"
+metaDescription: "Learn Labels vs. Annotations: Resource Selectors vs. Operational Metadata with architecture patterns, practical configurations, and step-by-step implementation"
+publishDate: "2026-07-01"
+relatedModules: ["liveness-readiness-startup-probes-guide"]
+---
+
+## Question
+What is the structural and functional difference between Labels and Annotations in Kubernetes, and why should operational metadata never be used in label selectors?
+
+## Quick Answer
+Labels are key-value pairs used for selection and grouping (Services use them to find pods); annotations store arbitrary metadata for tools and humans but are never used for selection.
+
+
+## Detailed Answer
+```yaml
+metadata:
+  labels:
+    # Labels: short, meaningful, used in selectors
+    # Keys: [prefix/]name — prefix optional, max 253 chars domain
+    # Values: max 63 chars, alphanumeric + - _ .
+    app: my-app                    # Service selector uses this
+    version: v1                    # Used by Istio, Argo Rollouts
+    environment: production        # Used in NodeAffinity, NetworkPolicy
+    tier: frontend                 # Organizational grouping
+
+  annotations:
+    # Annotations: no format restrictions, not used in selectors
+    # Use for: tool configuration, human notes, CI/CD metadata
+    kubernetes.io/change-cause: "Deployed v1.2.3 — fixes #789"
+    prometheus.io/scrape: "true"                 # Prometheus auto-discovery
+    prometheus.io/port: "8080"
+    nginx.ingress.kubernetes.io/rewrite-target: /   # Ingress controller config
+    kubectl.kubernetes.io/last-applied-configuration: "..."  # Added by kubectl apply
+    deployment.kubernetes.io/revision: "3"
+    description: "Main frontend service — owned by frontend team"
+    git-commit: "abc123def"
+```
+
+| | **Labels** | **Annotations** |
+|---|---|---|
+| **Used in selectors** | ✅ Yes — Services, Deployments | ❌ No |
+| **Value restrictions** | 63 chars max | No limit |
+| **Purpose** | Identity + grouping | Metadata + tool config |
+| **Examples** | `app=nginx`, `env=prod` | Prometheus config, descriptions |
+
+## Common Mistake
+Putting tool configuration (like Prometheus scrape settings) in labels. These belong in annotations. Labels are for Kubernetes-native selection; annotations are for everything else.
+
+
+<Callout variant="tip" title="Key Takeaways">
+If a Kubernetes resource needs to *find* or *select* other resources, it uses labels. If a tool or human needs metadata about a resource, use annotations.
+</Callout>
+
+---

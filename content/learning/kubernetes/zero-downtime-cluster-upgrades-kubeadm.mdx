@@ -1,0 +1,212 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "zero-downtime-cluster-upgrades-kubeadm"
+order: 15
+level: "advanced"
+format: "article"
+title: "Zero-Downtime Cluster Upgrades: Master Control Plane and Worker Maintenance"
+description: "Upgrade control plane first, then node groups one at a time — always upgrade one minor version at a time, back up etcd first, test in staging, and use manage..."
+question: "What step-by-step workflow guarantees zero downtime when upgrading worker nodes and control plane components using `kubeadm`, `cordon`, and `drain`?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Upgrades", "Maintenance"]
+estimatedMinutes: 6
+xpValue: 20
+seoTitle: "Zero-Downtime Cluster Upgrades: Master Contro | K8s Guide"
+metaDescription: "Learn Zero-Downtime Cluster Upgrades: Master Control Plane and Worker Maintenance with architecture patterns, practical configurations, and step-by-step implem"
+publishDate: "2026-06-26"
+relatedModules: []
+---
+
+## Question
+What step-by-step workflow guarantees zero downtime when upgrading worker nodes and control plane components using `kubeadm`, `cordon`, and `drain`?
+
+## Quick Answer
+Upgrade control plane first, then node groups one at a time — always upgrade one minor version at a time, back up etcd first, test in staging, and use managed node groups on EKS to minimize risk.
+
+
+## Detailed Answer
+## Pre-Upgrade Checklist
+```bash
+# 1. Check current versions
+kubectl version
+kubectl get nodes -o wide            # Node K8s versions
+kubectl get pods -A -o wide | grep -v Running  # Any unhealthy pods first
+
+# 2. Check deprecated APIs (critical — apps using deprecated APIs break on upgrade)
+# Install pluto
+brew install pluto
+
+# Scan your manifests for deprecated APIs
+pluto detect-files -d ./k8s-manifests/ --target-versions k8s=v1.30
+
+# Scan live cluster for deprecated APIs
+pluto detect-helm --target-versions k8s=v1.30
+pluto detect-api-resources --target-versions k8s=v1.30
+
+# Example output:
+# NAME                      KIND         VERSION          REPLACEMENT   REMOVED
+# my-ingress                Ingress      networking/v1beta1  networking/v1  true
+
+# 3. Check if your Helm charts support the new K8s version
+helm list -A                         # List all releases
+# Visit each chart's changelog for K8s version compatibility
+
+# 4. Backup etcd (even on managed EKS — backup Velero state)
+velero backup create pre-upgrade-$(date +%Y%m%d) \
+  --include-cluster-resources=true \
+  --wait
+
+# 5. Review K8s changelog for breaking changes
+# https://kubernetes.io/docs/reference/using-api/deprecation-guide/
+```
+
+## EKS Upgrade Process (Managed — Your Context)
+```bash
+# EKS upgrade — always one minor version at a time
+# 1.27 → 1.28 → 1.29 → 1.30 (cannot skip versions)
+
+# Step 1: Upgrade control plane (AWS manages this — minimal disruption)
+aws eks update-cluster-version \
+  --name production-cluster \
+  --kubernetes-version 1.30 \
+  --region us-east-1
+
+# Monitor upgrade progress
+aws eks describe-update \
+  --name production-cluster \
+  --update-id <update-id>
+
+# Or with eksctl
+eksctl upgrade cluster \
+  --name production-cluster \
+  --version 1.30 \
+  --approve
+
+# Step 2: Upgrade EKS managed add-ons AFTER control plane
+aws eks update-addon \
+  --cluster-name production-cluster \
+  --addon-name coredns \
+  --addon-version v1.11.1-eksbuild.4
+
+aws eks update-addon \
+  --cluster-name production-cluster \
+  --addon-name kube-proxy \
+  --addon-version v1.30.0-eksbuild.3
+
+aws eks update-addon \
+  --cluster-name production-cluster \
+  --addon-name aws-ebs-csi-driver \
+  --addon-version v1.28.0-eksbuild.1
+
+# Step 3: Upgrade node groups (rolling — one at a time)
+# Option A: Update in-place (managed node group rolling update)
+aws eks update-nodegroup-version \
+  --cluster-name production-cluster \
+  --nodegroup-name general \
+  --kubernetes-version 1.30
+
+# Option B: Blue-green node group (safer for production)
+# Create new node group with new version
+aws eks create-nodegroup \
+  --cluster-name production-cluster \
+  --nodegroup-name general-v130 \
+  --kubernetes-version 1.30 \
+  --node-role arn:aws:iam::123456789012:role/EKSNodeRole \
+  --subnets subnet-xxx subnet-yyy \
+  --instance-types m6i.large \
+  --scaling-config minSize=3,maxSize=10,desiredSize=3
+
+# Cordon old nodes (prevent new scheduling)
+kubectl get nodes -l eks.amazonaws.com/nodegroup=general \
+  -o name | xargs kubectl cordon
+
+# Drain old nodes (evict pods to new nodes)
+kubectl get nodes -l eks.amazonaws.com/nodegroup=general \
+  -o name | xargs -I{} kubectl drain {} \
+  --ignore-daemonsets \
+  --delete-emptydir-data \
+  --grace-period=120 \
+  --timeout=300s
+
+# Verify all pods on new nodes
+kubectl get pods -A -o wide | grep general
+
+# Delete old node group
+aws eks delete-nodegroup \
+  --cluster-name production-cluster \
+  --nodegroup-name general
+```
+
+## Terraform-Based Upgrade
+```hcl
+# Update cluster version in Terraform
+module "eks" {
+  source  = "terraform-aws-modules/eks/aws"
+  version = "~> 20.0"
+
+  cluster_name    = "production-cluster"
+  cluster_version = "1.30"           # Changed from "1.29"
+
+  eks_managed_node_groups = {
+    general = {
+      # Blue-green: create new node group alongside old
+      name           = "general-v130"  # New name forces new group creation
+      instance_types = ["m6i.large"]
+      min_size       = 3
+      max_size       = 10
+      desired_size   = 3
+    }
+  }
+}
+
+# Apply with targeted plan to see impact
+terraform plan -target=module.eks.aws_eks_cluster.this
+terraform apply -target=module.eks.aws_eks_cluster.this
+```
+
+## Post-Upgrade Verification
+```bash
+# Verify all nodes are on new version
+kubectl get nodes -o wide
+# All nodes should show v1.30.x
+
+# Verify all system pods are healthy
+kubectl get pods -n kube-system
+kubectl get pods -n kube-system | grep -v Running
+
+# Run a smoke test
+kubectl run upgrade-test \
+  --image=nginx:latest \
+  --rm -it \
+  --restart=Never \
+  -- curl localhost
+# Should return nginx default page
+
+# Check for any crashlooping pods
+kubectl get pods -A | grep -v Running | grep -v Completed
+
+# Verify all add-ons are healthy
+kubectl get pods -n kube-system
+kubectl get pods -n monitoring
+kubectl get pods -n ingress-nginx
+
+# Check API server audit logs for deprecation warnings
+# On EKS: CloudWatch Logs → /aws/eks/production-cluster/cluster
+```
+
+## Version Skew Rules
+```
+Kubernetes version skew policy:
+- kube-apiserver: must be upgraded FIRST
+- kubelet: can be 2 minor versions behind apiserver (1.30 apiserver + 1.28 kubelet = ok)
+
+
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Sequential Upgrades**: Always upgrade one minor version at a time (e.g., 1.29 -> 1.30), never skipping minor versions.
+- **Control Plane First**: Upgrade kube-apiserver and control plane components before worker nodes to satisfy version skew requirements.
+- **Node Drain Discipline**: Always cordon and drain nodes before upgrading kubelet, respecting PodDisruptionBudgets to avoid service disruption.
+</Callout>
+

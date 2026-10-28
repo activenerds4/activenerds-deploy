@@ -1,0 +1,73 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "rolling-update-strategy-zero-downtime"
+order: 60
+level: "beginner"
+format: "article"
+title: "Rolling Update Strategy: Zero-Downtime Deployment Control with maxSurge and maxUnavailable"
+description: "A rolling update gradually replaces old pods with new ones, controlled by `maxSurge` (extra pods allowed) and `maxUnavailable` (pods that can be down) — allo..."
+question: "How do `maxSurge` and `maxUnavailable` parameters control rolling update rollouts, and how do you configure them to guarantee zero-downtime deployments under heavy traffic?"
+domain: "Workloads & Scheduling"
+tags: ["Deployments", "Rollouts"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Rolling Update Strategy: Zero-Downtime Deploy | K8s Guide"
+metaDescription: "Learn Rolling Update Strategy: Zero-Downtime Deployment Control with maxSurge and maxUnavailable with architecture patterns, practical configurations, and step"
+publishDate: "2026-07-03"
+relatedModules: ["kubernetes-services-stable-networking-discovery"]
+---
+
+## Question
+How do `maxSurge` and `maxUnavailable` parameters control rolling update rollouts, and how do you configure them to guarantee zero-downtime deployments under heavy traffic?
+
+## Quick Answer
+A rolling update gradually replaces old pods with new ones, controlled by `maxSurge` (extra pods allowed) and `maxUnavailable` (pods that can be down) — allowing zero-downtime deployments.
+
+
+## Detailed Answer
+```yaml
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1           # Can go above desired replica count by 1 during update
+    maxUnavailable: 0     # Zero pods can be unavailable (zero-downtime)
+
+# With replicas: 3, maxSurge: 1, maxUnavailable: 0:
+# Step 1: Start 1 new pod (total: 4 — 3 old + 1 new)
+# Step 2: New pod passes readiness probe
+# Step 3: Terminate 1 old pod (total: 3 — 2 old + 1 new)
+# Step 4: Repeat until all 3 are new version
+```
+
+```bash
+# Trigger a rolling update
+kubectl set image deployment/my-app app=myapp:v2.0.0
+
+# Watch it happen in real time
+kubectl rollout status deployment/my-app
+# Waiting for deployment "my-app" rollout to finish: 1 out of 3 new replicas updated...
+# Waiting for deployment "my-app" rollout to finish: 2 out of 3 new replicas updated...
+# deployment "my-app" successfully rolled out
+
+# View rollout history
+kubectl rollout history deployment/my-app
+# REVISION  CHANGE-CAUSE
+# 1         <none>
+# 2         <none>
+
+# Roll back immediately if something goes wrong
+kubectl rollout undo deployment/my-app
+
+# Roll back to specific revision
+kubectl rollout undo deployment/my-app --to-revision=1
+```
+
+## Critical Insight — Readiness Probes Gate Updates
+The rolling update waits for each new pod to pass its **readiness probe** before terminating an old pod. Without a readiness probe, Kubernetes assumes the pod is ready immediately after the container starts — which can route traffic to a pod that hasn't finished initializing.
+
+
+<Callout variant="tip" title="Key Takeaways">
+Always configure readiness probes — they are the gate that prevents a bad deployment from rolling out fully before you notice something is wrong.
+</Callout>
+
+---

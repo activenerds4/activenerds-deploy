@@ -1,0 +1,489 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "cluster-resource-exhaustion-monitoring-and"
+order: 30
+level: "advanced"
+format: "article"
+title: "Cluster Resource Exhaustion: Monitoring and Scaling Strategy"
+description: "In-depth architectural breakdown and operational implementation for Cluster Resource Exhaustion: Monitoring and Scaling Strategy."
+question: "Your cluster is running out of resources. Pods are stuck in `Pending` state, nodes are at 90% CPU, and the on-call engineer is getting paged at 2 AM. What monitoring and scaling strategies do you implement to prevent this and respond automatically?"
+domain: "Troubleshooting"
+tags: ["Scaling", "Monitoring", "HPA", "VPA", "Cluster Autoscaler", "Resource Management"]
+estimatedMinutes: 22
+xpValue: 20
+seoTitle: "Cluster Resource Exhaustion: Monitoring and S | K8s Guide"
+metaDescription: "Learn Cluster Resource Exhaustion: Monitoring and Scaling Strategy with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-06-27"
+relatedModules: ["exposed-secrets-in-configmap-incident", "advanced-pod-scheduling-affinity-taints"]
+---
+
+**Prerequisite knowledge:** Resource requests/limits, HPA basics, Prometheus fundamentals
+
+---
+
+## Question
+Your cluster is running out of resources. Pods are stuck in `Pending` state, nodes are at 90% CPU, and the on-call engineer is getting paged at 2 AM. What monitoring and scaling strategies do you implement to prevent this and respond automatically?
+
+
+## Quick Answer
+Implement a three-layer autoscaling stack: **HPA** (scales pods based on metrics), **VPA** (right-sizes pod resource requests), and **Cluster Autoscaler** (adds/removes nodes). Add Prometheus alerts for early warning, and enforce LimitRanges and ResourceQuotas to prevent resource starvation.
+
+---
+
+
+## Detailed Answer
+## ️ Three-Layer Autoscaling Architecture
+```
+Layer 3: Infrastructure
+┌────────────────────────────────────────┐
+│         Cluster Autoscaler             │
+│  Adds nodes when pods can't schedule   │
+│  Removes underutilized nodes           │
+└────────────────┬───────────────────────┘
+                 │ triggers
+Layer 2: Pod Scaling
+┌────────────────▼───────────────────────┐
+│  HPA (Horizontal Pod Autoscaler)       │   ← Scale OUT (more pods)
+│  VPA (Vertical Pod Autoscaler)         │   ← Scale UP (bigger pods)
+│  KEDA (Event-driven autoscaling)         │   ← Scale on custom metrics
+└────────────────┬───────────────────────┘
+                 │ informed by
+Layer 1: Observability
+┌────────────────▼───────────────────────┐
+│  Prometheus + Grafana                  │
+│  Metrics Server                        │
+│  Alert Manager                         │
+└────────────────────────────────────────┘
+```
+
+## ️ Step-by-Step Implementation
+*Step 1: Metrics Server (prerequisite for HPA)*
+```bash
+# Install Metrics Server (required for kubectl top and HPA)
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# Verify it's working
+kubectl top nodes
+kubectl top pods -A
+
+# Expected output:
+# NAME              CPU(cores)   CPU%   MEMORY(bytes)   MEMORY%
+# worker-node-01    1823m        45%    6241Mi          78%
+# worker-node-02    2100m        52%    7100Mi          88%   ← Getting critical
+```
+
+*Step 2: Horizontal Pod Autoscaler (HPA v2)*
+```yaml
+# hpa-ecommerce.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ecommerce-api-hpa
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ecommerce-api
+  minReplicas: 5
+  maxReplicas: 50
+
+  metrics:
+    # CPU-based scaling (classic)
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70   # Scale when avg CPU > 70% of request
+
+    # Memory-based scaling
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+    # Custom metric: requests per second (via Prometheus Adapter)
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "1000"    # Scale when >1000 RPS per pod
+
+    # External metric: SQS queue depth (via KEDA or custom adapter)
+    - type: External
+      external:
+        metric:
+          name: sqs_queue_depth
+          selector:
+            matchLabels:
+              queue: order-processing
+        target:
+          type: AverageValue
+          averageValue: "100"     # 1 pod per 100 messages in queue
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60    # Wait 60s before scaling up again
+      policies:
+        - type: Pods
+          value: 5                      # Add at most 5 pods at once
+          periodSeconds: 60
+        - type: Percent
+          value: 100                    # Or double pod count
+          periodSeconds: 60
+      selectPolicy: Max                 # Use whichever adds MORE pods (aggressive scale-up)
+
+    scaleDown:
+      stabilizationWindowSeconds: 300   # Wait 5 min before scaling down (avoid flapping)
+      policies:
+        - type: Pods
+          value: 2                      # Remove at most 2 pods at once
+          periodSeconds: 120
+      selectPolicy: Min                 # Use whichever removes FEWER pods (conservative scale-down)
+```
+
+*Step 3: Vertical Pod Autoscaler (VPA) for Right-Sizing*
+```bash
+# Install VPA
+git clone https://github.com/kubernetes/autoscaler.git
+cd autoscaler/vertical-pod-autoscaler
+./hack/vpa-install.sh
+```
+
+```yaml
+# vpa-ecommerce.yaml
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: ecommerce-api-vpa
+  namespace: production
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ecommerce-api
+
+  updatePolicy:
+    updateMode: "Off"   # Options: Off | Initial | Recreate | Auto
+    # Off      → Only generates recommendations, no changes (use for analysis)
+    # Initial  → Apply recommendations only to NEW pods
+    # Recreate → Evict and recreate pods with new resources (causes brief disruption)
+    # Auto     → Same as Recreate currently (future: in-place resize)
+
+  resourcePolicy:
+    containerPolicies:
+      - containerName: ecommerce-api
+        minAllowed:
+          cpu: "100m"        # Never go below 100m CPU
+          memory: "256Mi"    # Never go below 256Mi RAM
+        maxAllowed:
+          cpu: "4"           # Never exceed 4 CPU cores
+          memory: "4Gi"      # Never exceed 4Gi RAM
+        controlledResources:
+          - cpu
+          - memory
+```
+
+```bash
+# Check VPA recommendations (your right-sizing advisor)
+kubectl describe vpa ecommerce-api-vpa -n production
+
+# Output shows:
+# Recommendation:
+#   Container Recommendations:
+#     Container Name: ecommerce-api
+#     Lower Bound:
+#       Cpu:     200m
+#       Memory:  400Mi
+#     Target:              ← What VPA recommends you set
+#       Cpu:     450m
+#       Memory:  600Mi
+#     Upper Bound:
+#       Cpu:     1200m
+#       Memory:  1500Mi
+```
+
+> ⚠️ **Important:** Do NOT run VPA in `Auto` mode alongside HPA CPU/memory metrics simultaneously — they conflict. Use VPA in `Off` mode for recommendations, apply them manually, then use HPA for scaling.
+
+*Step 4: KEDA for Event-Driven Scaling*
+```bash
+# Install KEDA
+helm repo add kedacore https://kedacore.github.io/charts
+helm install keda kedacore/keda --namespace keda --create-namespace
+```
+
+```yaml
+# keda-scaledobject.yaml — Scale based on Kafka lag
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: order-processor-scaledobject
+  namespace: production
+spec:
+  scaleTargetRef:
+    name: order-processor
+  minReplicaCount: 1
+  maxReplicaCount: 30
+  cooldownPeriod: 120      # Seconds to wait before scaling down
+  pollingInterval: 15      # Check trigger every 15 seconds
+
+  triggers:
+    # Scale based on Kafka consumer group lag
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka.production.svc.cluster.local:9092
+        consumerGroup: order-processor-group
+        topic: orders
+        lagThreshold: "50"        # 1 pod per 50 unprocessed messages
+        offsetResetPolicy: latest
+
+    # Also scale based on Prometheus metric
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc.cluster.local:9090
+        metricName: pending_orders_count
+        query: sum(pending_orders_total{namespace="production"})
+        threshold: "100"
+```
+
+*Step 5: Cluster Autoscaler*
+```yaml
+# cluster-autoscaler-deployment.yaml (AWS EKS example)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cluster-autoscaler
+  template:
+    metadata:
+      labels:
+        app: cluster-autoscaler
+      annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+    spec:
+      serviceAccountName: cluster-autoscaler
+      containers:
+        - image: registry.k8s.io/autoscaling/cluster-autoscaler:v1.29.0
+          name: cluster-autoscaler
+          command:
+            - ./cluster-autoscaler
+            - --v=4
+            - --stderrthreshold=info
+            - --cloud-provider=aws
+            - --skip-nodes-with-local-storage=false
+            - --expander=least-waste       # Choose node group that wastes least resources
+            - --node-group-auto-discovery=asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/my-cluster
+            - --balance-similar-node-groups # Keep node groups balanced
+            - --scale-down-delay-after-add=5m      # Wait 5m after scale-up before scaling down
+            - --scale-down-unneeded-time=10m       # Node must be unneeded for 10m to scale down
+            - --scale-down-utilization-threshold=0.5  # Scale down if node < 50% utilized
+            - --max-graceful-termination-sec=600
+```
+
+```bash
+# Annotate nodes to prevent Cluster Autoscaler from removing them
+kubectl annotate node worker-node-01 \
+  cluster-autoscaler.kubernetes.io/scale-down-disabled=true
+
+# Check Cluster Autoscaler status and decisions
+kubectl -n kube-system logs -f deployment/cluster-autoscaler | grep -E "scale|node"
+```
+
+*Step 6: ResourceQuotas and LimitRanges (Prevent Resource Starvation)*
+```yaml
+# resource-quota-production.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-quota
+  namespace: production
+spec:
+  hard:
+    # Compute limits
+    requests.cpu: "100"          # Total CPU requests across all pods
+    requests.memory: "200Gi"     # Total memory requests
+    limits.cpu: "200"
+    limits.memory: "400Gi"
+
+    # Object count limits
+    pods: "500"
+    services: "50"
+    persistentvolumeclaims: "100"
+    secrets: "200"
+    configmaps: "200"
+
+    # Storage limits
+    requests.storage: "5Ti"
+---
+# limit-range.yaml — Default limits for pods that don't specify
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: production-limit-range
+  namespace: production
+spec:
+  limits:
+    - type: Container
+      default:           # Applied if container doesn't set limits
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:    # Applied if container doesn't set requests
+        cpu: "100m"
+        memory: "128Mi"
+      max:               # Hard ceiling per container
+        cpu: "4"
+        memory: "8Gi"
+      min:               # Hard floor per container
+        cpu: "50m"
+        memory: "64Mi"
+
+    - type: Pod
+      max:               # Hard ceiling per pod (sum of all containers)
+        cpu: "8"
+        memory: "16Gi"
+
+    - type: PersistentVolumeClaim
+      max:
+        storage: "100Gi"
+      min:
+        storage: "1Gi"
+```
+
+*Step 7: Prometheus Alerting Rules (Early Warning System)*
+```yaml
+# prometheus-alerts.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cluster-resource-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: cluster.resources
+      interval: 30s
+      rules:
+        # Alert: Node CPU critical
+        - alert: NodeCPUCritical
+          expr: |
+            (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) by (node)) * 100 > 85
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.node }} CPU above 85%"
+            description: "Node CPU has been above 85% for 5 minutes. Current: {{ $value }}%"
+            runbook: "https://wiki.mycompany.com/runbooks/node-cpu-high"
+
+        # Alert: Node Memory critical
+        - alert: NodeMemoryCritical
+          expr: |
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ $labels.node }} memory above 85%"
+
+        # Alert: Pods stuck in Pending (early indicator of resource exhaustion)
+        - alert: PodsPendingTooLong
+          expr: |
+            kube_pod_status_phase{phase="Pending"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} stuck Pending"
+            description: "Pod has been Pending for >10 minutes. Check node resources and events."
+
+        # Alert: HPA at max replicas (scaling ceiling reached)
+        - alert: HPAAtMaxReplicas
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas
+            ==
+            kube_horizontalpodautoscaler_spec_max_replicas
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} at max replicas"
+            description: "HPA has been at maximum replicas for 15 minutes. Consider increasing maxReplicas or node capacity."
+
+        # Alert: Cluster CPU capacity warning (across all nodes)
+        - alert: ClusterCPUCapacityWarning
+          expr: |
+            sum(kube_node_status_allocatable{resource="cpu"}) -
+            sum(kube_pod_container_resource_requests{resource="cpu"}) < 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cluster has less than 10 CPU cores of unallocated capacity"
+```
+
+*Step 8: Grafana Dashboard Essentials*
+```bash
+# Import community dashboards for cluster monitoring
+# Kubernetes Cluster Overview: Dashboard ID 7249
+# Node Exporter Full:          Dashboard ID 1860
+# HPA Overview:                Dashboard ID 10257
+# Kubernetes Capacity Planning: Dashboard ID 5309
+
+# Key panels to build custom dashboards:
+# 1. CPU/Memory allocation vs actual usage per namespace
+# 2. Pending pods over time
+# 3. HPA current vs max replicas
+# 4. Node capacity remaining
+# 5. Cluster Autoscaler activity (scale-up/down events)
+```
+
+---
+
+## ️ Trade-offs & Alternatives
+
+| Tool | Best For | Limitation |
+|---|---|---|
+| **HPA (CPU/Memory)** | Stateless apps with predictable load | Reactive, not proactive; CPU lag |
+| **HPA (custom metrics)** | Business-metric-driven scaling | Requires Prometheus Adapter setup |
+| **VPA** | Right-sizing long-running services | Requires pod restart to apply |
+| **KEDA** | Queue/event-driven workloads | Additional CRD complexity |
+| **Cluster Autoscaler** | Dynamic node provisioning | 2–5 min lag to add nodes |
+| **Karpenter (AWS)** | Fast, flexible node provisioning | AWS-specific (has Azure port) |
+
+> **Karpenter vs Cluster Autoscaler:** Karpenter (developed by AWS) provisions nodes directly without Auto Scaling Groups, giving sub-minute node provisioning and more flexible instance selection. If you're on AWS, Karpenter is generally preferred over Cluster Autoscaler for its speed and flexibility.
+
+---
+
+## ️ Common Mistakes & Misconceptions
+- **"HPA will save me even without resource requests set."** — HPA calculates utilization as a percentage of resource *requests*. Without requests set, HPA cannot function. LimitRanges ensure every pod has requests.
+- **"Cluster Autoscaler adds nodes instantly."** — Node provisioning typically takes 2–5 minutes. Design your HPA to scale out pods proactively before nodes are actually needed (scale pods → Pending → CA triggers).
+- **"I'll set high limits so pods never OOMKill."** — Over-provisioning limits wastes cluster capacity. Use VPA recommendations to right-size, and treat OOMKills as signals to increase memory requests, not just limits.
+- **"VPA and HPA can't work together."** — They can, but only if HPA is using custom or external metrics, not CPU/memory. Running both on CPU is a conflict.
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+Cluster resource management is a **feedback loop**, not a one-time configuration. Observability (Prometheus alerts) gives you early warning, HPA/KEDA scale your workloads reactively, VPA keeps your requests accurate, and Cluster Autoscaler ensures the underlying infrastructure grows with you. The goal is to eliminate the 2 AM page by making scaling decisions automated, data-driven, and proactive.
+</Callout>
+
+---
+
+## Self-Assessment Checklist
+- [ ] Can you explain why HPA requires resource requests to function?
+- [ ] Can you describe why VPA and HPA conflict when both target CPU?
+- [ ] Can you write an HPA manifest that scales on both CPU and a custom Prometheus metric?
+- [ ] Can you explain the difference between Cluster Autoscaler and Karpenter?
+- [ ] Can you write a Prometheus alert rule for pods stuck in Pending state?
+
+
+---

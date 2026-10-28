@@ -1,0 +1,71 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "kubectl-apply-execution-flow-breakdown"
+order: 27
+level: "beginner"
+format: "article"
+title: "Inside kubectl apply: Execution Flow from API Server to Container Runtime"
+description: "kubectl → API Server → etcd (store) → Controller Manager (create pods) → Scheduler (assign nodes) → kubelet (run containers)."
+question: "What happens under the hood during a `kubectl apply` request from client-side YAML parsing, OpenAPI validation, authentication/authorization, admission webhooks, to etcd persistence?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Architecture"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Inside kubectl apply: Execution Flow from API | K8s Guide"
+metaDescription: "Learn Inside kubectl apply: Execution Flow from API Server to Container Runtime with architecture patterns, practical configurations, and step-by-step implemen"
+publishDate: "2026-05-13"
+relatedModules: ["kubernetes-namespaces-logical-cluster-isolation", "essential-kubectl-commands-debugging-cheatsheet", "pod-lifecycle-states-phase-transitions"]
+---
+
+## Question
+What happens under the hood during a `kubectl apply` request from client-side YAML parsing, OpenAPI validation, authentication/authorization, admission webhooks, to etcd persistence?
+
+## Quick Answer
+kubectl → API Server → etcd (store) → Controller Manager (create pods) → Scheduler (assign nodes) → kubelet (run containers).
+
+
+## Detailed Answer
+This request flow is one of the most important mental models in Kubernetes:
+
+```
+1. kubectl apply -f deployment.yaml
+   └── kubectl serializes the YAML → sends HTTP PATCH/POST to kube-apiserver
+
+2. kube-apiserver
+   └── Authenticates (who are you? — cert/token/OIDC)
+   └── Authorizes (are you allowed? — RBAC check)
+   └── Validates (is this valid YAML/schema? — admission controllers)
+   └── Persists Deployment object to etcd
+   └── Returns 200 OK to kubectl
+
+3. Deployment Controller (inside kube-controller-manager)
+   └── Watches etcd via API server for Deployment changes
+   └── Detects new Deployment → creates a ReplicaSet object
+   └── ReplicaSet controller detects ReplicaSet → creates Pod objects
+   └── Pod objects stored in etcd with nodeName: "" (unscheduled)
+
+4. kube-scheduler
+   └── Watches for Pods with no nodeName assigned
+   └── Evaluates all nodes: resources, affinity, taints, topology
+   └── Picks best node → writes nodeName into Pod spec in etcd
+
+5. kubelet (on the chosen node)
+   └── Watches API server for pods assigned to its node
+   └── Calls containerd to pull the image (if not cached)
+   └── Starts the container(s)
+   └── Reports pod status back to API server → etcd
+
+6. kube-proxy (on all nodes)
+   └── Watches for new Services/Endpoints
+   └── Updates iptables/IPVS rules so traffic routes to new pod IP
+```
+
+## Why This Matters
+When something fails, knowing this flow tells you exactly where to look. Pod stuck in Pending? The scheduler couldn't find a node — check resources and taints. Pod assigned but not starting? kubelet or containerd issue — check node logs.
+
+
+<Callout variant="tip" title="Key Takeaways">
+Every Kubernetes operation is a chain of watch-and-react loops between decoupled components — understanding the chain lets you pinpoint failures precisely.
+</Callout>
+
+---

@@ -1,0 +1,51 @@
+---
+pathSlug: "docker"
+moduleSlug: "docker-layer-caching-copy-order-optimization"
+order: 42
+level: "intermediate"
+format: "article"
+title: "Docker Layer Caching: Why COPY Order Determines Build Speed"
+description: "Docker invalidates a layer's cache whenever its inputs change, and every instruction after an invalidated layer is rebuilt too — so copying all source before installing dependencies busts the cache on every code change."
+question: "A Dockerfile does `COPY . .` before `RUN npm install`. Every single code change forces a full dependency reinstall during CI, adding 4 minutes per build. Explain the caching mechanic causing this and restructure the instructions to fix it."
+domain: "Image Engineering"
+tags: ["Image Engineering", "Layer Caching", "LayerCaching", "BuildOptimization"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "Docker Layer Caching: Why COPY Order | Docker Guide"
+metaDescription: "Learn Docker Layer Caching: Why COPY Order Determines Build Speed with practical Dockerfile restructuring examples and build optimization techniques."
+publishDate: "2026-08-12"
+relatedModules: ["multi-stage-builds-go-image-size-reduction", "buildkit-cache-mounts-ci-dependency-caching", "dockerignore-build-context-bloat-prevention"]
+---
+
+## Question
+A Dockerfile does `COPY . .` before `RUN npm install`. Every single code change forces a full dependency reinstall during CI, adding 4 minutes per build. Explain the caching mechanic causing this and restructure the instructions to fix it.
+
+
+## Quick Answer
+Docker caches each Dockerfile instruction as a layer and reuses it only if that instruction and everything before it are unchanged, so putting `COPY . .` before `RUN npm install` means any source edit invalidates the dependency-install layer too.
+
+## Detailed Answer
+Docker builds an image by executing Dockerfile instructions **sequentially**, checking before each one whether a cached layer already exists for that exact instruction given the current build state. The moment one instruction's inputs change, Docker treats the cache for that layer — and **every layer after it** — as invalid, and rebuilds them from scratch, even if those later instructions themselves didn't change.
+
+`COPY . .` hashes the contents of everything it copies to decide cache validity. If it runs before `npm install`, then any change anywhere in the source tree (a comment, a typo fix, an unrelated file) changes the hash of that `COPY` layer, which cascades: `RUN npm install` — sitting right after it — loses its cache too, and reinstalls the entire `node_modules` tree from the registry, even though `package.json` and `package-lock.json` didn't actually change.
+
+The fix is to **copy only the dependency manifest first**, install with it, and copy the rest of the source afterward:
+
+```dockerfile
+# Before — busts cache on every source change
+COPY . .
+RUN npm install
+
+# After — cache survives source-only changes
+COPY package.json package-lock.json ./
+RUN npm install
+COPY . .
+```
+
+Now `RUN npm install`'s cache is keyed only on `package.json`/`package-lock.json`. A code change further down still triggers the second `COPY . .`, but it no longer touches the install step at all — the 4-minute reinstall only happens when dependencies genuinely change.
+
+<Callout variant="tip" title="Key Takeaways">
+Order Dockerfile instructions from least-frequently-changed to most-frequently-changed, so a cache miss only invalidates the small set of layers that actually depend on what changed.
+</Callout>
+
+---

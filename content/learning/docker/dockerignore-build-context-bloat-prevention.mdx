@@ -1,0 +1,57 @@
+---
+pathSlug: "docker"
+moduleSlug: "dockerignore-build-context-bloat-prevention"
+order: 69
+level: "intermediate"
+format: "article"
+title: "Docker Build Context Bloat: How .dockerignore Prevents Sending Unnecessary Files to the Daemon"
+description: "Docker sends the entire build context directory to the daemon before a build even starts, so untracked folders like node_modules or .git inflate that transfer unless .dockerignore excludes them."
+question: "Your CI logs show the build context being sent to the daemon is 1.2GB despite a small application. Explain the mechanism by which this bloat occurs and how `.dockerignore` interacts with the build process to prevent it."
+domain: "Image Engineering"
+tags: ["Image Engineering", "Build Context", "DockerIgnore", "BuildContext"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "Docker Build Context Bloat: How | Docker Guide"
+metaDescription: "Learn Docker Build Context Bloat: How .dockerignore Prevents Sending Unnecessary Files to the Daemon with practical configuration examples."
+publishDate: "2026-09-08"
+relatedModules: ["multi-stage-builds-go-image-size-reduction", "docker-layer-caching-copy-order-optimization"]
+---
+
+## Question
+Your CI logs show the build context being sent to the daemon is 1.2GB despite a small application. Explain the mechanism by which this bloat occurs and how `.dockerignore` interacts with the build process to prevent it.
+
+
+## Quick Answer
+`docker build` packages and sends the **entire build context directory** (everything under the path you give it, like `.`) to the Docker daemon before any instruction runs — so large untracked directories such as `node_modules`, `.git`, or build artifacts inflate that transfer even if no `COPY` instruction ever references them directly.
+
+## Detailed Answer
+When you run `docker build .`, the client's first action isn't reading the Dockerfile — it's tar-ing up the specified directory (the **build context**) and streaming that archive to the Docker daemon, which may be running locally or remotely. This happens unconditionally and up front, independent of which files any given `COPY` or `ADD` instruction actually ends up using; Docker doesn't know in advance which files the Dockerfile will need, so it ships everything in the context by default.
+
+This is exactly how a small application can produce a 1.2GB context: a `node_modules` directory from local development, a `.git` history, log files, or downloaded model/data artifacts sitting in the project directory all get swept into that tarball, even though the actual Dockerfile only ever `COPY`s the source and a manifest file.
+
+`.dockerignore` fixes this by telling the Docker **client** which paths to exclude *before* building the context archive — not by filtering what's copied at build time, but by never including those paths in the archive sent to the daemon in the first place:
+
+```
+# .dockerignore
+node_modules
+.git
+*.log
+dist
+.env
+```
+
+```bash
+# Before: context includes node_modules, .git, etc.
+# Sending build context to Docker daemon  1.2GB
+
+# After: .dockerignore excludes them
+# Sending build context to Docker daemon  8.4MB
+```
+
+Because exclusion happens before the archive is built, `.dockerignore` doesn't just make individual `COPY` instructions more efficient — it reduces the actual bytes transferred to the daemon, which matters even more when the daemon is remote (e.g. a CI build agent talking to a separate builder) rather than local.
+
+<Callout variant="tip" title="Key Takeaways">
+`.dockerignore` isn't just cache hygiene — it directly controls how much data gets shipped to the Docker daemon before the build even starts, so it belongs in every project with generated or vendored directories sitting next to the Dockerfile.
+</Callout>
+
+---

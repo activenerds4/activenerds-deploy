@@ -1,0 +1,83 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "init-containers-pre-initialization-patterns"
+order: 51
+level: "beginner"
+format: "article"
+title: "Init Containers: Pre-initialization, Dependency Waiting, and Setup Execution"
+description: "Init containers run to completion before any main containers start — use them to wait for dependencies, pre-populate data, or perform setup tasks that must c..."
+question: "How do Init Containers execute sequentially before main application containers start, and how can they be used for dependency waiting, schema migrations, and secure credential setup?"
+domain: "Workloads & Scheduling"
+tags: ["Pods", "Init Containers"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Init Containers: Pre-initialization, Dependen | K8s Guide"
+metaDescription: "Learn Init Containers: Pre-initialization, Dependency Waiting, and Setup Execution with architecture patterns, practical configurations, and step-by-step imple"
+publishDate: "2026-05-11"
+relatedModules: ["understanding-pods-smallest-deployable-unit", "pod-lifecycle-states-phase-transitions"]
+---
+
+## Question
+How do Init Containers execute sequentially before main application containers start, and how can they be used for dependency waiting, schema migrations, and secure credential setup?
+
+## Quick Answer
+Init containers run to completion before any main containers start — use them to wait for dependencies, pre-populate data, or perform setup tasks that must complete before the app starts.
+
+
+## Detailed Answer
+Init containers are sequentially executed containers that must all succeed before the pod's main containers start. They have full access to the same volumes and network as main containers but run with different images and security contexts if needed.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-app
+spec:
+  initContainers:
+  # Init 1: Wait for database to be ready
+  - name: wait-for-db
+    image: busybox:1.36
+    command: ['sh', '-c',
+      'until nc -z postgres-svc 5432; do echo waiting for db; sleep 2; done']
+
+  # Init 2: Run database migrations
+  - name: run-migrations
+    image: myapp:v1.2.3
+    command: ['./migrate', '--up']
+    env:
+    - name: DB_URL
+      valueFrom:
+        secretKeyRef:
+          name: db-secret
+          key: url
+
+  # Main container starts ONLY after both init containers succeed
+  containers:
+  - name: web-app
+    image: myapp:v1.2.3
+    ports:
+    - containerPort: 8080
+```
+
+## Common Use Cases
+| Use Case | Example |
+|---|---|
+| **Dependency waiting** | Wait for DB, cache, or external API to be ready |
+| **Database migrations** | Run schema migrations before app starts |
+| **Config generation** | Fetch config from Vault, write to shared volume |
+| **Permission setup** | `chown` shared volumes before app user accesses them |
+| **Secrets injection** | Fetch secrets from external source into shared emptyDir |
+
+## Key Differences from Sidecar Containers
+| | Init Container | Sidecar Container |
+|---|---|---|
+| **Runs** | Before main containers | Alongside main containers |
+| **Lifecycle** | Must complete (exit 0) | Runs for pod lifetime |
+| **Purpose** | Setup/prerequisite | Support (logging, proxy) |
+
+
+<Callout variant="tip" title="Key Takeaways">
+Init containers solve the bootstrap ordering problem — they guarantee prerequisites are met before your application starts, preventing startup race conditions.
+</Callout>
+
+---

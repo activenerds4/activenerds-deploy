@@ -1,0 +1,59 @@
+---
+pathSlug: "docker"
+moduleSlug: "multi-stage-builds-go-image-size-reduction"
+order: 39
+level: "intermediate"
+format: "article"
+title: "Multi-Stage Docker Builds: Shrinking Go Images by Discarding the Compiler Toolchain"
+description: "A multi-stage build compiles the Go binary in a full SDK stage, then copies only that binary into a minimal runtime stage — the toolchain, source, and build cache never reach the final image."
+question: "Your Go application's final image is 900MB because it includes the full compiler toolchain. Design a multi-stage build that resolves this, and explain precisely what gets carried between stages and what gets discarded."
+domain: "Image Engineering"
+tags: ["Image Engineering", "Multi-Stage Builds", "MultiStageBuilds", "BuildArtifacts"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Multi-Stage Docker Builds: Shrinking Go | Docker Guide"
+metaDescription: "Learn Multi-Stage Docker Builds: Shrinking Go Images by Discarding the Compiler Toolchain with practical Dockerfile configurations and build optimization."
+publishDate: "2026-08-09"
+relatedModules: ["docker-layer-caching-copy-order-optimization", "buildkit-cache-mounts-ci-dependency-caching", "dockerignore-build-context-bloat-prevention"]
+updatedAt: "2026-08-10"
+faqs:
+  - question: "Why are multi-stage builds effective for reducing image size?"
+    answer: "Multi-stage builds allow you to compile software in a heavy SDK stage and copy only the compiled binary into a minimal distroless or alpine runtime stage, leaving compiler tools behind."
+  - question: "What is the COPY --from syntax in multi-stage builds?"
+    answer: "The COPY --from=builder /path/to/binary /destination command copies compiled build artifacts directly from a named build stage into the active runtime stage."
+---
+
+## Question
+Your Go application's final image is 900MB because it includes the full compiler toolchain. Design a multi-stage build that resolves this, and explain precisely what gets carried between stages and what gets discarded.
+
+
+## Quick Answer
+A **multi-stage build** compiles the binary in one stage using the full Go SDK image, then `COPY --from=` pulls only the compiled binary into a minimal final stage — the compiler, module cache, and source tree never make it into the shipped image.
+
+## Detailed Answer
+A single-stage Dockerfile that does `FROM golang` and then `RUN go build` bakes the **entire build environment** into the final image layer stack: the Go toolchain, `apt` package caches, intermediate object files, and the full source tree, none of which the running application actually needs at runtime. That's where the 900MB comes from — most of it is build-time weight, not application weight.
+
+A multi-stage Dockerfile splits this into named stages. Each `FROM` line starts a fresh, isolated filesystem; nothing from an earlier stage carries forward automatically. The only thing that crosses the boundary is what you explicitly copy with `COPY --from=<stage>`:
+
+```dockerfile
+# Stage 1: build — full SDK, compiler, module cache
+FROM golang:1.22 AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/app .
+
+# Stage 2: runtime — nothing but the binary
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /out/app /app
+ENTRYPOINT ["/app"]
+```
+
+What crosses the boundary: only the single compiled binary at `/out/app`, copied by explicit path. What gets discarded: the Go compiler, the module download cache, every intermediate `.o`/object artifact, the `go.mod`/`go.sum` files, and the full application source — none of it exists in the final image's layers because the final stage's filesystem starts from `distroless/static`, not from the builder stage. The builder stage is only ever kept around locally as build cache (or discarded entirely after `docker build` finishes); it's never pushed as part of the tagged image.
+
+<Callout variant="tip" title="Key Takeaways">
+Multi-stage builds let you use a heavyweight, fully-tooled image for compiling and a minimal image for running, without ever having to manually strip files out of a single bloated layer.
+</Callout>
+
+---

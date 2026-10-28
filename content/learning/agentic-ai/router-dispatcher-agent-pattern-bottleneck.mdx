@@ -1,0 +1,43 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "router-dispatcher-agent-pattern-bottleneck"
+order: 63
+level: "advanced"
+format: "article"
+title: "Router/Dispatcher Agents: Avoiding Cognitive Bottlenecks and Latency Inflation"
+description: "A router agent should classify and dispatch with a small, fast decision — often a lightweight model or even a deterministic classifier — rather than reasoning deeply about every request, since a heavy router turns the one component every task passes through into the system's latency and cost floor."
+question: "How do you design an efficient Router/Dispatcher agent that dynamically selects and hands off tasks to specialized downstream agents without becoming a single point of cognitive bottleneck or latency inflation?"
+domain: "Multi-Agent Topology"
+tags: ["Multi-Agent Topology", "Router Pattern", "RouterPattern", "Dispatcher", "AgentTopology"]
+estimatedMinutes: 8
+xpValue: 20
+seoTitle: "Router/Dispatcher Agent Design | AI Agents Guide"
+metaDescription: "Learn Router/Dispatcher Agents: Avoiding Cognitive Bottlenecks and Latency Inflation with architecture patterns, practical configurations, next steps"
+publishDate: "2026-07-31"
+relatedModules: ["hierarchical-vs-peer-to-peer-agent-topology", "sub-agent-handoff-protocols-state-passing"]
+---
+
+## Question
+How do you design an efficient Router/Dispatcher agent that dynamically selects and hands off tasks to specialized downstream agents without becoming a single point of cognitive bottleneck or latency inflation?
+
+
+## Quick Answer
+Because every request passes through the router, its decision needs to be cheap — a lightweight classifier or a small/fast model call, not a full reasoning pass — and it should hand off a scoped task package rather than trying to solve or deeply plan the task itself; a router that reasons too much becomes the latency and cost floor for the entire system, not just a dispatch step.
+
+## Detailed Answer
+A Router/Dispatcher sits in front of a set of specialized downstream agents and decides which one (or which combination) should handle an incoming request. The trap is treating the router like a general-purpose reasoning agent — giving it the same large model and open-ended prompt as the specialists it's dispatching to. Every single request pays the router's cost and latency before anything useful happens, so if the router itself does deep multi-step reasoning, that overhead is now a **tax on every request in the system**, not an occasional cost.
+
+The fix is scoping the router's job as narrowly as possible: classify intent and select a destination, nothing more. This often means using a **smaller, faster model** for routing than for the specialist agents doing the actual work — sometimes even a non-LLM classifier (embedding similarity against known task categories, or a rules-based dispatcher for clearly patterned requests) when the routing decision doesn't actually require open-ended reasoning. The router's output should be a compact handoff package — which specialist, with what scoped inputs — not an attempt to solve the task itself; if the router starts drafting a partial answer or doing its own tool calls before dispatching, it's absorbed the cognitive load it was supposed to distribute, and it's become a bottleneck by a different name.
+
+The second failure mode is a **single point of failure**: because all traffic passes through one router, an outage, a slow response, or a bad classification there blocks or misroutes everything downstream. Mitigations include running the router with tight timeouts and a deterministic fallback route (e.g. "default to a general-purpose agent" rather than blocking) when classification confidence is low or the router itself errors, and — for high-throughput systems — running multiple stateless router instances behind a load balancer, since a router with no persistent state of its own is straightforward to scale horizontally in a way a stateful supervisor isn't.
+
+## Production Implications
+- Benchmark router latency in isolation — if it's a meaningful fraction of end-to-end request time, it's undersized relative to its job, not doing something wrong per se
+- Set a confidence threshold below which the router defaults to a safe fallback route instead of guessing
+- Keep the router stateless so it can be horizontally scaled without coordination overhead
+- Log routing decisions with confidence scores — this is the fastest way to spot systematic misrouting before it shows up as downstream failures
+
+<Callout variant="tip" title="Key Takeaways">
+A router earns its place in the architecture only if its own decision stays cheap — the moment it starts reasoning like the specialists it dispatches to, it stops being a router and becomes the system's slowest, most expensive step.
+</Callout>
+

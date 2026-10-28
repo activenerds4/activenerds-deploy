@@ -1,0 +1,37 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "subword-tokenization-oov-handling-vocab-size-tradeoffs"
+order: 3
+level: "beginner"
+format: "article"
+title: "Subword Tokenization: How BPE Handles Out-of-Vocabulary Words and Vocab Size Trade-offs"
+description: "Subword tokenizers like BPE never truly hit an OOV wall — unseen words just get split into smaller known pieces, down to individual bytes if needed."
+question: "How does Subword Tokenization (e.g., Byte-Pair Encoding or WordPiece) handle out-of-vocabulary (OOV) tokens compared to character-level or word-level tokenization, and what are the system memory implications of increasing vocabulary size versus context window size?"
+domain: "Architecture & Mathematics"
+tags: ["Architecture & Mathematics", "BPE", "Tokenizer", "BytePairEncoding", "VocabSize"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Subword Tokenization: How BPE Handles | LLM Guide"
+metaDescription: "Learn how BPE subword tokenization handles out-of-vocabulary words and the memory trade-offs of vocab size vs. context window with practical detail."
+publishDate: "2026-07-30"
+relatedModules: ["subword-tokens-spelling-counting-arithmetic-limits", "token-embeddings-vector-space-semantics"]
+---
+
+## Question
+How does Subword Tokenization (e.g., Byte-Pair Encoding or WordPiece) handle out-of-vocabulary (OOV) tokens compared to character-level or word-level tokenization, and what are the system memory implications of increasing vocabulary size versus context window size?
+
+
+## Quick Answer
+Subword tokenizers like **Byte-Pair Encoding (BPE)** never truly hit an out-of-vocabulary wall — an unseen word just gets broken down into smaller known pieces, all the way down to individual bytes if necessary, so there's always a valid encoding.
+
+## Detailed Answer
+Word-level tokenization keeps a fixed dictionary of whole words; anything outside that dictionary becomes an `<UNK>` token, permanently losing information. Character-level tokenization avoids OOV entirely but produces very long sequences, since a single word might become a dozen tokens, which is expensive for a model that has to attend over every one of them.
+
+**BPE and WordPiece** sit in between. During training, the tokenizer starts with individual characters (or bytes) and iteratively merges the most frequent adjacent pairs into new subword units, building a vocabulary of common word fragments, prefixes, and suffixes. At inference time, an unfamiliar word like "cryptozoologist" doesn't need its own vocabulary entry — it's greedily split into learned pieces such as `crypto`, `zoo`, `log`, `ist`. Because byte-level BPE (used by GPT-style models) ultimately falls back to raw bytes, literally any Unicode string is representable, so there's no true OOV case, only longer token sequences for unfamiliar text.
+
+The memory trade-off runs in the opposite direction for **vocabulary size** versus **context window**. A larger vocabulary means a bigger embedding matrix and output projection layer — that cost is a one-time, fixed parameter cost paid once regardless of how long any given input is. A larger context window, by contrast, drives up the **KV cache** size linearly (or worse, depending on attention variant) with every additional token processed, which is a per-request, per-token memory cost that scales with usage. In short: growing vocab size is a static memory tax on the model's weights; growing context length is a dynamic memory tax on every inference request.
+
+<Callout variant="tip" title="Key Takeaways">
+Subword tokenization trades a small, fixed vocabulary-memory cost for the guarantee that no input text can ever produce an unencodable token.
+</Callout>
+

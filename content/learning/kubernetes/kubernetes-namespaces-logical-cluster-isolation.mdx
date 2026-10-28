@@ -1,0 +1,60 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "kubernetes-namespaces-logical-cluster-isolation"
+order: 30
+level: "beginner"
+format: "article"
+title: "Kubernetes Namespaces: Logical Cluster Isolation and Resource Scoping"
+description: "A Namespace is a logical partition within a cluster that isolates resources — names must be unique within a namespace but can repeat across namespaces, and R..."
+question: "How do Kubernetes Namespaces provide logical cluster isolation and resource scoping, and what are the limitations of namespaces regarding security and network boundary isolation?"
+domain: "Workloads & Scheduling"
+tags: ["Namespaces"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Kubernetes Namespaces: Logical Cluster Isolat | K8s Guide"
+metaDescription: "Learn Kubernetes Namespaces: Logical Cluster Isolation and Resource Scoping with architecture patterns, practical configurations, and step-by-step implementati"
+publishDate: "2026-06-07"
+relatedModules: []
+---
+
+## Question
+How do Kubernetes Namespaces provide logical cluster isolation and resource scoping, and what are the limitations of namespaces regarding security and network boundary isolation?
+
+## Quick Answer
+A Namespace is a logical partition within a cluster that isolates resources — names must be unique within a namespace but can repeat across namespaces, and RBAC/quotas can be scoped per namespace.
+
+
+## Detailed Answer
+Namespaces provide **soft multi-tenancy** within a single cluster. They're not a security boundary (pods in different namespaces can still communicate by default), but they provide organizational, RBAC, and quota isolation. Common patterns:
+
+| Pattern | Example Namespaces | Use Case |
+|---|---|---|
+| **By environment** | `dev`, `staging`, `production` | Multiple envs in one cluster |
+| **By team** | `frontend`, `backend`, `data` | Team ownership and quota |
+| **By application** | `payments`, `auth`, `notifications` | Microservice isolation |
+| **By concern** | `monitoring`, `ingress`, `logging` | Platform vs. app separation |
+
+```bash
+# Namespace operations
+kubectl get namespaces
+kubectl create namespace production
+kubectl config set-context --current --namespace=production  # Set default namespace
+kubectl get pods -n production                               # Target specific namespace
+kubectl get pods -A                                          # All namespaces
+
+# Four default namespaces:
+# default        — where resources go if no namespace specified
+# kube-system    — Kubernetes system components (CoreDNS, kube-proxy)
+# kube-public    — publicly readable (cluster-info)
+# kube-node-lease — node heartbeat objects
+```
+
+## Common Mistake
+Treating namespaces as a security boundary. Without NetworkPolicy, a pod in `development` namespace can freely call a pod in `production` namespace. Namespaces are organizational tools, not firewalls.
+
+
+<Callout variant="tip" title="Key Takeaways">
+Namespaces are organizational and quota boundaries, not security boundaries — use NetworkPolicies to enforce actual traffic isolation between namespaces.
+</Callout>
+
+---

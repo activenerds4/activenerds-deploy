@@ -1,0 +1,46 @@
+---
+pathSlug: "docker"
+moduleSlug: "buildkit-cache-mounts-ci-dependency-caching"
+order: 45
+level: "intermediate"
+format: "article"
+title: "BuildKit Cache Mounts: Persistent Dependency Caching Across Ephemeral CI Runners"
+description: "BuildKit cache mounts persist a directory (like a package manager's download cache) across separate build invocations on the BuildKit host, independent of Dockerfile layer caching or --cache-from."
+question: "Even after reordering Dockerfile instructions for cache-friendliness, your team's CI runners (ephemeral, ban `--cache-from` layer reuse) still reinstall dependencies every run. What BuildKit feature addresses this specific problem, and how does it differ from ordinary layer caching?"
+domain: "Image Engineering"
+tags: ["Image Engineering", "BuildKit", "CacheMounts"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "BuildKit Cache Mounts: Persistent CI | Docker Guide"
+metaDescription: "Learn BuildKit Cache Mounts: Persistent Dependency Caching Across Ephemeral CI Runners with practical Dockerfile syntax and CI optimization strategies."
+publishDate: "2026-08-15"
+relatedModules: ["docker-layer-caching-copy-order-optimization", "multi-stage-builds-go-image-size-reduction"]
+---
+
+## Question
+Even after reordering Dockerfile instructions for cache-friendliness, your team's CI runners (ephemeral, ban `--cache-from` layer reuse) still reinstall dependencies every run. What BuildKit feature addresses this specific problem, and how does it differ from ordinary layer caching?
+
+
+## Quick Answer
+BuildKit's `RUN --mount=type=cache` mounts a **persistent cache directory** into the build step that survives across separate build runs on the same BuildKit host, even when layer caching itself is unavailable because runners are ephemeral.
+
+## Detailed Answer
+Ordinary Dockerfile layer caching (what `--cache-from` reuses) works by matching a whole instruction's output against a previous run's layer — reordering `COPY package.json` before `RUN npm install` helps, but it only helps if the *layer itself* is available to reuse. On ephemeral CI runners that start from a clean disk every run and don't push/pull intermediate layers, there's simply no prior layer sitting around to match against, so `RUN npm install` always executes from zero, regardless of how well the Dockerfile is ordered.
+
+A **cache mount** solves a different problem: instead of caching the *output* of a `RUN` instruction, it persists a specific *directory used during* that instruction — typically a package manager's internal download/build cache (`~/.npm`, `/root/.cache/pip`, `/go/pkg/mod`) — in a BuildKit-managed cache volume that lives independently of the image layers and survives across builds on the same host:
+
+```dockerfile
+# syntax=docker/dockerfile:1
+RUN --mount=type=cache,target=/root/.npm \
+    npm install
+```
+
+Here, even though `RUN npm install` itself has no valid layer cache and re-executes every time, `npm` finds most of the packages it needs already sitting in `/root/.npm` from the previous run, and only fetches what's new — turning a full network reinstall into a mostly-local one.
+
+The key distinction: layer caching skips a step entirely when nothing changed; a cache mount lets a step that *does* run every time do meaningfully less work by reusing accumulated state from prior runs. They're complementary — properly ordering the Dockerfile still avoids the mount doing unnecessary work — but only the cache mount fixes the "runners are ephemeral" problem specifically.
+
+<Callout variant="tip" title="Key Takeaways">
+On CI systems that can't reuse image layers between runs, cache mounts give BuildKit a place to persist package-manager state directly, independent of the Docker image cache.
+</Callout>
+
+---

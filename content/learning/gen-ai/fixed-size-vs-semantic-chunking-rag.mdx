@@ -1,0 +1,53 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "fixed-size-vs-semantic-chunking-rag"
+order: 111
+level: "intermediate"
+format: "article"
+title: "Fixed-Size vs. Semantic Chunking: Failure Modes in RAG Pipelines"
+description: "Fixed-size chunking splits at arbitrary token boundaries, slicing tables and procedures mid-structure; semantic chunking fixes this by splitting at document structure at the cost of ingestion complexity."
+question: "When designing a chunking strategy for a RAG pipeline over long technical documents, what are the concrete failure modes of fixed-size chunking (e.g., splitting mid-table or mid-procedure), and how do semantic or structure-aware chunking strategies address them at the cost of what added complexity?"
+domain: "RAG & Data Systems"
+tags: ["RAG & Data Systems", "Chunking", "RAG"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Fixed-Size vs. Semantic Chunking: Failure | LLM Guide"
+metaDescription: "Learn Fixed-Size vs. Semantic Chunking: Failure Modes in RAG Pipelines with architecture patterns, practical configurations, and step-by-step implementa"
+publishDate: "2026-07-12"
+relatedModules: ["ann-search-hnsw-ef-construction-m-tradeoffs", "hybrid-search-dense-bm25-reranking"]
+---
+
+## Question
+When designing a chunking strategy for a RAG pipeline over long technical documents, what are the concrete failure modes of fixed-size chunking (e.g., splitting mid-table or mid-procedure), and how do semantic or structure-aware chunking strategies address them at the cost of what added complexity?
+
+
+## Quick Answer
+Fixed-size chunking cuts a document every N tokens regardless of content, which routinely slices a table mid-row or a procedure mid-step; semantic or structure-aware chunking splits at logical boundaries instead, at the cost of needing format-aware parsing at ingestion time.
+
+## Detailed Answer
+A fixed-size chunker treats the document as an undifferentiated stream of tokens and cuts wherever the count hits its window, with or without overlap. That's cheap and predictable, but it has no concept of what it's cutting through — and technical documents are full of structures where an arbitrary cut destroys the content's meaning entirely.
+
+**Concrete failure modes:**
+
+- **Split tables** — a chunk boundary lands mid-table, so one chunk has rows without the header defining what the columns mean, and the retriever can return numbers with no context for what they represent.
+- **Split procedures** — a numbered installation or troubleshooting procedure gets cut after step 3 of 7; retrieval can surface "step 4: restart the service" without the prerequisite steps that make it safe or correct.
+- **Split mid-sentence or mid-thought** — the embedding for a chunk that ends mid-clause is a poor representation of the idea it was supposed to capture, degrading retrieval precision for that unit even before ranking is involved.
+- **Fragmented context across chunks** — a definition introduced in one chunk and referenced three paragraphs later ends up separated, so a chunk that answers a question well is retrievable but incomplete without its now-absent context.
+
+Overlapping windows (e.g. 20% overlap between consecutive chunks) partially soften this — a cut mid-procedure at least duplicates the preceding step into the next chunk — but overlap doesn't understand structure either; it just increases the odds that *some* chunk happens to contain enough context, at the cost of redundant, near-duplicate content sitting in the index.
+
+**Semantic and structure-aware chunking** addresses this directly by splitting at boundaries the document actually has: markdown/HTML headers, detected table boundaries, list/procedure boundaries, or points of low embedding similarity between adjacent sentences (a proxy for topic shift). A table stays a table in one chunk; a procedure's steps stay together; a section keeps its heading attached so the chunk is self-describing.
+
+| Approach | Split point | Coherence | Added complexity |
+|----------|-------------|-----------|-------------------|
+| Fixed-size | Every N tokens | Frequently broken mid-structure | Low — one parameter to tune |
+| Fixed-size + overlap | Every N tokens, with overlap | Partially mitigated, duplicated content | Low-medium — tune size and overlap |
+| Structure-aware | Document structural boundaries (headers, tables, lists) | High for structured content | Medium-high — needs format-specific parsers (PDF layout, table extraction) |
+| Semantic (embedding-similarity) | Detected topic shifts | High for prose | High — extra embedding passes at ingestion, variable chunk sizes to manage |
+
+The cost of the more careful strategies is real: structure-aware chunking needs a parser that understands the source format well enough to find those boundaries (PDF layout extraction is notoriously unreliable for tables), and both approaches produce **variable-length chunks**, which complicates downstream token-budget planning and batching efficiency compared to the predictable size of fixed windows.
+
+<Callout variant="tip" title="Key Takeaways">
+Fixed-size chunking is cheap but structure-blind; pay the ingestion-time complexity of structure- or semantic-aware chunking specifically where the source documents contain tables, procedures, or other content that loses meaning when cut arbitrarily.
+</Callout>
+

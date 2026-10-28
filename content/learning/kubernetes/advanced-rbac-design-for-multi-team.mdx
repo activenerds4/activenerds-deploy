@@ -1,0 +1,630 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "advanced-rbac-design-for-multi-team"
+order: 36
+level: "advanced"
+format: "article"
+title: "Advanced RBAC Design for Multi-Team Organization: Architecture & Implementation"
+description: "In-depth architectural breakdown and operational implementation for Advanced RBAC Design for Multi-Team Organization: Architecture & Implementation."
+question: "Your company has three engineering teams: Frontend (deploys React apps), Backend (deploys APIs and workers), and Database (manages PostgreSQL and Redis). Each team has developers, leads, and CI/CD service accounts. Design a complete RBAC system where teams can only access their own namespaces, leads can approve deployments, CI/CD can deploy but not delete, and platform engineers have cluster-wide admin access with audit trails."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["RBAC", "Security", "Multi-tenancy", "Governance"]
+estimatedMinutes: 35
+xpValue: 20
+seoTitle: "Advanced RBAC Design for Multi-Team Organizat | K8s Guide"
+metaDescription: "Learn Advanced RBAC Design for Multi-Team Organization: Architecture & Implementation with architecture patterns, practical configurations, and step-by-step im"
+publishDate: "2026-06-21"
+relatedModules: []
+---
+
+**Prerequisite knowledge:** RBAC fundamentals, namespaces, ServiceAccounts, OPA basics
+
+---
+
+## Question
+Your company has three engineering teams: Frontend (deploys React apps), Backend (deploys APIs and workers), and Database (manages PostgreSQL and Redis). Each team has developers, leads, and CI/CD service accounts. Design a complete RBAC system where teams can only access their own namespaces, leads can approve deployments, CI/CD can deploy but not delete, and platform engineers have cluster-wide admin access with audit trails.
+
+
+## Quick Answer
+Use namespace-per-team isolation with `Role` and `RoleBinding` for team-scoped access, `ClusterRole` aggregation for shared read-only views, separate ServiceAccounts per pipeline with least-privilege verbs, and OPA Gatekeeper to enforce namespace ownership. Use audit logging to track all privileged actions.
+
+---
+
+
+## Detailed Answer
+## ️ RBAC Architecture
+```
+ClusterAdmin (Platform Team)
+        │
+        ├── ClusterRole: cluster-admin (full access)
+        └── Bound via ClusterRoleBinding
+
+Team Leads (per team)
+        │
+        ├── Role: team-lead (in team namespace)
+        │   ├── deployments: * (all verbs)
+        │   ├── pods: get, list, watch, delete
+        │   └── secrets: get, list
+        └── Bound via RoleBinding (namespace-scoped)
+
+Developers (per team)
+        │
+        ├── Role: developer (in team namespace)
+        │   ├── deployments: get, list, watch, update
+        │   ├── pods: get, list, watch, logs
+        │   └── configmaps: get, list, watch, create, update
+        └── Bound via RoleBinding (namespace-scoped)
+
+CI/CD ServiceAccounts (per team)
+        │
+        ├── Role: cicd-deployer (in team namespace)
+        │   ├── deployments: get, list, watch, create, update, patch
+        │   ├── services: get, list, watch, create, update, patch
+        │   └── NO delete verbs (intentional)
+        └── Bound via RoleBinding (namespace-scoped)
+```
+
+## ️ Implementation
+*Step 1: Namespace Structure*
+```yaml
+# namespaces.yaml — One namespace per team per environment
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: frontend-production
+  labels:
+    team: frontend
+    environment: production
+    cost-center: "CC-001"
+  annotations:
+    mycompany.com/team-lead: "alice@mycompany.com"
+    mycompany.com/slack-channel: "#team-frontend"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: frontend-staging
+  labels:
+    team: frontend
+    environment: staging
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backend-production
+  labels:
+    team: backend
+    environment: production
+    cost-center: "CC-002"
+  annotations:
+    mycompany.com/team-lead: "bob@mycompany.com"
+    mycompany.com/slack-channel: "#team-backend"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: database-production
+  labels:
+    team: database
+    environment: production
+    cost-center: "CC-003"
+  annotations:
+    mycompany.com/team-lead: "carol@mycompany.com"
+    mycompany.com/slack-channel: "#team-database"
+```
+
+*Step 2: ClusterRoles (Reusable Role Templates)*
+```yaml
+# cluster-roles.yaml
+
+# Role: Read-only access (base for all developers)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: namespace-viewer
+  labels:
+    rbac.mycompany.com/aggregate-to-developer: "true"
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - events
+      - resourcequotas
+      - limitranges
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+---
+# Role: Developer (read + limited write)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: namespace-developer
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]              # Allow exec into pods for debugging
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    verbs: ["create"]              # Allow port-forward for local debugging
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+                                   # Can update deployments (e.g., image tag)
+                                   # Cannot CREATE or DELETE deployments
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]         # Can list secret names but not values
+                                   # Use resourceNames to restrict further
+---
+# Role: Team Lead (full namespace control)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: namespace-lead
+rules:
+  - apiGroups: ["", "apps", "batch", "autoscaling", "networking.k8s.io"]
+    resources: ["*"]
+    verbs: ["*"]                   # Full control within namespace
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["*"]
+  # Leads CANNOT touch:
+  # - ClusterRoles / ClusterRoleBindings (cluster-scoped)
+  # - Nodes (cluster-scoped)
+  # - PersistentVolumes (cluster-scoped)
+  # - Namespaces themselves (cluster-scoped)
+---
+# Role: CI/CD Deployer (deploy but never delete)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cicd-deployer
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    # Explicitly NO "delete" verb
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Secrets: CI/CD can create but NOT read (write-only for security)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "update", "patch"]
+    # Cannot read existing secret values
+```
+
+*Step 3: RoleBindings per Team per Namespace*
+```yaml
+# frontend-rbac.yaml — Apply to frontend-production namespace
+
+# Bind developers to namespace-developer role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: frontend-developers
+  namespace: frontend-production
+subjects:
+  # Individual developers (from SSO/LDAP group via OIDC)
+  - kind: Group
+    name: "frontend-developers"    # Maps to OIDC group claim
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: namespace-developer
+  apiGroup: rbac.authorization.k8s.io
+---
+# Bind team lead
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: frontend-lead
+  namespace: frontend-production
+subjects:
+  - kind: Group
+    name: "frontend-leads"
+    apiGroup: rbac.authorization.k8s.io
+  - kind: User
+    name: "alice@mycompany.com"    # Explicit user binding as backup
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: namespace-lead
+  apiGroup: rbac.authorization.k8s.io
+---
+# Bind CI/CD service account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend-cicd
+  namespace: frontend-production
+  annotations:
+    mycompany.com/purpose: "GitHub Actions deployment pipeline"
+    mycompany.com/owner: "frontend-lead"
+    mycompany.com/created: "2026-07-09"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: frontend-cicd-deployer
+  namespace: frontend-production
+subjects:
+  - kind: ServiceAccount
+    name: frontend-cicd
+    namespace: frontend-production
+roleRef:
+  kind: ClusterRole
+  name: cicd-deployer
+  apiGroup: rbac.authorization.k8s.io
+```
+
+*Step 4: Platform Team Cluster Admin with Audit Trail*
+```yaml
+# platform-admin-rbac.yaml
+
+# Platform engineers get full cluster access
+# BUT via a named ClusterRoleBinding for audit trail
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-team-cluster-admin
+  annotations:
+    mycompany.com/approved-by: "CTO"
+    mycompany.com/review-date: "2026-07-09"
+    mycompany.com/next-review: "2026-10-09"   # Quarterly access review
+subjects:
+  - kind: Group
+    name: "platform-engineers"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+# Break-glass emergency access (tightly audited)
+# Used only during incidents — time-limited via external tooling
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: emergency-break-glass
+  annotations:
+    mycompany.com/purpose: "Emergency incident response only"
+    mycompany.com/approval-required: "true"
+    mycompany.com/max-duration: "4h"
+subjects:
+  - kind: Group
+    name: "oncall-engineers"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+```
+
+*Step 5: Kubernetes Audit Policy (Tracking Privileged Actions)*
+```yaml
+# audit-policy.yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  # Log all secret access at RequestResponse level (captures who read what)
+  - level: RequestResponse
+    resources:
+      - group: ""
+        resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Log all RBAC changes (who changed who has access)
+  - level: RequestResponse
+    resources:
+      - group: "rbac.authorization.k8s.io"
+        resources:
+          - clusterroles
+          - clusterrolebindings
+          - roles
+          - rolebindings
+
+  # Log all privileged pod creation
+  - level: RequestResponse
+    resources:
+      - group: ""
+        resources: ["pods"]
+    verbs: ["create", "update", "patch"]
+
+  # Log all delete operations (who deleted what)
+  - level: Metadata
+    verbs: ["delete", "deletecollection"]
+
+  # Log namespace-level changes
+  - level: RequestResponse
+    resources:
+      - group: ""
+        resources: ["namespaces"]
+
+  # Platform team actions: log everything they do
+  - level: RequestResponse
+    users:
+      - "system:serviceaccount:kube-system:*"
+    userGroups:
+      - "platform-engineers"
+
+  # Default: metadata only for read operations (reduces log volume)
+  - level: Metadata
+    verbs: ["get", "list", "watch"]
+
+  # Skip noisy health check endpoints
+  - level: None
+    nonResourceURLs:
+      - "/healthz*"
+      - "/readyz*"
+      - "/livez*"
+      - "/metrics"
+```
+
+```bash
+# Enable audit logging in kube-apiserver
+# Add to /etc/kubernetes/manifests/kube-apiserver.yaml:
+# --audit-policy-file=/etc/kubernetes/audit-policy.yaml
+# --audit-log-path=/var/log/kubernetes/audit.log
+# --audit-log-maxage=30        # Keep 30 days
+# --audit-log-maxbackup=10     # Keep 10 rotated files
+# --audit-log-maxsize=100      # Rotate at 100MB
+
+# Query audit logs for secret access
+cat /var/log/kubernetes/audit.log | \
+  jq 'select(.objectRef.resource == "secrets") |
+  select(.verb == "get") | {
+    time: .requestReceivedTimestamp,
+    user: .user.username,
+    groups: .user.groups,
+    secret: .objectRef.name,
+    namespace: .objectRef.namespace,
+    sourceIP: .sourceIPs[0]
+  }'
+
+# Find who deleted a deployment
+cat /var/log/kubernetes/audit.log | \
+  jq 'select(.objectRef.resource == "deployments") |
+  select(.verb == "delete") | {
+    time: .requestReceivedTimestamp,
+    user: .user.username,
+    deployment: .objectRef.name,
+    namespace: .objectRef.namespace
+  }'
+```
+
+*Step 6: OPA Policy — Enforce Namespace Ownership*
+```rego
+# policy/namespace-ownership.rego
+package namespace.ownership
+
+# Deny cross-namespace resource creation
+deny[msg] {
+  input.review.kind.kind == "Deployment"
+  namespace := input.review.object.metadata.namespace
+
+  # Get the team label from the namespace
+  # (In practice, fetch from namespace object via Gatekeeper's data.inventory)
+  namespace_team := data.inventory.cluster["v1"]["Namespace"][namespace].metadata.labels.team
+
+  # Get the user's team from their group membership
+  user_groups := input.review.userInfo.groups
+  user_team := [g | g := user_groups[_]; startswith(g, "team-")][0]
+  user_team_name := trim_prefix(user_team, "team-")
+
+  # Deny if user's team doesn't match namespace team
+  user_team_name != namespace_team
+
+  msg := sprintf(
+    "User from team '%v' cannot create resources in namespace '%v' (owned by team '%v')",
+    [user_team_name, namespace, namespace_team]
+  )
+}
+```
+
+*Step 7: ServiceAccount Token Best Practices*
+```yaml
+# Use projected service account tokens (short-lived, audience-bound)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cicd-runner
+  namespace: frontend-production
+spec:
+  serviceAccountName: frontend-cicd
+  automountServiceAccountToken: false    # Disable auto-mount
+
+  volumes:
+    - name: cicd-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              path: token
+              expirationSeconds: 3600     # 1-hour token (vs default permanent)
+              audience: "kubernetes"      # Audience-bound (prevents token reuse)
+  containers:
+    - name: cicd-runner
+      image: registry.mycompany.com/cicd-runner:latest
+      volumeMounts:
+        - name: cicd-token
+          mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          readOnly: true
+```
+
+*Step 8: Quarterly Access Review Automation*
+```python
+#!/usr/bin/env python3
+# access-review.py — Generate quarterly RBAC access report
+
+from kubernetes import client, config
+import json
+from datetime import datetime
+
+def generate_access_report():
+    config.load_incluster_config()  # or load_kube_config() locally
+
+    rbac_v1 = client.RbacAuthorizationV1Api()
+    core_v1  = client.CoreV1Api()
+
+    report = {
+        "generated_at": datetime.utcnow().isoformat(),
+        "cluster_role_bindings": [],
+        "role_bindings_by_namespace": {},
+        "service_accounts": [],
+        "findings": []
+    }
+
+    # Audit ClusterRoleBindings
+    crbs = rbac_v1.list_cluster_role_binding()
+    for crb in crbs.items:
+        for subject in (crb.subjects or []):
+            entry = {
+                "binding": crb.metadata.name,
+                "role": crb.role_ref.name,
+                "subject_kind": subject.kind,
+                "subject_name": subject.name,
+                "created": str(crb.metadata.creation_timestamp),
+                "annotations": crb.metadata.annotations or {}
+            }
+            report["cluster_role_bindings"].append(entry)
+
+            # Flag: cluster-admin bindings need justification
+            if crb.role_ref.name == "cluster-admin":
+                if "mycompany.com/approved-by" not in (crb.metadata.annotations or {}):
+                    report["findings"].append({
+                        "severity": "HIGH",
+                        "type": "MISSING_APPROVAL",
+                        "message": f"ClusterRoleBinding '{crb.metadata.name}' grants cluster-admin without approval annotation",
+                        "binding": crb.metadata.name
+                    })
+
+    # Audit RoleBindings per namespace
+    namespaces = core_v1.list_namespace()
+    for ns in namespaces.items:
+        ns_name = ns.metadata.name
+        rbs = rbac_v1.list_namespaced_role_binding(ns_name)
+        report["role_bindings_by_namespace"][ns_name] = []
+
+        for rb in rbs.items:
+            for subject in (rb.subjects or []):
+                entry = {
+                    "binding": rb.metadata.name,
+                    "role": rb.role_ref.name,
+                    "subject_kind": subject.kind,
+                    "subject_name": subject.name,
+                    "namespace": ns_name
+                }
+                report["role_bindings_by_namespace"][ns_name].append(entry)
+
+    # Audit ServiceAccounts — flag ones with no usage annotation
+    for ns in namespaces.items:
+        sas = core_v1.list_namespaced_service_account(ns.metadata.name)
+        for sa in sas.items:
+            if sa.metadata.name == "default":
+                continue
+            annotations = sa.metadata.annotations or {}
+            if "mycompany.com/purpose" not in annotations:
+                report["findings"].append({
+                    "severity": "MEDIUM",
+                    "type": "UNDOCUMENTED_SERVICE_ACCOUNT",
+                    "message": f"ServiceAccount '{sa.metadata.name}' in namespace '{ns.metadata.name}' has no purpose annotation",
+                    "namespace": ns.metadata.name,
+                    "service_account": sa.metadata.name
+                })
+
+    return report
+
+if __name__ == "__main__":
+    report = generate_access_report()
+
+    # Print summary
+    print(f"\n=== RBAC Access Review Report ===")
+    print(f"Generated: {report['generated_at']}")
+    print(f"ClusterRoleBindings: {len(report['cluster_role_bindings'])}")
+    print(f"Findings: {len(report['findings'])}")
+
+    # Print findings
+    if report["findings"]:
+        print("\n⚠️  FINDINGS:")
+        for finding in report["findings"]:
+            print(f"  [{finding['severity']}] {finding['type']}: {finding['message']}")
+
+    # Save full report
+    with open(f"rbac-report-{datetime.now().strftime('%Y%m%d')}.json", "w") as f:
+        json.dump(report, f, indent=2, default=str)
+
+    print(f"\nFull report saved to rbac-report-{datetime.now().strftime('%Y%m%d')}.json")
+```
+
+---
+
+## ️ Trade-offs: RBAC Design Approaches
+
+| Pattern | Isolation | Flexibility | Maintenance | Best For |
+|---|---|---|---|---|
+| **Namespace per team** | Strong | Medium | Medium | Clear team boundaries |
+| **Namespace per app** | Very Strong | Low | High | Microservices with strict isolation |
+| **Shared namespace** | Weak | High | Low | Small teams, simple apps |
+| **Virtual clusters (vCluster)** | Very Strong | High | High | True multi-tenancy |
+| **Hierarchical namespaces (HNC)** | Strong | High | Medium | Large orgs with subteams |
+
+---
+
+## ️ Common Mistakes & Misconceptions
+- **"Using `cluster-admin` for CI/CD is easier."** — It is easier until a compromised pipeline deletes your production namespace. CI/CD service accounts should have the minimum verbs needed — typically create, update, patch but never delete.
+- **"Roles are cluster-scoped."** — `Role` is namespace-scoped. `ClusterRole` is cluster-scoped. A `ClusterRole` bound with a `RoleBinding` (not `ClusterRoleBinding`) only grants access within that namespace — a useful pattern for reusable role templates.
+- **"RBAC prevents all unauthorized access."** — RBAC controls the Kubernetes API. It does not control network access between pods (use NetworkPolicy), application-level authorization, or node-level access via SSH.
+- **"Default service accounts are safe to use."** — The `default` ServiceAccount in every namespace should have `automountServiceAccountToken: false` set, otherwise every pod gets API credentials it likely doesn't need.
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+Effective RBAC design follows three principles: **least privilege** (give only what's needed), **explicit bindings** (name every binding so it's auditable), and **regular review** (access creep is real — quarterly reviews catch it). The distinction between `Role`/`ClusterRole` and `RoleBinding`/`ClusterRoleBinding` is fundamental — use `ClusterRole` as reusable templates bound with namespace-scoped `RoleBinding`s to avoid duplicating role definitions across namespaces.
+</Callout>
+
+---
+
+## Self-Assessment Checklist
+- [ ] Can you explain the difference between `Role` and `ClusterRole`?
+- [ ] Can you explain why binding a `ClusterRole` with a `RoleBinding` is namespace-scoped?
+- [ ] Can you write a CI/CD ServiceAccount with deploy-but-no-delete permissions?
+- [ ] Can you describe what an audit policy `level: RequestResponse` captures vs `level: Metadata`?
+- [ ] Can you explain why `automountServiceAccountToken: false` is a security best practice?
+
+
+---

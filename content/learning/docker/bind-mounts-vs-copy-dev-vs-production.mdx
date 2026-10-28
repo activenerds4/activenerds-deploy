@@ -1,0 +1,47 @@
+---
+pathSlug: "docker"
+moduleSlug: "bind-mounts-vs-copy-dev-vs-production"
+order: 12
+level: "beginner"
+format: "article"
+title: "Bind Mounts vs. COPY: Why Dev Convenience Doesn't Belong in Production"
+description: "A bind mount syncs live host files into a running container for fast iteration. COPY bakes files into the image at build time, so production doesn't depend on the host."
+question: "A developer mounts their local project folder into a container with `-v` during development, but in the production Dockerfile they use `COPY`. Explain why these two approaches exist and why you would never rely on a bind mount in a production deployment."
+domain: "Persistence"
+tags: ["Persistence", "Volumes", "Bind Mounts", "BindMounts"]
+estimatedMinutes: 5
+xpValue: 10
+seoTitle: "Bind Mounts vs. COPY: Why Dev Convenience | Docker Guide"
+metaDescription: "Learn Bind Mounts vs. COPY: Why Dev Convenience Doesn't Belong in Production with architecture patterns, practical configurations, and step-by-step imple"
+publishDate: "2026-07-16"
+relatedModules: ["container-filesystem-lifecycle-data-loss", "entrypoint-vs-cmd-runtime-behavior"]
+---
+
+## Question
+A developer mounts their local project folder into a container with `-v` during development, but in the production Dockerfile they use `COPY`. Explain why these two approaches exist and why you would never rely on a bind mount in a production deployment.
+
+
+## Quick Answer
+A bind mount (`-v`) points a container at a live folder on the host, so edits show up instantly without rebuilding — great for development, but it ties the container to that host's filesystem. `COPY` bakes files into the image at build time, so the container carries everything it needs and runs identically anywhere.
+
+## Detailed Answer
+These two mechanisms exist to solve opposite problems, and both are correct — for their own stage of the workflow.
+
+During development, the whole point is iteration speed: you want to edit a file and see the effect immediately, without waiting for `docker build` to copy it into a new image. A **bind mount** does exactly this — it maps a directory on the host straight into the container's filesystem, so the container is literally reading (and often writing) the same files sitting on your laptop. There's no image rebuild involved because nothing was ever copied anywhere.
+
+In production, that exact behavior becomes a liability rather than a convenience:
+
+| Concern | Bind Mount | `COPY` (baked into image) |
+|---------|-----------|----------------------------|
+| Reproducibility | Depends on whatever's on that specific host, right now | Image content is fixed and versioned |
+| Portability | Breaks if the host path doesn't exist elsewhere | Runs identically on any host or cluster node |
+| Immutability | Container can mutate files a deploy assumed were fixed | Image is read-only; nothing external can silently change it |
+| Rollback | No clean "previous version" of the mounted files | Roll back = deploy the previous image tag |
+| Security | Grants the container read/write access to host paths | Container filesystem is fully self-contained |
+
+The core issue is that a bind mount makes the container's behavior depend on **something outside the image** — the exact contents of a host directory at the moment the container starts. That's the opposite of what you want from a deployable artifact. An image tagged `myapp:1.4.2` should behave the same way whether it's started on a developer's laptop, a staging VM, or one of fifty identical nodes in a Kubernetes cluster — none of which have your local project folder at the expected path. `COPY` guarantees that by making the files part of the immutable image itself, built once and shipped as a unit.
+
+<Callout variant="tip" title="Key Takeaways">
+Bind mounts trade reproducibility for edit-and-refresh speed during development; production wants the opposite trade, which is exactly what `COPY`-into-the-image gives you.
+</Callout>
+

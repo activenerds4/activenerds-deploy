@@ -1,0 +1,75 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "kubernetes-services-stable-networking-discovery"
+order: 63
+level: "beginner"
+format: "article"
+title: "Kubernetes Services: Stable Networking and Service Discovery for Transient Pods"
+description: "A Service provides a stable network endpoint (fixed IP + DNS name) for a dynamic set of pods — because pod IPs change every time a pod is restarted, replaced..."
+question: "How do Kubernetes Services provide stable IP addresses and DNS endpoints for transient Pods, and how does kube-proxy update iptables/IPVS rules when Pod endpoints change?"
+domain: "Services & Networking"
+tags: ["Services", "Networking"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Kubernetes Services: Stable Networking and Se | K8s Guide"
+metaDescription: "Learn Kubernetes Services: Stable Networking and Service Discovery for Transient Pods with architecture patterns, practical configurations, and step-by-step im"
+publishDate: "2026-06-19"
+relatedModules: ["service-types-clusterip-nodeport-loadbalancer", "configmaps-decoupling-application-configuration", "kubernetes-secrets-vs-configmaps-security", "kubernetes-self-healing-mechanics-restarts"]
+---
+
+## Question
+How do Kubernetes Services provide stable IP addresses and DNS endpoints for transient Pods, and how does kube-proxy update iptables/IPVS rules when Pod endpoints change?
+
+## Quick Answer
+A Service provides a stable network endpoint (fixed IP + DNS name) for a dynamic set of pods — because pod IPs change every time a pod is restarted, replaced, or rescheduled.
+
+
+## Detailed Answer
+Pods are ephemeral — every time a pod is replaced (update, crash, reschedule), it gets a new IP address. If Service A needs to talk to Service B, it can't hardcode pod IPs. A Service solves this by:
+
+1. **Selecting pods** via label selector — always pointing to the current healthy pods
+2. **Providing a stable ClusterIP** — a virtual IP that never changes
+3. **Registering a DNS name** — `my-svc.my-namespace.svc.cluster.local`
+4. **Load balancing** — distributing traffic across all matching pods
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-svc
+  namespace: production
+spec:
+  selector:
+    app: my-app                       # Finds all pods with this label
+  ports:
+  - name: http
+    port: 80                          # Port the Service listens on
+    targetPort: 8080                  # Port on the Pod
+    protocol: TCP
+  type: ClusterIP                     # Internal only (default)
+```
+
+```bash
+# How Services find pods — via Endpoints
+kubectl get endpoints my-app-svc
+# NAME         ENDPOINTS                          AGE
+# my-app-svc   10.0.1.5:8080,10.0.1.6:8080,...   5m
+
+# If endpoints are empty → label selector doesn't match any pods
+# This is one of the most common networking bugs in Kubernetes
+```
+
+## The DNS Magic
+CoreDNS automatically creates DNS records for every Service:
+```
+my-app-svc                            → resolves within same namespace
+my-app-svc.production                 → resolves from any namespace
+my-app-svc.production.svc.cluster.local → fully qualified, always works
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+Services decouple consumers from the dynamic pod infrastructure — always communicate with Services, never with pod IPs directly.
+</Callout>
+
+---

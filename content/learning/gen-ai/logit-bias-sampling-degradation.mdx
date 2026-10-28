@@ -1,0 +1,37 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "logit-bias-sampling-degradation"
+order: 33
+level: "beginner"
+format: "article"
+title: "Logit Bias: How Adjusting Log-Odds Steers Token Sampling (and Breaks It)"
+description: "Logit bias adds a fixed value directly to a token's pre-softmax score, and extreme values can force incoherent tokens to always win or make valid tokens permanently unreachable."
+question: "How does applying a positive or negative `logit_bias` value dynamically adjust the log-odds of target tokens during sampling, and why does extreme logit biasing cause unexpected decoding degradation?"
+domain: "System Design & Prompt Engineering"
+tags: ["System Design & Prompt Engineering", "Logit Bias", "LogitBias", "Sampling", "Grammar"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Logit Bias Explained: Steering Token Sampling | LLM Guide"
+metaDescription: "Learn how logit_bias adjusts token log-odds before sampling, and why extreme bias values can cause incoherent or broken decoding output."
+publishDate: "2026-08-29"
+relatedModules: ["temperature-top-k-top-p-sampling-strategies"]
+---
+
+## Question
+How does applying a positive or negative `logit_bias` value dynamically adjust the log-odds of target tokens during sampling, and why does extreme logit biasing cause unexpected decoding degradation?
+
+
+## Quick Answer
+`logit_bias` adds a fixed value directly to a specific token's raw logit before softmax is computed, shifting that token's log-odds up or down relative to every other candidate — extreme values can force it to always (or never) be selected, regardless of context.
+
+## Detailed Answer
+Every candidate token has a raw score — a **logit** — coming out of the model's final layer, before softmax converts those scores into a probability distribution. Because softmax is applied on the log scale, adding a constant to a logit is mathematically equivalent to multiplying that token's odds relative to the others by `exp(bias)`. A positive bias makes a token more likely to be sampled; a negative bias makes it less likely; and many APIs cap this at roughly ±100, where the extremes function as an effective forced-include or forced-exclude.
+
+This is genuinely useful in moderation: negatively biasing tokens associated with profanity or unwanted formatting, or positively biasing a token you want to nudge the model toward using more often. It's also how naive implementations of constrained generation used to work, before dedicated grammar-based decoding became common.
+
+The failure mode comes from the fact that logit bias operates on **individual tokens**, not concepts or words. A word can be split into multiple subword tokens depending on context, so biasing "the token for 'cat'" might only ever hit one specific tokenization of that word, missing others entirely, or worse, might partially match a token that's a substring of many unrelated words. Setting an extreme positive bias on a common token (a frequent punctuation mark, a common subword fragment) can force the model to emit that token almost every step regardless of what makes sense there, producing repetitive or garbled output. Extreme negative bias on a token the model needs to complete a valid word can force it into a degenerate loop, since every alternative path forward has also been probabilistically crippled, and the model has no legal high-probability continuation left to fall back on — leading to visibly broken, incoherent generations.
+
+<Callout variant="tip" title="Key Takeaways">
+Logit bias is a blunt, token-level lever — small adjustments nudge style and word choice, but extreme values fight against the model's own learned distribution and reliably produce degraded output.
+</Callout>
+

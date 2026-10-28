@@ -1,0 +1,46 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "control-plane-vs-worker-nodes-architecture"
+order: 15
+level: "beginner"
+format: "article"
+title: "Control Plane vs. Worker Nodes: Key Architecture Components of a Kubernetes Cluster"
+description: "A cluster has a Control Plane (API Server, etcd, Scheduler, Controller Manager) and Worker Nodes (kubelet, kube-proxy, container runtime), plus optionally a..."
+question: "Explain the architecture, failure modes, and operational best practices for Control Plane vs. Worker Nodes: Key Architecture Components of a Kubernetes Cluster in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Architecture"]
+estimatedMinutes: 5
+xpValue: 10
+seoTitle: "Control Plane vs. Worker Nodes: Key Architect | K8s Guide"
+metaDescription: "Learn Control Plane vs. Worker Nodes: Key Architecture Components of a Kubernetes Cluster with architecture patterns, practical configurations, and step-by-ste"
+publishDate: "2026-06-19"
+relatedModules: ["etcd-architecture-distributed-key-value-store", "control-plane-vs-worker-node-responsibilities", "kubectl-apply-execution-flow-breakdown"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for Control Plane vs. Worker Nodes: Key Architecture Components of a Kubernetes Cluster in production Kubernetes environments.
+
+## Quick Answer
+A cluster has a **Control Plane** (API Server, etcd, Scheduler, Controller Manager) and **Worker Nodes** (kubelet, kube-proxy, container runtime), plus optionally a cloud controller manager.
+
+
+## Detailed Answer
+Think of the cluster as a company: the **Control Plane is headquarters** (makes decisions) and **Worker Nodes are the offices** (do the actual work).
+
+## Control Plane
+- **kube-apiserver:** The front door — every kubectl command, every controller, every kubelet talks to the API server. It validates requests and persists state to etcd.
+- **etcd:** The company's filing cabinet — a distributed key-value store holding all cluster state. If you lose etcd without a backup, you lose the cluster.
+- **kube-scheduler:** HR that assigns new employees (pods) to offices (nodes) based on resource availability, affinity rules, and taints.
+- **kube-controller-manager:** The management layer — runs dozens of controllers (Deployment controller, Node controller, etc.) that watch for drift and correct it.
+
+## Worker Nodes
+- **kubelet:** The office manager — receives pod assignments from the scheduler and ensures containers are running as specified.
+- **kube-proxy:** The receptionist — maintains network rules so that Service traffic reaches the right pods.
+- **Container runtime:** The actual infrastructure — containerd pulls images and runs containers.
+
+
+<Callout variant="tip" title="Key Takeaways">
+Understanding which component does what lets you diagnose where in the chain something broke when things go wrong.
+</Callout>
+
+---

@@ -1,0 +1,43 @@
+---
+pathSlug: "docker"
+moduleSlug: "default-bridge-vs-user-defined-bridge-dns"
+order: 48
+level: "intermediate"
+format: "article"
+title: "Default Bridge vs. User-Defined Bridge: Why Container Name Resolution Differs"
+description: "The default bridge network has no embedded DNS server, so containers on it can only reach each other by IP; user-defined bridge networks run Docker's embedded DNS resolver, enabling name-based resolution."
+question: "Two containers on the default `bridge` network can't resolve each other by container name, but two containers on a user-defined bridge network can. Explain the underlying difference in how Docker handles DNS resolution between these two network types."
+domain: "Networking"
+tags: ["Networking", "Bridge Network", "BridgeNetwork", "NetworkDrivers"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "Default Bridge vs. User-Defined Bridge | Docker Guide"
+metaDescription: "Learn Default Bridge vs. User-Defined Bridge: Why Container Name Resolution Differs with networking fundamentals and practical Docker configurations."
+publishDate: "2026-08-18"
+relatedModules: ["host-networking-vs-bridge-latency-tradeoff", "docker-embedded-dns-intermittent-resolution-failures"]
+---
+
+## Question
+Two containers on the default `bridge` network can't resolve each other by container name, but two containers on a user-defined bridge network can. Explain the underlying difference in how Docker handles DNS resolution between these two network types.
+
+
+## Quick Answer
+Containers only get **name-based DNS resolution** on a user-defined bridge network, because that's the only network type where Docker runs its embedded DNS server (`127.0.0.11`) for automatic service discovery; the default `bridge` network never registers container names with it.
+
+## Detailed Answer
+Docker ships with a built-in `bridge` network that every container joins automatically unless told otherwise — it exists mainly for backward compatibility with early Docker versions. On this **default bridge**, containers get IP connectivity to each other, but Docker does not populate its embedded DNS resolver with their names; the only way to reach another container is by its IP address, or via legacy `--link` flags (deprecated, fragile, and rarely used today).
+
+A **user-defined bridge network** (created with `docker network create mynet`) behaves differently by design. When a container joins a user-defined network, Docker automatically registers its name (and any `--network-alias`) with the embedded DNS server running inside the Docker daemon at `127.0.0.11`. Every container on that network has its `/etc/resolv.conf` pointed at that address, so a lookup for another container's name resolves to its current IP transparently — including after that container restarts and gets a new IP.
+
+| Network Type | Container Name Resolution | Registered With Embedded DNS |
+|---------------|---------------------------|-------------------------------|
+| Default `bridge` | No — IP only (or deprecated `--link`) | No |
+| User-defined bridge | Yes — automatic, by container/service name | Yes |
+
+This is one of the main reasons Docker's own documentation and most Compose-based workflows steer people away from the default bridge network entirely — Compose, in fact, creates a user-defined bridge network for every project automatically, which is why service-name resolution "just works" in a `docker-compose.yml` without anyone configuring DNS explicitly.
+
+<Callout variant="tip" title="Key Takeaways">
+Always run multi-container applications on a user-defined bridge network — it's the only bridge type where container names resolve to IPs automatically.
+</Callout>
+
+---

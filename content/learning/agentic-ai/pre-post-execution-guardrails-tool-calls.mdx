@@ -1,0 +1,35 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "pre-post-execution-guardrails-tool-calls"
+order: 21
+level: "beginner"
+format: "article"
+title: "Guardrails for Tool Execution: Validating Agent Parameters Before and After a Call"
+description: "Pre-execution guardrails validate generated parameters — types, allow-listed paths, query shape — against fixed safety bounds before a tool ever runs, while post-execution checks confirm the actual side effect matched what was authorized; both live in deterministic code, never in the model."
+question: "How do you enforce strict pre-execution and post-execution guardrails around a tool call to verify that the generated parameters (e.g., file paths, database queries) conform to system safety bounds before the execution engine runs them?"
+domain: "Deterministic Execution"
+tags: ["Deterministic Execution", "Validation", "StateMachines", "ControlFlow"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Guardrails for Tool Execution in Agents | AI Agents Guide"
+metaDescription: "Learn Guardrails for Tool Execution: Validating Agent Parameters Before and After a Call with architecture patterns and step-by-step implementation details"
+publishDate: "2026-06-19"
+relatedModules: ["deterministic-vs-nondeterministic-agent-boundaries", "native-vs-prompt-based-tool-calling"]
+---
+
+## Question
+How do you enforce strict pre-execution and post-execution guardrails around a tool call to verify that the generated parameters (e.g., file paths, database queries) conform to system safety bounds before the execution engine runs them?
+
+
+## Quick Answer
+Pre-execution guardrails run generated parameters through fixed, deterministic checks — schema validation, allow-listed paths or tables, range limits — before the tool is invoked, and post-execution checks confirm the actual result stayed within the bounds that were authorized; both are ordinary code, not something the model is asked to police itself.
+
+## Detailed Answer
+The model proposes arguments for a tool call, but it should never be the last line of defense on whether those arguments are safe to run. **Pre-execution guardrails** sit between "model produced a call" and "runtime executes it," and they check things a schema alone can't: is this file path inside an allow-listed directory (not `../../etc/passwd`)? Is this SQL query a `SELECT` against an approved table, not a `DROP`? Is this numeric parameter within a sane range (a "quantity" of 5, not 5,000,000)? These checks are written as explicit, fixed logic — allow-lists, regex bounds, range checks — so the same input always produces the same accept/reject decision, which is what makes them auditable and testable.
+
+**Post-execution guardrails** check the result of the call itself, since a call can pass every pre-execution check and still do something unintended — a query scoped correctly but returning far more rows than expected, or a file write that succeeded but landed at an unexpected size. Post-checks confirm the observed outcome matches the envelope that was authorized (row-count ceilings, expected file-size ranges, exit codes) and can trigger a rollback, an alert, or a hard stop if it doesn't. The combination matters because pre-checks catch obviously unsafe *requests*, while post-checks catch cases where a request looked safe but the *outcome* wasn't — neither alone is sufficient.
+
+<Callout variant="tip" title="Key Takeaways">
+Never let the model's own judgment be the safety boundary — pre-execution guardrails gate what's allowed to run, and post-execution checks confirm what actually happened stayed inside that boundary.
+</Callout>
+

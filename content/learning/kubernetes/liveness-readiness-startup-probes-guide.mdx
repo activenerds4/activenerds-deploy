@@ -1,0 +1,150 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "liveness-readiness-startup-probes-guide"
+order: 33
+level: "intermediate"
+format: "article"
+title: "Liveness, Readiness, and Startup Probes: Health Check Configurations"
+description: "Liveness restarts dead containers; readiness removes unready pods from service load balancing; startup gives slow-starting apps time to initialize before liv..."
+question: "How do Liveness, Readiness, and Startup probes differ in purpose and behavior, and how do incorrect probe configurations cause cascading deployment failures or unnecessary restarts?"
+domain: "Workloads & Scheduling"
+tags: ["Probes", "Health Checks"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "Liveness, Readiness, and Startup Probes: Heal | K8s Guide"
+metaDescription: "Learn Liveness, Readiness, and Startup Probes: Health Check Configurations with architecture patterns, practical configurations, and step-by-step implementatio"
+publishDate: "2026-06-21"
+relatedModules: ["crashloopbackoff-troubleshooting-root-cause-analysis", "rolling-update-strategy-zero-downtime", "production-stateless-web-app-deployment-design"]
+---
+
+## Question
+How do Liveness, Readiness, and Startup probes differ in purpose and behavior, and how do incorrect probe configurations cause cascading deployment failures or unnecessary restarts?
+
+## Quick Answer
+Liveness restarts dead containers; readiness removes unready pods from service load balancing; startup gives slow-starting apps time to initialize before liveness kicks in — run all three in production.
+
+
+## Detailed Answer
+| Probe | Failure Action | Purpose | When to Use |
+|---|---|---|---|
+| **Liveness** | Container restarted | Detect deadlocks/hangs | App can hang without crashing |
+| **Readiness** | Pod removed from Service | Signal not ready for traffic | App has warm-up time or dependencies |
+| **Startup** | Container restarted | Protect slow-starting apps | Java, .NET apps taking &gt;30s to start |
+
+```yaml
+containers:
+- name: app
+  image: myapp:v1
+
+  # STARTUP PROBE — checked FIRST
+  # Disables liveness until it passes
+  # Gives slow apps time to initialize
+  startupProbe:
+    httpGet:
+      path: /healthz
+      port: 8080
+    failureThreshold: 30            # 30 attempts × 10s = 5 min max startup
+    periodSeconds: 10
+    # After this passes, liveness takes over
+
+  # LIVENESS PROBE — checked continuously after startup passes
+  # Failure → container KILLED and RESTARTED
+  # Use for: detecting deadlocks, infinite loops, hung threads
+  livenessProbe:
+    httpGet:
+      path: /healthz                # Should return 200 if app is alive
+      port: 8080
+    initialDelaySeconds: 0          # Startup probe handles delay
+    periodSeconds: 15               # Check every 15 seconds
+    timeoutSeconds: 5               # Fail if no response in 5s
+    failureThreshold: 3             # Restart after 3 consecutive failures
+    successThreshold: 1             # 1 success to pass (liveness always 1)
+
+  # READINESS PROBE — checked continuously
+  # Failure → pod REMOVED from Service endpoints (no restart)
+  # Use for: dependency checks, warm-up, graceful degradation
+  readinessProbe:
+    httpGet:
+      path: /ready                  # Different from /healthz — checks dependencies too
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3             # Remove from service after 3 failures
+    successThreshold: 1             # Re-add to service after 1 success
+
+  # PROBE TYPES — httpGet, tcpSocket, exec, grpc
+  # TCP Socket — for non-HTTP services
+  livenessProbe:
+    tcpSocket:
+      port: 5432                    # Just checks TCP connection opens
+    periodSeconds: 10
+
+  # Exec — run a command inside container
+  livenessProbe:
+    exec:
+      command:
+      - /bin/sh
+      - -c
+      - "pg_isready -U postgres -d mydb"
+    periodSeconds: 10
+
+  # gRPC — for gRPC services (K8s 1.24+)
+  livenessProbe:
+    grpc:
+      port: 50051
+    periodSeconds: 10
+```
+
+## What /healthz vs /ready Should Check
+```python
+# /healthz — liveness endpoint (is the process alive?)
+# Should ONLY check if the app itself is functional
+# Do NOT check external dependencies here
+@app.route('/healthz')
+def healthz():
+    # Check: can I process requests? Is my thread pool alive?
+    return {"status": "ok"}, 200
+    # Never return 500 here unless the app truly needs a restart
+
+# /ready — readiness endpoint (am I ready to serve traffic?)
+# CAN check external dependencies
+@app.route('/ready')
+def ready():
+    # Check: database connected? cache warm? config loaded?
+    try:
+        db.ping()
+        cache.ping()
+        return {"status": "ready"}, 200
+    except Exception as e:
+        return {"status": "not ready", "reason": str(e)}, 503
+        # This removes pod from load balancer until dependencies recover
+```
+
+## Common Mistakes
+```yaml
+# MISTAKE 1: Liveness probe checks external dependencies
+# If DB goes down → liveness fails → pod restarts → DB still down → infinite restart loop
+livenessProbe:
+  exec:
+    command: ["check-database-connection.sh"]  # WRONG for liveness
+
+# MISTAKE 2: No startup probe on slow-starting app
+# Java app takes 45s to start → liveness probe fails at 30s → restarts forever
+# Fix: Add startupProbe with failureThreshold: 30, periodSeconds: 10 (5 min budget)
+
+# MISTAKE 3: Same path for liveness and readiness
+# If the path checks dependencies (right for readiness) and DB goes down:
+# Liveness fails → pod restarts → doesn't help → cascading restart storm
+# Fix: /healthz checks only self; /ready checks dependencies
+
+# MISTAKE 4: initialDelaySeconds on liveness when startupProbe exists
+# Redundant and confusing — let startupProbe handle the delay
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+Separate concerns — liveness checks "am I broken beyond recovery?" (trigger restart); readiness checks "am I ready to handle requests?" (gate traffic) — never let liveness check external dependencies or you'll create restart storms.
+</Callout>
+
+---

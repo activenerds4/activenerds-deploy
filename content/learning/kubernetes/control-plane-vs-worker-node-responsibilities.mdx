@@ -1,0 +1,50 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "control-plane-vs-worker-node-responsibilities"
+order: 24
+level: "beginner"
+format: "article"
+title: "Control Plane vs. Worker Nodes: Responsibilities and Component Breakdown"
+description: "A Node is a physical or virtual machine in the cluster. Master nodes (control plane nodes) run cluster management components; worker nodes run your applicati..."
+question: "Explain the architecture, failure modes, and operational best practices for Control Plane vs. Worker Nodes: Responsibilities and Component Breakdown in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Architecture", "Nodes"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Control Plane vs. Worker Nodes: Responsibilit | K8s Guide"
+metaDescription: "Learn Control Plane vs. Worker Nodes: Responsibilities and Component Breakdown with architecture patterns, practical configurations, and step-by-step implement"
+publishDate: "2026-07-22"
+relatedModules: ["control-plane-vs-worker-nodes-architecture", "kubectl-apply-execution-flow-breakdown"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for Control Plane vs. Worker Nodes: Responsibilities and Component Breakdown in production Kubernetes environments.
+
+## Quick Answer
+A Node is a physical or virtual machine in the cluster. Master nodes (control plane nodes) run cluster management components; worker nodes run your application pods.
+
+
+## Detailed Answer
+In Kubernetes, **nodes** are the machines (EC2 instances, VMs, or bare metal) that form the cluster. Every node runs the **kubelet** (the node agent), **kube-proxy** (network routing), and a **container runtime** (containerd). The distinction between master and worker is about which additional components run on the node:
+
+- **Control plane nodes** additionally run: kube-apiserver, etcd, kube-scheduler, kube-controller-manager. In managed services like EKS, these are fully managed by AWS — you never see these nodes.
+- **Worker nodes** run your application pods. On EKS, these are the EC2 instances in your node groups that you pay for and manage.
+
+## On EKS Specifically (Your Context)
+The control plane is AWS-managed — you don't provision, patch, or back up control plane nodes. You only manage worker nodes (via managed node groups or Karpenter). This is one of EKS's biggest operational advantages.
+
+```bash
+kubectl get nodes                      # List all nodes
+kubectl get nodes -o wide              # With IP, OS, container runtime
+kubectl describe node <node-name>      # Full detail: conditions, capacity, allocated pods
+kubectl cordon <node-name>             # Mark node unschedulable (drain prep)
+kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
+kubectl uncordon <node-name>           # Re-enable scheduling after maintenance
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+In managed Kubernetes (EKS, GKE, AKS), you only manage worker nodes — the control plane is the cloud provider's responsibility.
+</Callout>
+
+---

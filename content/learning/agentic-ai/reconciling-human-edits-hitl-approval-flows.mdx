@@ -1,0 +1,37 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "reconciling-human-edits-hitl-approval-flows"
+order: 45
+level: "intermediate"
+format: "article"
+title: "Reconciling Human Edits with Agent State During HITL Approval Flows"
+description: "When a supervisor edits the proposed state during an HITL interrupt, the engine should write the edit directly into the checkpointed state as the new ground truth and resume from there, rather than trying to reconcile it against the agent's original reasoning — the trajectory is annotated, not overwritten."
+question: "When a human supervisor modifies the proposed state or edit plan during an HITL interrupt, how should the execution engine reconcile the human's manual edits with the agent's prior trajectory context?"
+domain: "Human-in-the-Loop (HITL)"
+tags: ["Human-in-the-Loop (HITL)", "Approval Flows", "HITL", "StateMutation", "ApprovalFlows"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "Reconciling Human Edits in HITL Flows | AI Agents Guide"
+metaDescription: "Learn Reconciling Human Edits with Agent State During HITL Approval Flows with architecture patterns, practical configurations, and step-by-step guidance"
+publishDate: "2026-07-13"
+relatedModules: ["async-hitl-interrupt-pattern-high-risk-tools", "state-graph-architectures-checkpointers-persistence"]
+---
+
+## Question
+When a human supervisor modifies the proposed state or edit plan during an HITL interrupt, how should the execution engine reconcile the human's manual edits with the agent's prior trajectory context?
+
+
+## Quick Answer
+A human's edit during an HITL pause is written directly into the checkpointed state as the new ground truth for that field, and execution resumes from the edited state rather than the agent's original proposal; the prior trajectory isn't discarded, but it's annotated as "superseded by human edit" so later reasoning doesn't act on a stale value.
+
+## Detailed Answer
+When a supervisor changes a proposed edit plan or tool argument during an interrupt — swapping a proposed file diff, correcting a parameter — the engine has to decide what "the state" actually is going forward. The reliable pattern is: the human's edit **replaces** the corresponding field in the checkpointed state directly (the same state a node execution would have written to), rather than being appended as a *second, competing* version that something downstream has to reconcile between. This avoids an entire class of bugs where the agent's next Thought is generated against a stale proposal that a human already overrode.
+
+What still needs preserving is the **trajectory record** — the fact that a human intervened, what the original proposal was, and what it was changed to. This is written as metadata alongside the state update, not merged into the state itself: an audit log entry like `{node: "propose_edit", original: {...}, human_edit: {...}, approved_by: "..."}`. That distinction matters because the *state* going forward should be unambiguous (the agent's next step reasons from one current value, not two), while the *history* should be complete for audit and for any later reflection the agent does about why an earlier plan changed.
+
+One edge case worth naming explicitly: if the human's edit invalidates an assumption a *later*, not-yet-executed step in the plan depends on (e.g. they changed a file path a subsequent step still references by the old path), the engine should trigger the same re-planning trigger used for any other invalidated assumption — treating a human edit as just another kind of state change the downstream plan needs to be checked against, not a special case exempt from that check.
+
+<Callout variant="tip" title="Key Takeaways">
+Human edits become the new state directly — don't try to merge or reconcile them against the agent's prior proposal — but keep a separate audit trail so the intervention itself isn't lost.
+</Callout>
+

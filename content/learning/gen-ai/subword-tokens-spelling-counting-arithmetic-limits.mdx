@@ -1,0 +1,37 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "subword-tokens-spelling-counting-arithmetic-limits"
+order: 39
+level: "beginner"
+format: "article"
+title: "Subword Tokens and the Spelling Problem: Why LLMs Struggle to Count Letters and Do Arithmetic"
+description: "LLMs read subword chunks, not individual letters, so a model never directly sees the character sequence inside a word, making spelling, counting, and digit arithmetic unreliable."
+question: "Why do LLMs operate on subword tokens (via BPE or similar) rather than whole words or raw characters, and what practical problems does this cause when a model has to reason about things like spelling, counting characters, or arithmetic on numbers?"
+domain: "Architecture & Mathematics"
+tags: ["Architecture & Mathematics", "Tokenization", "BPE", "Embeddings"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Why LLMs Struggle to Spell and Do Math | LLM Guide"
+metaDescription: "Learn why subword tokenization makes LLMs unreliable at spelling, counting letters, and arithmetic, since the model never sees raw characters directly."
+publishDate: "2026-09-04"
+relatedModules: ["subword-tokenization-oov-handling-vocab-size-tradeoffs", "token-embeddings-vector-space-semantics"]
+---
+
+## Question
+Why do LLMs operate on subword tokens (via BPE or similar) rather than whole words or raw characters, and what practical problems does this cause when a model has to reason about things like spelling, counting characters, or arithmetic on numbers?
+
+
+## Quick Answer
+LLMs operate on **subword tokens** — merged multi-character chunks — rather than whole words or individual characters, because this keeps vocabulary size and sequence length in a practical range, but it also means the model never directly sees the individual letters or digits inside a token.
+
+## Detailed Answer
+If a model tokenized every character separately, sequences would become extremely long, since even a short sentence turns into dozens of tokens, driving up compute cost quadratically with **self-attention**. If it instead used whole-word tokenization, the vocabulary would need to be enormous to cover every word form in every language, and any truly novel word would hit an out-of-vocabulary wall. **Byte-Pair Encoding (BPE)** and similar subword schemes split the difference: common words often become a single token, while rarer or longer words get split into a handful of frequent sub-pieces — a reasonable trade-off for language modeling in general.
+
+The practical cost shows up specifically in tasks that require reasoning about the *internal character structure* of a token. When the tokenizer merges "strawberry" into one or two token IDs, the model's input is those ID numbers — not the literal sequence `s-t-r-a-w-b-e-r-r-y`. The model has learned statistical associations about what that token tends to co-occur with, but it has no direct, guaranteed access to "this token is spelled with these five specific letters in this order." Asking it to count how many times a particular letter appears, or to reverse the spelling, requires it to have implicitly memorized character-level facts about that specific token from training data — which it often has for common words, but unreliably, and it breaks down further for rarer tokens or unusual character-counting questions.
+
+**Arithmetic on numbers** suffers from a related but distinct issue: number tokenization is often inconsistent across different digit-string lengths and doesn't necessarily align with place value. "1234" might be split as a single token in one context and as `12` + `34` in another, depending on what happened to be frequent in training data, and there's no guarantee that the tokenizer's chunking respects the ones/tens/hundreds structure a human would rely on to do the arithmetic correctly. This is a major reason models are meaningfully more reliable at arithmetic when digit-level tokenization is used consistently, or when they're prompted to work step by step rather than jumping straight to an answer computed "in one shot" from opaque number chunks.
+
+<Callout variant="tip" title="Key Takeaways">
+Subword tokenization optimizes for efficient language modeling, not for character-level transparency — so any task that depends on exact spelling, counting, or digit structure is working against the grain of how the model actually sees text.
+</Callout>
+

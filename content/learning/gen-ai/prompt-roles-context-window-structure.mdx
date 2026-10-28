@@ -1,0 +1,37 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "prompt-roles-context-window-structure"
+order: 18
+level: "beginner"
+format: "article"
+title: "System, User, and Assistant Roles: How Prompt Structure Shapes the Context Window"
+description: "System, User, and Assistant roles are formatted into special delimiter tokens that the model was trained to recognize, letting the KV cache reuse stable, unchanging turns."
+question: "From an inference-engine perspective, how does structured prompt framing (e.g., System vs. User vs. Assistant roles) affect the underlying key-value structure of the context window during a multi-turn conversation?"
+domain: "System Design & Prompt Engineering"
+tags: ["System Design & Prompt Engineering", "Prompt Engineering", "PromptEngineering", "FewShot", "SystemPrompts"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "System vs. User vs. Assistant Roles | LLM Guide"
+metaDescription: "Learn how System, User, and Assistant prompt roles are encoded as delimiter tokens and how that structure interacts with the KV cache in multi-turn chat."
+publishDate: "2026-08-14"
+relatedModules: ["absolute-vs-rope-positional-encoding", "logit-bias-sampling-degradation"]
+---
+
+## Question
+From an inference-engine perspective, how does structured prompt framing (e.g., System vs. User vs. Assistant roles) affect the underlying key-value structure of the context window during a multi-turn conversation?
+
+
+## Quick Answer
+There's no separate "role" data structure inside the model itself — **System**, **User**, and **Assistant** roles are just conventions rendered as special delimiter tokens in the raw token sequence, and the model was fine-tuned to treat text following each delimiter differently.
+
+## Detailed Answer
+A chat-formatted prompt gets flattened by a **chat template** into one continuous token stream before it ever reaches the Transformer. Something conceptually like `<|system|>You are helpful<|user|>What's 2+2?<|assistant|>` becomes an ordinary sequence of tokens — the model has no built-in notion of "roles," only a learned statistical association between certain special tokens and how it should behave in the text that follows them, instilled during instruction-tuning.
+
+This matters for the **KV cache** during multi-turn conversation. As a decoder-only model generates, it caches the **key** and **value** vectors it computed for every prior token, so it never has to recompute attention over the full history on each new token — it only computes attention for the newest token against the cached keys/values of everything before it. Because System and earlier User/Assistant turns are, by convention, immutable once written, their KV entries stay valid and reusable across the whole conversation. Only the newly appended turn requires fresh computation. This is what makes multi-turn chat efficient: without a cache, every new message would require reprocessing the entire conversation history from scratch through every attention layer.
+
+Where this breaks down is if anything upstream of the newest turn changes — editing an earlier message, swapping the system prompt mid-conversation, or reordering turns invalidates the cached keys/values for everything downstream of that edit, forcing a full recomputation from that point forward. This is also why some inference engines expose **prompt caching**: they let a stable prefix (a long system prompt, a set of few-shot examples) be cached and reused across many separate requests, not just within a single conversation.
+
+<Callout variant="tip" title="Key Takeaways">
+Chat roles are a training-time convention encoded as ordinary tokens, and the practical payoff is a KV cache that only has to do fresh work on the newest turn instead of the entire conversation.
+</Callout>
+

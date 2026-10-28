@@ -1,0 +1,35 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "tool-calling-json-schema-translation"
+order: 6
+level: "beginner"
+format: "article"
+title: "Tool Calling and JSON Schema: How LLMs Translate Function Signatures into Structured Calls"
+description: "Runtimes convert a function's signature into a JSON Schema description that's passed alongside the prompt, and the model returns arguments matching that schema; a deterministic validator, not the model, must catch and repair type mismatches before execution."
+question: "How does an LLM runtime translate an abstract function signature into a strict JSON Schema call, and what deterministic parsing strategy should be implemented when the model generates syntactically valid JSON that violates the required schema types?"
+domain: "Tool Calling & Execution"
+tags: ["Tool Calling & Execution", "JSON Schema", "ToolCalling", "JSONSchema", "StructuredOutputs"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Tool Calling & JSON Schema Translation | AI Agents Guide"
+metaDescription: "Learn Tool Calling and JSON Schema: How LLMs Translate Function Signatures into Structured Calls with architecture patterns and step-by-step implementation"
+publishDate: "2026-06-04"
+relatedModules: ["native-vs-prompt-based-tool-calling", "pre-post-execution-guardrails-tool-calls"]
+---
+
+## Question
+How does an LLM runtime translate an abstract function signature into a strict JSON Schema call, and what deterministic parsing strategy should be implemented when the model generates syntactically valid JSON that violates the required schema types?
+
+
+## Quick Answer
+The runtime describes each available function as a JSON Schema object (name, description, parameter types) and includes it in the request; the model returns a structured call matching that schema, but a deterministic parser must still validate types before anything runs, since "syntactically valid JSON" doesn't guarantee "schema-valid JSON."
+
+## Detailed Answer
+Under the hood, an abstract function signature — say, `get_weather(city: str, units: Literal["celsius","fahrenheit"])` — is translated into a **JSON Schema** object describing the function's name, a natural-language description, and a `parameters` block with types, enums, and required fields. This schema is sent to the model as part of the request (either as a dedicated `tools` field for providers with native support, or embedded in the system prompt otherwise). The model doesn't literally "call" anything — it predicts tokens that happen to form a JSON object shaped like the schema it was shown, and the runtime is what actually executes the corresponding function once it receives that output.
+
+The failure mode worth designing around: the model can produce **syntactically valid JSON that violates the schema's types** — for example, `"units": "Celsius"` (wrong casing versus the enum), `"city": 12345` (wrong type), or a missing required field. This isn't a JSON parsing error, it's a schema conformance error, so `json.loads()` succeeding tells you nothing about whether the call is safe to execute. The deterministic strategy is to run the parsed object through a schema validator (e.g. Pydantic, Zod, or a JSON Schema validator library) immediately after parsing, and on failure, either reject the call and return the validation error back to the model as a new Observation so it can retry, or apply narrow, explicit coercions (case-normalizing an enum, casting a numeric string) — never silently guessing at the model's intent for anything beyond trivial normalization.
+
+<Callout variant="tip" title="Key Takeaways">
+Valid JSON and valid arguments are two different guarantees — always validate parsed tool calls against the schema itself before execution, and feed validation failures back to the model rather than trying to execute a best-guess repair.
+</Callout>
+

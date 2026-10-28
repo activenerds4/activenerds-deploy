@@ -1,0 +1,128 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "debugging-pending-pods-troubleshooting-workflow"
+order: 9
+level: "intermediate"
+format: "article"
+title: "Debugging Pending Pods: Systematic Troubleshooting for Scheduling Blocks"
+description: "Pending means the scheduler can't find a suitable node — check Events in `kubectl describe pod` for the specific reason: insufficient resources, taint mismat..."
+question: "Explain the architecture, failure modes, and operational best practices for Debugging Pending Pods: Systematic Troubleshooting for Scheduling Blocks in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Troubleshooting", "Scheduling"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "Debugging Pending Pods: Systematic Troublesho | K8s Guide"
+metaDescription: "Learn Debugging Pending Pods: Systematic Troubleshooting for Scheduling Blocks with architecture patterns, practical configurations, and step-by-step implement"
+publishDate: "2026-05-01"
+relatedModules: ["crashloopbackoff-troubleshooting-root-cause-analysis"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for Debugging Pending Pods: Systematic Troubleshooting for Scheduling Blocks in production Kubernetes environments.
+
+## Quick Answer
+Pending means the scheduler can't find a suitable node — check Events in `kubectl describe pod` for the specific reason: insufficient resources, taint mismatch, node selector mismatch, or unbound PVC.
+
+
+## Detailed Answer
+```bash
+# Step 1: Get the basic status
+kubectl get pod my-pod -n my-namespace -o wide
+# STATUS: Pending, NODE: <none> confirms scheduling failure
+
+# Step 2: The most important command — read the Events
+kubectl describe pod my-pod -n my-namespace
+# Look at the bottom Events section — it will say exactly why
+```
+
+## Pending Reasons and Fixes
+```bash
+# REASON 1: Insufficient resources
+# Event: "0/3 nodes are available: 3 Insufficient cpu"
+# Fix: Check actual node capacity
+kubectl describe nodes | grep -A8 "Allocated resources"
+kubectl top nodes
+# Solutions: Reduce pod CPU/memory requests, add nodes, or use Karpenter
+
+# REASON 2: Node selector / affinity mismatch
+# Event: "0/3 nodes are available: 3 node(s) didn't match node selector"
+# Fix: Check what labels your nodes actually have
+kubectl get nodes --show-labels
+kubectl describe node <node-name> | grep Labels -A20
+
+# Check what your pod is asking for
+kubectl get pod my-pod -o jsonpath='{.spec.nodeSelector}'
+kubectl get pod my-pod -o jsonpath='{.spec.affinity}'
+
+# Fix: Either fix the nodeSelector to match actual node labels
+# OR label the node to match the pod's requirement
+kubectl label node node1 disktype=ssd
+
+# REASON 3: Taint/Toleration mismatch
+# Event: "0/3 nodes are available: 3 node(s) had untolerated taint"
+# Fix: See what taints are on nodes
+kubectl describe nodes | grep Taint
+
+# Either add toleration to pod spec:
+tolerations:
+- key: "dedicated"
+  operator: "Equal"
+  value: "gpu"
+  effect: "NoSchedule"
+
+# OR remove the taint if it shouldn't be there
+kubectl taint node node1 dedicated=gpu:NoSchedule-
+
+# REASON 4: PersistentVolumeClaim unbound
+# Event: "persistentvolumeclaim my-pvc not found" or "waiting for PVC to bind"
+kubectl get pvc -n my-namespace
+# STATUS: Pending means no PV matches the claim
+
+kubectl describe pvc my-pvc -n my-namespace
+# Check: storageClassName matches existing StorageClass?
+# Check: accessMode (RWO/RWX) is supported by the storage backend?
+# Check: requested size doesn't exceed available PV?
+kubectl get storageclass
+kubectl get pv
+
+# REASON 5: No nodes exist (cluster autoscaler not working)
+# Event: "0/0 nodes are available"
+kubectl get nodes                    # If empty — no worker nodes registered
+# On EKS: check node group in AWS console, check IAM roles
+
+# REASON 6: Pod resource request exceeds any single node capacity
+# Event: "0/3 nodes are available: 3 Insufficient memory"
+# Even if total cluster memory is enough, one node must fit the entire pod
+kubectl get pod my-pod -o jsonpath='{.spec.containers[*].resources.requests}'
+# If requesting 32Gi memory but largest node is 16Gi → will never schedule
+```
+
+## Systematic Troubleshooting Decision Tree
+```
+kubectl describe pod → read Events
+         │
+         ├── "Insufficient cpu/memory"
+         │    └── kubectl top nodes + kubectl describe nodes → scale up or reduce requests
+         │
+         ├── "didn't match node selector/affinity"
+         │    └── kubectl get nodes --show-labels → fix selector or label node
+         │
+         ├── "had untolerated taint"
+         │    └── kubectl describe nodes | grep Taint → add toleration or remove taint
+         │
+         ├── "unbound PVC" or "PVC not found"
+         │    └── kubectl get pvc, kubectl describe pvc → fix StorageClass or create PV
+         │
+         └── No events at all
+              └── Scheduler might be down → kubectl get pods -n kube-system
+```
+
+## Common Mistake
+Only looking at `kubectl get pod` output — the STATUS column alone never tells you WHY it's pending. Always run `kubectl describe pod` and read the Events section.
+
+
+<Callout variant="tip" title="Key Takeaways">
+Pending always means the scheduler can't place the pod — the Events section of `kubectl describe pod` gives you the exact reason within seconds.
+</Callout>
+
+---

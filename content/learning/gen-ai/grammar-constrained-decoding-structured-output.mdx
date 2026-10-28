@@ -1,0 +1,50 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "grammar-constrained-decoding-structured-output"
+order: 210
+level: "advanced"
+format: "article"
+title: "Grammar-Constrained Decoding: Guaranteeing Valid Structured Output at the Token Level"
+description: "Compiling a JSON schema or CFG into a finite-state machine lets a decoder mask out any token that would produce invalid output before sampling, guaranteeing well-formed structured output — at the cost of computing a fresh logit mask at every single decoding step."
+question: "How does grammar-constrained decoding (e.g., via a CFG or JSON schema compiled into a finite-state machine) guarantee valid structured output at the token level, and what is the performance cost of masking the logits at every decoding step compared to unconstrained generation with post-hoc validation/retry?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "Structured Outputs", "Constrained Decoding", "StructuredOutputs", "Grammars", "ConstrainedDecoding"]
+estimatedMinutes: 7
+xpValue: 20
+seoTitle: "Grammar-Constrained Decoding Explained | LLM Guide"
+metaDescription: "Learn how grammar-constrained decoding guarantees valid structured LLM output and its performance cost versus unconstrained generation with retry"
+publishDate: "2026-09-16"
+relatedModules: ["rag-evaluation-faithfulness-context-precision"]
+---
+
+## Question
+How does grammar-constrained decoding (e.g., via a CFG or JSON schema compiled into a finite-state machine) guarantee valid structured output at the token level, and what is the performance cost of masking the logits at every decoding step compared to unconstrained generation with post-hoc validation/retry?
+
+
+## Quick Answer
+Grammar-constrained decoding compiles a formal grammar (a JSON schema or context-free grammar) into a **finite-state machine (or pushdown automaton)** that tracks which tokens are valid at every position, then **masks the logits** at each decoding step so the model can only sample tokens the grammar permits — guaranteeing syntactic validity by construction, at the cost of computing that mask on every single step, which is cheaper in expectation than unconstrained generation with post-hoc validation and retry, but adds real per-token overhead compared to unconstrained sampling alone.
+
+## Detailed Answer
+A JSON schema or CFG defines the space of valid output strings. To use this during decoding, the schema is first compiled into an automaton — conceptually, a graph of states where each state represents "how far into a valid structure we are" (e.g., "inside an object, expecting a key" vs. "just closed a string value, expecting a comma or closing brace"). Each state has a defined set of **valid next characters or tokens** that would keep the output within the grammar.
+
+At every decoding step, the constrained decoder does the following: given the current automaton state, compute the set of tokens that would transition to a valid next state (this can require intersecting the automaton's valid-character transitions with the model's actual token vocabulary, since tokens can span multiple characters and don't align neatly with grammar boundaries); **mask the logits** for every other token to negative infinity (or zero probability) before sampling, so the model's softmax can only ever select from grammar-valid tokens; sample (or greedily pick) from the masked distribution; and **advance the automaton's state** based on the token actually selected, so the valid-token set for the next step reflects the updated context. This guarantees, by construction, that the final output is grammar-valid — there's no way for the model to emit an invalid token, since invalid tokens are literally excluded from the sampling distribution at every step.
+
+Compare this to **unconstrained generation with post-hoc validation and retry**: the model generates freely (no masking overhead per step), the full output is checked against the schema afterward, and if it fails, the whole generation is discarded and retried. This approach has zero per-step overhead during generation itself, but carries a **probabilistic risk of wasted full-sequence generations** — for complex schemas or larger outputs, the retry rate can be high, and each failed attempt costs the full generation time, not just a fast validation check.
+
+The performance trade-off is therefore: **constrained decoding pays a small, deterministic cost on every token** (computing/intersecting the valid-token mask, which usually requires walking the automaton and can involve non-trivial vocabulary-scale set operations), **in exchange for eliminating the variable, sometimes-large cost of full-sequence retries**. Whether this is a net win depends on the schema's complexity (simple grammars: mask computation is cheap and retries were rare anyway) and the base failure rate of unconstrained generation against that schema (complex, deeply nested schemas: retries under the naive approach can be frequent and expensive, making the per-step masking overhead clearly worth it).
+
+| Approach | Per-step cost | Failure handling | Guarantee |
+|----------|-----------------|---------------------|-------------|
+| Grammar-constrained decoding | Fixed overhead every step (mask computation) | None needed — invalid tokens excluded | Always valid |
+| Unconstrained + post-hoc retry | None during generation | Full regeneration on schema failure | Valid only if retry eventually succeeds |
+
+## Production Implications
+- Mask computation cost scales with **vocabulary size and automaton complexity** — pre-compiling and caching the automaton (rather than rebuilding it per request) is essential for keeping the per-step overhead low in production.
+- Highly nested or recursive schemas can create automatons with large numbers of states, making the valid-token-set computation at each step more expensive — profile mask-computation latency specifically for your actual schemas, not just simple test cases.
+- Constrained decoding doesn't guarantee **semantic** correctness (a value can be the wrong number but still valid JSON) — it only guarantees structural/syntactic validity, so semantic validation on top is still often needed.
+- For latency-sensitive applications with simple, shallow schemas and low expected retry rates, unconstrained-plus-retry can genuinely be faster in practice — the "always constrain" choice isn't universally correct.
+
+<Callout variant="tip" title="Key Takeaways">
+Grammar-constrained decoding trades a small, predictable per-token cost for an ironclad structural guarantee — worth paying when schema complexity would otherwise make unconstrained retry unreliable or expensive, but not a free lunch compared to simple, low-failure-rate cases.
+</Callout>
+

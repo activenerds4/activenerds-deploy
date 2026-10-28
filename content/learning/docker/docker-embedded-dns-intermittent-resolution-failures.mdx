@@ -1,0 +1,40 @@
+---
+pathSlug: "docker"
+moduleSlug: "docker-embedded-dns-intermittent-resolution-failures"
+order: 63
+level: "intermediate"
+format: "article"
+title: "Docker's Embedded DNS Resolver: Why External Hostname Lookups Intermittently Fail Under Load"
+description: "Docker's embedded DNS resolver at 127.0.0.11 proxies external lookups upstream over UDP, and UDP DNS packets can be dropped or truncated under load — producing exactly the kind of intermittent failure curl's retries mask."
+question: "A container intermittently fails to resolve an external hostname under load, though `curl` works fine most of the time. Explain how Docker's embedded DNS resolver works and a plausible root cause for intermittent resolution failures."
+domain: "Networking"
+tags: ["Networking", "DNS", "EmbeddedDNS"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Docker's Embedded DNS: Intermittent | Docker Guide"
+metaDescription: "Learn Docker's Embedded DNS Resolver: Why External Hostname Lookups Intermittently Fail Under Load with practical debugging and mitigation steps."
+publishDate: "2026-09-02"
+relatedModules: ["default-bridge-vs-user-defined-bridge-dns", "host-networking-vs-bridge-latency-tradeoff"]
+---
+
+## Question
+A container intermittently fails to resolve an external hostname under load, though `curl` works fine most of the time. Explain how Docker's embedded DNS resolver works and a plausible root cause for intermittent resolution failures.
+
+
+## Quick Answer
+Docker's **embedded DNS resolver** (`127.0.0.11`) proxies every container DNS lookup, including external ones, out to the host's configured upstream resolvers over UDP — and UDP DNS traffic is inherently unreliable under load, which is exactly the kind of intermittent failure this scenario describes.
+
+## Detailed Answer
+Every container's `/etc/resolv.conf` points at `127.0.0.11`, a resolver embedded directly in the Docker daemon rather than the host's real DNS server. For container-name lookups on a user-defined network, this resolver answers immediately from its internal service registry. For anything it doesn't recognize — any external hostname — it acts as a **forwarding proxy**, relaying the query out to the DNS servers configured on the host (typically inherited from `/etc/resolv.conf` outside the container) and returning whatever comes back.
+
+That relay step is where intermittent failures creep in, and there are a few plausible mechanisms working together:
+
+- **UDP packet loss under load.** DNS queries default to UDP, which has no retransmission built into the protocol layer itself — if a query or response packet gets dropped (common under high connection-rate load, container churn, or a saturated network path), the lookup simply times out rather than failing cleanly.
+- **`curl`'s own retry/connection-reuse behavior masking failures.** `curl` frequently succeeds where a fresh lookup wouldn't because it can reuse an already-resolved connection, or because its own timeout is more forgiving than the application's client library — so "curl works fine most of the time" doesn't necessarily mean DNS resolution is more reliable for curl, just that curl is more tolerant of the same underlying flakiness.
+- **Resolver/conntrack contention at high container density.** On a busy host running many containers, the embedded resolver and the kernel's connection tracking table for the NAT'd UDP traffic can both become contention points, increasing the odds a given query gets dropped or delayed past the client's timeout specifically under load rather than at idle.
+
+<Callout variant="tip" title="Key Takeaways">
+Intermittent DNS failures under load in Docker are usually a UDP reliability problem at the embedded-resolver relay step, not a broken resolver — checking retry counts, DNS timeout settings, and TCP fallback for DNS is a more productive first step than assuming the resolver itself is misconfigured.
+</Callout>
+
+---

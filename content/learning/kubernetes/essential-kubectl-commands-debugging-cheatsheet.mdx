@@ -1,0 +1,77 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "essential-kubectl-commands-debugging-cheatsheet"
+order: 33
+level: "beginner"
+format: "article"
+title: "Essential kubectl Commands: Operations and Debugging Cheat Sheet"
+description: "`get`, `describe`, `apply`, `delete`, `logs`, `exec`, `port-forward`, and `rollout` — these eight command families cover 90% of daily Kubernetes work."
+question: "Explain the architecture, failure modes, and operational best practices for Essential kubectl Commands: Operations and Debugging Cheat Sheet in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["kubectl"]
+estimatedMinutes: 5
+xpValue: 10
+seoTitle: "Essential kubectl Commands: Operations and De | K8s Guide"
+metaDescription: "Learn Essential kubectl Commands: Operations and Debugging Cheat Sheet with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-05-04"
+relatedModules: ["imperative-vs-declarative-kubernetes-management", "dry-run-client-vs-server-validation"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for Essential kubectl Commands: Operations and Debugging Cheat Sheet in production Kubernetes environments.
+
+## Quick Answer
+`get`, `describe`, `apply`, `delete`, `logs`, `exec`, `port-forward`, and `rollout` — these eight command families cover 90% of daily Kubernetes work.
+
+
+## Detailed Answer
+```bash
+# ── CLUSTER INSPECTION ──────────────────────────────────────────
+kubectl cluster-info                        # API server URL + CoreDNS
+kubectl get nodes -o wide                   # Node list with IPs and versions
+kubectl api-resources                       # All resource types with shortnames
+kubectl explain deployment.spec.strategy    # Inline documentation for any field
+
+# ── RESOURCE INSPECTION ─────────────────────────────────────────
+kubectl get pods                            # List pods in current namespace
+kubectl get pods -A -o wide                 # All namespaces with node + IP
+kubectl get all -n production               # All resources in a namespace
+kubectl describe pod my-pod                 # Full detail + events (most useful debug tool)
+kubectl get pod my-pod -o yaml              # Full YAML of live object
+kubectl get pod my-pod -o jsonpath='{.status.podIP}'  # Extract specific field
+
+# ── CREATING & MANAGING ─────────────────────────────────────────
+kubectl apply -f manifest.yaml              # Declarative — always prefer this
+kubectl apply -f ./dir/ -R                  # Apply all YAML in directory recursively
+kubectl delete -f manifest.yaml             # Delete by manifest
+kubectl delete pod my-pod --grace-period=0 --force  # Force delete stuck pod
+
+# ── DEBUGGING ───────────────────────────────────────────────────
+kubectl logs my-pod                         # Container logs
+kubectl logs my-pod --previous              # Logs from previous (crashed) container
+kubectl logs my-pod -f --tail=100           # Stream last 100 lines
+kubectl logs -l app=nginx -n production     # Logs from all pods matching label
+kubectl exec -it my-pod -- /bin/bash        # Interactive shell in pod
+kubectl exec my-pod -- env                  # Print env vars non-interactively
+kubectl port-forward pod/my-pod 8080:80     # Forward local port to pod
+kubectl port-forward svc/my-svc 8080:80     # Forward local port to service
+kubectl debug -it my-pod --image=busybox    # Attach debug container to pod
+
+# ── ROLLOUTS & SCALING ──────────────────────────────────────────
+kubectl scale deployment my-app --replicas=5
+kubectl rollout status deployment/my-app
+kubectl rollout undo deployment/my-app
+kubectl rollout restart deployment/my-app   # Force rolling restart
+kubectl set image deployment/my-app app=myimage:v2
+
+# ── EVENTS (often overlooked — extremely useful) ─────────────────
+kubectl get events -n production --sort-by='.lastTimestamp'
+kubectl get events --field-selector reason=BackOff
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+`kubectl describe` and `kubectl get events` are your first stops for any debugging — the Events section at the bottom of describe output tells you exactly what Kubernetes tried and what failed.
+</Callout>
+
+---

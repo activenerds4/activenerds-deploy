@@ -1,0 +1,251 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "what-are-the-key-levers"
+order: 27
+level: "expert"
+format: "article"
+title: "What Are the Key Levers for etcd Performance Tuning?: Architecture & Implementation"
+description: "The most impactful etcd performance levers are: NVMe/SSD disk with low fsync latency, dedicated disk for etcd WAL, `--heartbeat-interval` and `--election-tim..."
+question: "What are the primary performance tuning levers for etcd (such as heartbeat intervals, election timeouts, disk I/O priorities, and DB quota limits) to ensure cluster stability under heavy write loads?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["etcd", "Performance", "Tuning"]
+estimatedMinutes: 15
+xpValue: 25
+seoTitle: "What Are the Key Levers for etcd Performance  | K8s Guide"
+metaDescription: "Learn What Are the Key Levers for etcd Performance Tuning?: Architecture & Implementation with architecture patterns, practical configurations, and step-by-ste"
+publishDate: "2026-05-31"
+relatedModules: []
+---
+
+---
+
+## Question
+What are the primary performance tuning levers for etcd (such as heartbeat intervals, election timeouts, disk I/O priorities, and DB quota limits) to ensure cluster stability under heavy write loads?
+
+## Quick Answer
+## The most impactful etcd performance levers are: NVMe/SSD disk with low fsync latency, dedicated disk for etcd WAL, `--heartbeat-interval` and `--election-timeout` tuned to network RTT, `--quota-backend-bytes` set appropriately, and regular compaction + defragmentation.
+---
+
+
+## Detailed Answer
+etcd performance is almost entirely I/O-bound because every committed write requires at least two `fdatasync()` calls to the WAL. **Disk fsync latency is the single most important factor** — etcd targets sub-10ms WAL fsync. Everything else (CPU, network) is secondary. The second-biggest lever is **network latency between etcd members**: heartbeat intervals must be at least 10× the network RTT, and election timeouts must be at least 5× the heartbeat interval. The third lever is **compaction and defrag cadence**: an un-compacted etcd accumulates historical revisions and grows its bbolt file indefinitely, eventually hitting the `--quota-backend-bytes` limit (default 2GB, max 8GB).
+
+---
+
+## Deep Dive
+## Disk performance — the most critical factor
+```bash
+# Test disk sequential write latency (run on etcd node)
+# Target: < 10ms for 99th percentile
+fio --rw=write \
+    --ioengine=sync \
+    --fdatasync=1 \
+    --directory=/var/lib/etcd \
+    --size=22m \
+    --bs=2300 \
+    --name=etcd-fio-test \
+    --output-format=json | \
+    jq '.jobs[0].sync.lat_ns | {
+      p50_ms: (.percentile["50.000000"] / 1000000),
+      p99_ms: (.percentile["99.000000"] / 1000000),
+      p999_ms: (.percentile["99.900000"] / 1000000)
+    }'
+
+# Good result:  p99 < 10ms
+# Warning:      p99 10-50ms
+# Bad:          p99 > 50ms (etcd will be unstable)
+```
+
+## etcd static pod tuning (kubeadm clusters)
+```yaml
+# /etc/kubernetes/manifests/etcd.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: etcd
+  namespace: kube-system
+spec:
+  containers:
+  - command:
+    - etcd
+    # --- Disk & quota ---
+    - --data-dir=/var/lib/etcd          # On NVMe/SSD dedicated disk
+    - --wal-dir=/var/lib/etcd-wal       # Separate disk from data dir (ideal)
+    - --quota-backend-bytes=6442450944  # 6GB quota (default 2GB is too small)
+    - --auto-compaction-mode=periodic
+    - --auto-compaction-retention=1h    # Compact revisions older than 1 hour
+    
+    # --- Raft timing (tune to your network RTT) ---
+    # Rule: heartbeat = 10x RTT, election-timeout = 5x heartbeat
+    # For 1ms RTT: heartbeat=10ms, election-timeout=100ms (defaults — fine)
+    # For 10ms RTT: heartbeat=100ms, election-timeout=1000ms
+    - --heartbeat-interval=100          # milliseconds
+    - --election-timeout=1000          # milliseconds (10x heartbeat)
+
+    # --- Snapshot tuning ---
+    - --snapshot-count=10000            # snapshot every 10k committed entries
+                                        # lower = more snapshots = less WAL replay
+                                        # higher = faster writes, more WAL replay on restart
+
+    # --- gRPC & connection ---
+    - --max-snapshots=5
+    - --max-wals=5
+    - --grpc-keepalive-min-time=5s
+    - --grpc-keepalive-interval=2h
+    - --grpc-keepalive-timeout=20s
+
+    # --- Peer & client TLS ---
+    - --peer-client-cert-auth=true
+    - --client-cert-auth=true
+
+    image: registry.k8s.io/etcd:3.5.12-0
+    resources:
+      requests:
+        cpu: 200m
+        memory: 900Mi      # etcd working set fits in memory — give it enough
+      limits:
+        cpu: "4"
+        memory: 8Gi
+    volumeMounts:
+    - mountPath: /var/lib/etcd
+      name: etcd-data
+    - mountPath: /var/lib/etcd-wal
+      name: etcd-wal          # separate PV or disk mount
+  volumes:
+  - name: etcd-data
+    hostPath:
+      path: /var/lib/etcd
+  - name: etcd-wal
+    hostPath:
+      path: /mnt/etcd-wal     # mount a second NVMe disk here
+```
+
+## Compaction and defrag — must be automated
+```bash
+#!/bin/bash
+# etcd-maintenance.sh — run as a CronJob on control plane nodes
+# Recommended cadence: every 30 minutes for compaction, nightly for defrag
+
+ETCDCTL="etcdctl --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/peer.crt \
+  --key=/etc/kubernetes/pki/etcd/peer.key"
+
+# Step 1: Get current revision
+REV=$($ETCDCTL endpoint status --write-out=json | \
+  jq -r '.[0].Status.header.revision')
+
+echo "Current revision: $REV"
+
+# Step 2: Compact to current revision (removes old historical data)
+$ETCDCTL compact $REV
+echo "Compacted to revision $REV"
+
+# Step 3: Defrag each member sequentially (NOT all at once — causes quorum loss)
+for ENDPOINT in \
+  https://etcd-0.etcd:2379 \
+  https://etcd-1.etcd:2379 \
+  https://etcd-2.etcd:2379; do
+  echo "Defragmenting $ENDPOINT..."
+  $ETCDCTL defrag --endpoints=$ENDPOINT
+  # Wait between members to avoid simultaneous unavailability
+  sleep 30
+done
+
+# Step 4: Check DB size after defrag
+$ETCDCTL endpoint status --write-out=table
+```
+
+## Kubernetes CronJob for etcd maintenance
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: etcd-compaction
+  namespace: kube-system
+spec:
+  schedule: "*/30 * * * *"   # every 30 minutes
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          hostNetwork: true
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+          nodeSelector:
+            node-role.kubernetes.io/control-plane: ""
+          containers:
+            - name: etcd-maintenance
+              image: registry.k8s.io/etcd:3.5.12-0
+              command: ["/bin/sh", "/scripts/maintenance.sh"]
+              volumeMounts:
+                - name: etcd-certs
+                  mountPath: /etc/kubernetes/pki/etcd
+                  readOnly: true
+                - name: scripts
+                  mountPath: /scripts
+          volumes:
+            - name: etcd-certs
+              hostPath:
+                path: /etc/kubernetes/pki/etcd
+            - name: scripts
+              configMap:
+                name: etcd-maintenance-scripts
+          restartPolicy: OnFailure
+```
+
+## OS-level tuning for etcd nodes
+```bash
+# /etc/sysctl.d/etcd.conf — apply with: sysctl --system
+# Increase max open files
+fs.file-max = 1000000
+
+# Reduce dirty page write-back (forces more frequent flushes — good for WAL)
+vm.dirty_background_ratio = 5
+vm.dirty_ratio = 10
+
+# Disable swap entirely — etcd latency spikes when memory pages are swapped
+vm.swappiness = 0
+
+# Increase network backlog
+net.core.somaxconn = 32768
+net.ipv4.tcp_max_syn_backlog = 16384
+
+# Set I/O scheduler to none/mq-deadline for NVMe (not cfq which is for HDDs)
+# Run for each etcd disk:
+echo "mq-deadline" > /sys/block/nvme0n1/queue/scheduler
+
+# CPU governor: performance mode (avoid frequency scaling latency)
+cpupower frequency-set -g performance
+```
+
+## Performance tuning impact table
+| Tuning Lever | Default | Recommended | Expected Improvement |
+|---|---|---|---|
+| Disk type | HDD/network | Local NVMe | 10–100× fsync latency |
+| WAL on separate disk | Same disk | Separate NVMe | 2–3× write throughput |
+| `quota-backend-bytes` | 2GB | 6–8GB | Avoids quota alarms |
+| `auto-compaction-retention` | None | 1h | Steady DB size |
+| `heartbeat-interval` | 100ms | 10× RTT | Fewer spurious elections |
+| `snapshot-count` | 100000 | 10000 | Faster restart recovery |
+| Defrag cadence | Manual | Nightly | Reclaims fragmented space |
+| `vm.swappiness` | 60 | 0 | Eliminates swap-induced latency |
+
+> **Production lesson:** A large etcd cluster at Datadog famously had cascading API server slowdowns traced entirely to a shared disk between etcd WAL and OS logs. Separating the WAL to a dedicated NVMe disk reduced p99 write latency from 80ms to 4ms. Disk isolation is the highest-ROI single change you can make.
+
+> **Common mistake:** Running `etcdctl defrag --endpoints=all` in a single command. This defragments all members simultaneously, causing all of them to become briefly unavailable at the same time — which breaks quorum and makes etcd completely unavailable. Always defrag one member at a time with a sleep between each.
+
+> **Self-assessment:** Can you explain why etcd is I/O-bound rather than CPU-bound? Can you calculate correct heartbeat and election timeout values for a cluster with 5ms inter-node RTT? Can you write the compaction + defrag script from memory and explain why the order matters?
+
+> **Follow-up questions:** Q8 (etcd monitoring), Q9 (Diagnose slow etcd scenario), Q10 (etcd HA topology)
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+- **Dedicated Disk Isolation**: Isolating etcd WAL on high-speed NVMe eliminates I/O contention with OS and application logs.
+- **Sequential Defragmentation**: Always defragment etcd members one at a time with delays in between to prevent quorum loss and cluster downtime.
+</Callout>
+

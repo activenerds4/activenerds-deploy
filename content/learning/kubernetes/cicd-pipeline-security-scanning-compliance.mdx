@@ -1,0 +1,425 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "cicd-pipeline-security-scanning-compliance"
+order: 21
+level: "advanced"
+format: "article"
+title: "CI/CD Pipeline Security Scanning & Compliance: Architecture & Implementation"
+description: "In-depth architectural breakdown and operational implementation for CI/CD Pipeline Security Scanning & Compliance: Architecture & Implementation."
+question: "Your organization must comply with SOC 2 and PCI-DSS. The security team requires that no container image with a Critical or High CVE reaches production, all Kubernetes manifests must comply with the CIS Kubernetes Benchmark, and secrets must never appear in source code or image layers. Design and implement a complete DevSecOps pipeline."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Security", "CI/CD", "Compliance", "DevSecOps"]
+estimatedMinutes: 30
+xpValue: 20
+seoTitle: "CI/CD Pipeline Security Scanning & Compliance | K8s Guide"
+metaDescription: "Learn CI/CD Pipeline Security Scanning & Compliance: Architecture & Implementation with architecture patterns, practical configurations, and step-by-step imple"
+publishDate: "2026-05-21"
+relatedModules: ["zero-downtime-deployments", "bluegreen-and-canary-deployments-with", "advanced-pod-scheduling-affinity-taints"]
+---
+
+**Prerequisite knowledge:** CI/CD pipelines (Jenkins/GitHub Actions), container image concepts, RBAC
+
+---
+
+## Question
+Your organization must comply with SOC 2 and PCI-DSS. The security team requires that no container image with a Critical or High CVE reaches production, all Kubernetes manifests must comply with the CIS Kubernetes Benchmark, and secrets must never appear in source code or image layers. Design and implement a complete DevSecOps pipeline.
+
+
+## Quick Answer
+Implement a multi-gate pipeline: scan images with Trivy/Snyk at build time, validate manifests with kube-score/OPA Conftest, use Sealed Secrets or Vault for secret management, enforce admission controllers (OPA Gatekeeper) at the cluster gate, and generate audit reports for compliance evidence.
+
+---
+
+
+## Detailed Answer
+## ️ Pipeline Architecture (Defense in Depth)
+```
+Developer Push
+     │
+     ▼
+[Gate 1: Pre-commit hooks]
+  - detect-secrets (credential scanning)
+  - hadolint (Dockerfile linting)
+     │
+     ▼
+[Gate 2: CI — Build Stage]
+  - Build image
+  - Trivy image scan (CVE check)
+  - Syft SBOM generation
+  - Fail if Critical/High CVEs found
+     │
+     ▼
+[Gate 3: CI — Manifest Validation]
+  - kube-score (K8s best practices)
+  - conftest (OPA policy enforcement)
+  - kubeval (schema validation)
+  - checkov (IaC security scan)
+     │
+     ▼
+[Gate 4: Image Signing]
+  - Cosign (sigstore) image signing
+  - Push to private registry with signed digest
+     │
+     ▼
+[Gate 5: Cluster Admission]
+  - OPA Gatekeeper policies
+  - Kyverno policies
+  - ImagePolicyWebhook (verify signatures)
+     │
+     ▼
+[Production Deployment]
+  - Runtime scanning (Falco)
+  - Compliance reports (Compliance Operator / Kube-bench)
+```
+
+---
+
+## ️ Implementation: Gate-by-Gate
+*Gate 1: Pre-commit Secret Detection*
+```bash
+# Install detect-secrets
+pip install detect-secrets
+
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint-docker
+```
+
+*Gate 2: Image CVE Scanning (GitHub Actions example)*
+```yaml
+# .github/workflows/security-scan.yml
+name: DevSecOps Pipeline
+
+on: [push, pull_request]
+
+jobs:
+  image-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t myapp:${{ github.sha }} .
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'myapp:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'          # Fail pipeline on Critical/High CVEs
+          ignore-unfixed: true    # Don't fail on CVEs with no patch available
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: 'myapp:${{ github.sha }}'
+          format: cyclonedx-json
+          output-file: sbom.json
+
+      - name: Upload SBOM as artifact (compliance evidence)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.json
+```
+
+*Gate 3: Manifest Policy Enforcement with OPA Conftest*
+```rego
+# policy/kubernetes.rego
+package main
+
+# Rule: All containers must have resource limits
+deny[msg] {
+  input.kind == "Deployment"
+  container := input.spec.template.spec.containers[_]
+  not container.resources.limits
+  msg := sprintf("Container '%v' must have resource limits defined", [container.name])
+}
+
+# Rule: No privileged containers allowed (CIS Benchmark 5.2.1)
+deny[msg] {
+  input.kind == "Deployment"
+  container := input.spec.template.spec.containers[_]
+  container.securityContext.privileged == true
+  msg := sprintf("Container '%v' must not run as privileged", [container.name])
+}
+
+# Rule: Images must come from approved registry
+deny[msg] {
+  input.kind == "Deployment"
+  container := input.spec.template.spec.containers[_]
+  not startswith(container.image, "registry.mycompany.com/")
+  msg := sprintf("Container '%v' must use approved registry", [container.name])
+}
+
+# Rule: readOnlyRootFilesystem must be true (CIS 5.2.4)
+deny[msg] {
+  input.kind == "Deployment"
+  container := input.spec.template.spec.containers[_]
+  not container.securityContext.readOnlyRootFilesystem
+  msg := sprintf("Container '%v' must use readOnlyRootFilesystem", [container.name])
+}
+```
+
+```yaml
+# In CI pipeline:
+- name: Validate Kubernetes manifests with OPA Conftest
+  run: |
+    conftest test k8s/ \
+      --policy policy/ \
+      --output github \
+      --all-namespaces
+
+- name: Run kube-score
+  run: |
+    kube-score score k8s/*.yaml \
+      --output-format ci \
+      --exit-one-on-warning
+```
+
+*Gate 4: Image Signing with Cosign*
+```bash
+# Generate a signing key pair (store private key in Vault/GitHub Secrets)
+cosign generate-key-pair
+
+# Sign the image after push
+cosign sign --key cosign.key registry.mycompany.com/myapp:$SHA
+
+# In CI:
+- name: Sign image with Cosign
+  env:
+    COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+    COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+  run: |
+    echo "$COSIGN_PRIVATE_KEY" > cosign.key
+    cosign sign --key cosign.key \
+      registry.mycompany.com/myapp:${{ github.sha }}
+```
+
+*Gate 5: OPA Gatekeeper Admission Controller*
+```yaml
+# ConstraintTemplate: Enforce approved registries
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sallowedrepos
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sAllowedRepos
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            repos:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sallowedrepos
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          satisfied := [good | repo = input.parameters.repos[_] ; good = startswith(container.image, repo)]
+          not any(satisfied)
+          msg := sprintf("Image '%v' is not from an allowed repository", [container.image])
+        }
+---
+# Constraint: Apply to all namespaces
+```
+```yaml
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRepos
+metadata:
+  name: allow-approved-registries
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces:
+      - "production"
+      - "staging"
+  parameters:
+    repos:
+      - "registry.mycompany.com/"
+      - "gcr.io/myproject/"
+```
+
+*Secret Management — Sealed Secrets + Vault Integration*
+```yaml
+# Option A: Sealed Secrets (simpler, git-friendly)
+# Install kubeseal CLI and controller
+helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+helm install sealed-secrets sealed-secrets/sealed-secrets -n kube-system
+
+# Seal a secret (safe to commit to git)
+kubectl create secret generic db-creds \
+  --from-literal=password=supersecret \
+  --dry-run=client -o yaml | \
+  kubeseal --format yaml > sealed-db-creds.yaml
+
+# The SealedSecret is encrypted with the controller's public key
+# Only the in-cluster controller can decrypt it
+```
+
+```yaml
+# Option B: Vault Agent Injector (enterprise-grade)
+# Annotate your Pod to inject secrets at runtime
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+spec:
+  template:
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "myapp-role"
+        vault.hashicorp.com/agent-inject-secret-db-creds: "secret/data/myapp/db"
+        vault.hashicorp.com/agent-inject-template-db-creds: |
+          {{- with secret "secret/data/myapp/db" -}}
+          export DB_PASSWORD="{{ .Data.data.password }}"
+          {{- end }}
+    spec:
+      serviceAccountName: myapp-sa
+      containers:
+        - name: myapp
+          image: registry.mycompany.com/myapp:latest
+          command: ["/bin/sh", "-c"]
+          args: ["source /vault/secrets/db-creds && exec myapp"]
+```
+
+*Runtime Compliance with Falco*
+```yaml
+# falco-rules.yaml — Custom rules for PCI-DSS compliance
+- rule: Detect Shell in Container
+  desc: Alert on shell execution inside a container (PCI-DSS 10.6)
+  condition: >
+    spawned_process and
+    container and
+    proc.name in (shell_binaries) and
+    not proc.pname in (shell_binaries)
+  output: >
+    Shell spawned in container
+    (user=%user.name container=%container.name
+    image=%container.image.repository proc=%proc.name
+    parent=%proc.pname cmdline=%proc.cmdline)
+  priority: WARNING
+  tags: [container, shell, pci_dss]
+
+- rule: Write to /etc in Container
+  desc: Detect writes to /etc (indicates config tampering)
+  condition: >
+    open_write and
+    container and
+    fd.name startswith /etc
+  output: >
+    File write to /etc in container
+    (user=%user.name file=%fd.name
+    container=%container.name image=%container.image.repository)
+  priority: ERROR
+  tags: [container, filesystem, pci_dss, soc2]
+```
+
+*CIS Benchmark Compliance Report with kube-bench*
+```bash
+# Run kube-bench as a Job in your cluster
+kubectl apply -f - <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kube-bench
+spec:
+  template:
+    spec:
+      hostPID: true
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: kube-bench
+          image: aquasec/kube-bench:latest
+          command: ["kube-bench", "--json"]
+          volumeMounts:
+            - name: var-lib-etcd
+              mountPath: /var/lib/etcd
+              readOnly: true
+            - name: etc-kubernetes
+              mountPath: /etc/kubernetes
+              readOnly: true
+      restartPolicy: Never
+      volumes:
+        - name: var-lib-etcd
+          hostPath:
+            path: /var/lib/etcd
+        - name: etc-kubernetes
+          hostPath:
+            path: /etc/kubernetes
+EOF
+
+# Retrieve results
+kubectl logs job/kube-bench > cis-benchmark-report.json
+```
+
+---
+
+## ️ Trade-offs & Alternatives
+
+| Tool | Use Case | Pros | Cons |
+|---|---|---|---|
+| **Trivy** | Image CVE scanning | Free, fast, comprehensive | Occasional false positives |
+| **Snyk** | Image + IaC scanning | Developer-friendly UX, IDE plugins | Paid for advanced features |
+| **OPA Gatekeeper** | Admission control | Highly flexible Rego policies | Steep Rego learning curve |
+| **Kyverno** | Admission control | Native K8s syntax (YAML policies) | Less powerful than OPA for complex logic |
+| **Sealed Secrets** | Secret management | Git-friendly, simple | Controller key rotation is manual |
+| **Vault** | Secret management | Enterprise-grade, dynamic secrets | Complex to operate |
+| **Cosign** | Image signing | CNCF standard, keyless option | Requires policy enforcement separately |
+
+---
+
+## ️ Common Mistakes & Misconceptions
+- **"Scanning once at build time is enough."** — CVEs are discovered daily. Images that were clean yesterday may be vulnerable today. Implement scheduled re-scanning of images already in production.
+- **"ConfigMaps are safe for non-sensitive config."** — True, but teams often accidentally put API keys or tokens into ConfigMaps. Gate 1 pre-commit scanning is your safety net.
+- **"OPA Gatekeeper policies in `dryrun` mode protect us."** — `dryrun` only audits; it does not block. Always move policies to `deny` mode in production after testing.
+- **"Sealed Secrets are permanently secure."** — If the controller's master key is compromised, all sealed secrets must be rotated. Protect and back up that key.
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+Security in Kubernetes CI/CD is not a single tool — it is a **layered defense model**. Each gate catches a different class of problem: pre-commit catches developer mistakes, build-time scanning catches known CVEs, manifest validation catches misconfigurations, admission controllers enforce cluster-level policy, and runtime scanning catches zero-day behavioral anomalies. Compliance evidence (SBOMs, scan reports, audit logs) must be generated automatically and stored for auditors.
+</Callout>
+
+---
+
+## Self-Assessment Checklist
+- [ ] Can you explain what an SBOM is and why it matters for compliance?
+- [ ] Can you write an OPA Rego policy from scratch?
+- [ ] Can you describe the difference between Sealed Secrets and Vault and when to use each?
+- [ ] Can you explain what `cosign` does and why image signing matters?
+- [ ] Can you describe what kube-bench tests and which benchmark it uses?
+
+
+---

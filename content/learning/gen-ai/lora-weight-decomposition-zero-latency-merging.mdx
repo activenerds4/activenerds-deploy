@@ -1,0 +1,50 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "lora-weight-decomposition-zero-latency-merging"
+order: 81
+level: "intermediate"
+format: "article"
+title: "LoRA Weight Decomposition: Why Merged Adapters Add Zero Inference Latency"
+description: "LoRA represents a weight update as the product of two small low-rank matrices, and once training is done, that product can be added directly into the frozen base weights so inference runs the original architecture unchanged."
+question: "How does Low-Rank Adaptation (LoRA) decompose weight updates ($\\Delta W = A \\cdot B$), and why does merging these adapter weights back into the frozen base model prior to inference result in zero added latency compared to runtime adapters?"
+domain: "Model Training & Fine-Tuning"
+tags: ["Model Training & Fine-Tuning", "LoRA", "PEFT", "LowRankAdaptation"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "LoRA Decomposition: Zero-Latency | LLM Guide"
+metaDescription: "Learn LoRA Weight Decomposition: Why Merged Adapters Add Zero Inference Latency with the underlying matrix math and deployment implications."
+publishDate: "2026-09-17"
+relatedModules: ["qlora-nf4-double-quantization-4bit-finetuning", "prefix-tuning-vs-lora-kv-cache-cost"]
+---
+
+## Question
+How does Low-Rank Adaptation (LoRA) decompose weight updates ($\Delta W = A \cdot B$), and why does merging these adapter weights back into the frozen base model prior to inference result in zero added latency compared to runtime adapters?
+
+
+## Quick Answer
+LoRA represents the fine-tuning update to a weight matrix as the product of two much smaller matrices, `ΔW = A · B`; once training finishes, that product can be **added directly into the frozen base weights**, so the model that runs at inference time is architecturally identical to the original — no extra matrix multiply, no extra latency.
+
+## Detailed Answer
+A full fine-tune updates an entire weight matrix `W` (say, `d × d`) directly, requiring gradients and optimizer state for every one of its `d²` parameters. LoRA instead freezes the original `W` completely and learns a much smaller update alongside it: two low-rank matrices, `A` (`d × r`) and `B` (`r × d`), where the rank `r` is a small number like 8 or 16 — far smaller than `d`. The effective weight used during training becomes:
+
+```
+W_effective = W_frozen + (A · B)
+```
+
+Because `r << d`, the number of trainable parameters in `A` and `B` combined is a tiny fraction of `d²` — this is the entire source of LoRA's memory and compute savings during fine-tuning: you're only computing gradients for `A` and `B`, never for `W_frozen`.
+
+**During training**, `A · B` has to be computed at every forward pass and added to `W_frozen`'s contribution — this does add a small amount of compute relative to a pure frozen model, though far less than updating all of `W` would.
+
+**The zero-latency claim is about what happens after training.** Because `A · B` produces a matrix the exact same shape as `W_frozen` (`d × d`), you can compute that product **once**, add it directly into `W_frozen`, and write out a single merged weight matrix:
+
+```
+W_merged = W_frozen + (A · B)   # computed once, offline
+```
+
+From that point forward, the model literally has no adapter to run — `W_merged` replaces `W_frozen` in the checkpoint, and inference calls the exact same matrix multiply the base model always used. There's no separate `A`/`B` computation happening at request time, because there's no separate `A`/`B` left in the deployed model at all; it's been algebraically folded into the original weights. This is fundamentally different from a **runtime adapter**, which keeps `A` and `B` as live, separate tensors and computes `A · B` fresh on every forward pass — a real, if usually small, added-latency cost that merging eliminates entirely by doing that same computation exactly once, ahead of time.
+
+<Callout variant="tip" title="Key Takeaways">
+Merging LoRA is possible only because the adapter and the base weight are the same shape and combine additively — once merged, the extra parameters aren't "run" at inference, they've become the base model's weights.
+</Callout>
+
+---

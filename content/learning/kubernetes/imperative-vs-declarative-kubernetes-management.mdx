@@ -1,0 +1,65 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "imperative-vs-declarative-kubernetes-management"
+order: 36
+level: "beginner"
+format: "article"
+title: "Imperative vs. Declarative Management: Infrastructure as Code with Kubernetes Manifests"
+description: "Imperative commands (`kubectl run`, `kubectl create`) execute immediately and don't leave a record; declarative (`kubectl apply -f`) manages state via files..."
+question: "What are the fundamental differences between imperative `kubectl` commands and declarative `kubectl apply` manifest management, and why is declarative management required for Production Infrastructure as Code?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["kubectl", "Best Practices"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Imperative vs. Declarative Management: Infras | K8s Guide"
+metaDescription: "Learn Imperative vs. Declarative Management: Infrastructure as Code with Kubernetes Manifests with architecture patterns, practical configurations, and step-by"
+publishDate: "2026-05-21"
+relatedModules: ["dry-run-client-vs-server-validation"]
+---
+
+## Question
+What are the fundamental differences between imperative `kubectl` commands and declarative `kubectl apply` manifest management, and why is declarative management required for Production Infrastructure as Code?
+
+## Quick Answer
+Imperative commands (`kubectl run`, `kubectl create`) execute immediately and don't leave a record; declarative (`kubectl apply -f`) manages state via files stored in Git — always use declarative in production.
+
+
+## Detailed Answer
+**Imperative** means telling Kubernetes *how* to do something step by step:
+```bash
+kubectl run nginx --image=nginx          # Creates pod directly
+kubectl create deployment my-app --image=myapp:v1
+kubectl expose deployment my-app --port=80
+```
+
+**Declarative** means telling Kubernetes *what* you want and letting it figure out how:
+```bash
+kubectl apply -f deployment.yaml        # Apply desired state from file
+kubectl apply -f ./manifests/           # Apply entire directory
+```
+
+| | Imperative | Declarative |
+|---|---|---|
+| **Speed** | Faster for one-off tasks | Slower to set up initially |
+| **Repeatability** | Not repeatable | Idempotent — apply multiple times safely |
+| **Version control** | No audit trail | Full Git history |
+| **Team collaboration** | Doesn't scale | Standard across teams |
+| **Best for** | Quick debugging, generating YAML | All production use |
+
+## The Golden Workflow
+Use imperative commands to *generate* YAML, then use declarative to *apply* it:
+```bash
+# Generate YAML from imperative command — don't apply yet
+kubectl create deployment my-app --image=nginx:1.27 \
+  --dry-run=client -o yaml > deployment.yaml
+
+# Edit the YAML, then apply declaratively
+kubectl apply -f deployment.yaml
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+Use imperative commands only for learning or generating YAML scaffolding — all production changes should be declarative and stored in Git.
+</Callout>
+
+---

@@ -1,0 +1,110 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "qos-classes-guaranteed-burstable-besteffort"
+order: 30
+level: "intermediate"
+format: "article"
+title: "Kubernetes QoS Classes: Guaranteed, Burstable, and BestEffort Pod Eviction Priorities"
+description: "QoS classes (Guaranteed, Burstable, BestEffort) determine which pods are evicted first when a node runs out of memory — Guaranteed pods are evicted last, Bes..."
+question: "How does Kubernetes assign Guaranteed, Burstable, and BestEffort Quality of Service (QoS) classes to Pods, and how does the kernel OOM killer use `oom_score_adj` to evict Pods during resource scarcity?"
+domain: "Troubleshooting"
+tags: ["Resources", "QoS"]
+estimatedMinutes: 4
+xpValue: 15
+seoTitle: "Kubernetes QoS Classes: Guaranteed, Burstable | K8s Guide"
+metaDescription: "Learn Kubernetes QoS Classes: Guaranteed, Burstable, and BestEffort Pod Eviction Priorities with architecture patterns, practical configurations, and step-by-s"
+publishDate: "2026-07-06"
+relatedModules: ["resource-requests-vs-limits-scheduling-throttling", "oomkilled-prevention-memory-limits-cgroups"]
+---
+
+## Question
+How does Kubernetes assign Guaranteed, Burstable, and BestEffort Quality of Service (QoS) classes to Pods, and how does the kernel OOM killer use `oom_score_adj` to evict Pods during resource scarcity?
+
+## Quick Answer
+QoS classes (Guaranteed, Burstable, BestEffort) determine which pods are evicted first when a node runs out of memory — Guaranteed pods are evicted last, BestEffort pods first.
+
+
+## Detailed Answer
+```
+QoS Class Assignment (automatic — you don't set it directly):
+
+Guaranteed ← BEST: Last to be evicted
+  Condition: requests == limits for ALL containers (both CPU and memory)
+  resources:
+    requests: {cpu: "500m", memory: "512Mi"}
+    limits:   {cpu: "500m", memory: "512Mi"}  ← exactly equal
+
+Burstable ← MIDDLE: Evicted after BestEffort
+  Condition: At least one container has requests < limits
+  OR: requests set but no limits (common pattern)
+  resources:
+    requests: {cpu: "250m", memory: "256Mi"}
+    limits:   {memory: "512Mi"}               ← different from requests
+
+BestEffort ← WORST: Evicted FIRST
+  Condition: No requests OR limits set on ANY container
+  resources: {}                               ← completely empty
+```
+
+```bash
+# Check QoS class of a pod
+kubectl get pod my-pod \
+  -o jsonpath='{.status.qosClass}'
+# Returns: Guaranteed | Burstable | BestEffort
+
+# Check all pods and their QoS
+kubectl get pods -A \
+  -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,QOS:.status.qosClass'
+```
+
+## Eviction Order Under Memory Pressure
+```
+Node running low on memory:
+        │
+        ▼
+kubelet evicts BestEffort pods first (highest consumption over request)
+        │
+        ▼
+If still low: evicts Burstable pods (furthest over their request)
+        │
+        ▼
+If still critical: evicts Guaranteed pods (last resort)
+        │
+        ▼
+If node still unstable: kernel OOM killer starts killing processes
+```
+
+## Production Recommendations
+| Workload Type | Recommended QoS | Reasoning |
+|---|---|---|
+| **Critical databases** | Guaranteed | Must not be evicted unexpectedly |
+| **Production APIs** | Burstable | Balance between protection and flexibility |
+| **Batch jobs** | BestEffort or Burstable | Can be interrupted and restarted |
+| **Dev/test workloads** | BestEffort | Acceptable to evict for prod workloads |
+
+```yaml
+# Guaranteed QoS — for critical stateful workloads
+resources:
+  requests:
+    cpu: "1000m"
+    memory: "2Gi"
+  limits:
+    cpu: "1000m"      # Must equal requests for Guaranteed
+    memory: "2Gi"     # Must equal requests for Guaranteed
+
+# Burstable QoS — for most production stateless apps
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    memory: "512Mi"   # Higher than request = Burstable
+    # No CPU limit = also Burstable (requests set but not limits)
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+BestEffort pods are the first casualties when nodes run low on memory — always set at least memory requests on production workloads to achieve Burstable QoS minimum.
+</Callout>
+
+---

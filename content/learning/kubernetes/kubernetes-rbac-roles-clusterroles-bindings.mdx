@@ -1,0 +1,254 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "kubernetes-rbac-roles-clusterroles-bindings"
+order: 42
+level: "intermediate"
+format: "article"
+title: "Kubernetes RBAC: Implementing Roles, ClusterRoles, and Bindings for Granular Security"
+description: "RBAC (Role-Based Access Control) grants permissions to subjects (users, groups, ServiceAccounts) through Roles (namespace-scoped) or ClusterRoles (cluster-wi..."
+question: "How do Role, ClusterRole, RoleBinding, and ClusterRoleBinding resources interact to enforce least-privilege authorization across namespaces and cluster-wide resources?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["RBAC", "Security"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Kubernetes RBAC: Implementing Roles, ClusterR | K8s Guide"
+metaDescription: "Learn Kubernetes RBAC: Implementing Roles, ClusterRoles, and Bindings for Granular Security with architecture patterns, practical configurations, and step-by-s"
+publishDate: "2026-05-12"
+relatedModules: ["serviceaccounts-vs-user-accounts-authentication"]
+---
+
+## Question
+How do Role, ClusterRole, RoleBinding, and ClusterRoleBinding resources interact to enforce least-privilege authorization across namespaces and cluster-wide resources?
+
+## Quick Answer
+RBAC (Role-Based Access Control) grants permissions to subjects (users, groups, ServiceAccounts) through Roles (namespace-scoped) or ClusterRoles (cluster-wide) bound via RoleBindings or ClusterRoleBindings.
+
+
+## Detailed Answer
+```
+RBAC building blocks:
+
+WHO (Subject)          WHAT (Role/ClusterRole)     WHERE (Binding)
+─────────────          ───────────────────────     ───────────────
+User                   Role                        RoleBinding
+Group           ──────► (namespace-scoped)   ─────► (namespace-scoped)
+ServiceAccount         ClusterRole                 ClusterRoleBinding
+                       (cluster-wide)              (cluster-wide)
+```
+
+## Practical Implementation — Dev Team RBAC
+```yaml
+# Scenario: 3 teams — frontend, backend, ops
+# Each team gets appropriate access to their namespace
+
+# ── FRONTEND TEAM ────────────────────────────────────────────────
+# Developers can view everything, deploy to dev namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer
+  namespace: frontend-dev
+rules:
+# View all common resources
+- apiGroups: ["", "apps", "autoscaling", "batch"]
+  resources:
+  - pods
+  - pods/log
+  - pods/exec                       # Allow kubectl exec
+  - deployments
+  - replicasets
+  - services
+  - configmaps
+  - horizontalpodautoscalers
+  - jobs
+  - cronjobs
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Read-only for secrets (can reference, can't read values)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]            # Can see secret names, not values
+# Can port-forward for debugging
+- apiGroups: [""]
+  resources: ["pods/portforward"]
+  verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: frontend-developers
+  namespace: frontend-dev
+subjects:
+- kind: Group
+  name: frontend-team               # Maps to OIDC group or AWS IAM role
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: developer
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ── OPS TEAM ─────────────────────────────────────────────────────
+# Ops gets read-only access cluster-wide + full access to ops namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-viewer
+rules:
+- apiGroups: ["", "apps", "autoscaling", "batch", "networking.k8s.io"]
+  resources:
+  - pods
+  - nodes
+  - namespaces
+  - deployments
+  - services
+  - ingresses
+  - persistentvolumes
+  - persistentvolumeclaims
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ops-cluster-viewer
+subjects:
+- kind: Group
+  name: ops-team
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-viewer
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ── CI/CD SERVICE ACCOUNT ─────────────────────────────────────────
+# Minimal permissions for GitLab CI runner
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-ci-runner
+  namespace: production
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/gitlab-ci-role
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-deployer
+  namespace: production
+rules:
+# Can update deployments (for image updates)
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets"]
+  verbs: ["get", "list", "patch", "update"]
+# Can manage configmaps (for config updates)
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "create", "update", "patch"]
+# Can check rollout status
+- apiGroups: ["apps"]
+  resources: ["replicasets"]
+  verbs: ["get", "list", "watch"]
+# Can read pods and logs (for deployment verification)
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitlab-ci-deployer
+  namespace: production
+subjects:
+- kind: ServiceAccount
+  name: gitlab-ci-runner
+  namespace: production
+roleRef:
+  kind: Role
+  name: ci-deployer
+  apiGroup: rbac.authorization.k8s.io
+```
+
+## RBAC on EKS — AWS IAM Integration
+```yaml
+# EKS maps IAM users/roles to K8s RBAC via aws-auth ConfigMap
+# OR via EKS Access Entries (newer, preferred approach)
+
+# Method 1: aws-auth ConfigMap (legacy but widely used)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-auth
+  namespace: kube-system
+data:
+  mapRoles: |
+    # Map IAM role to K8s group
+    - rolearn: arn:aws:iam::123456789012:role/frontend-developers
+      username: frontend-developer
+      groups:
+        - frontend-team              # This group name matches RoleBinding subjects
+
+    - rolearn: arn:aws:iam::123456789012:role/ops-engineers
+      username: ops-engineer
+      groups:
+        - ops-team
+
+    # Node group role — required for worker nodes
+    - rolearn: arn:aws:iam::123456789012:role/EKSNodeGroupRole
+      username: system:node:{{EC2PrivateDNSName}}
+      groups:
+        - system:bootstrappers
+        - system:nodes
+
+  mapUsers: |
+    # Map specific IAM user (use roles instead — easier to manage)
+    - userarn: arn:aws:iam::123456789012:user/admin-user
+      username: admin-user
+      groups:
+        - system:masters             # cluster-admin equivalent
+```
+
+```bash
+# Method 2: EKS Access Entries (preferred for new clusters)
+aws eks create-access-entry \
+  --cluster-name production-cluster \
+  --principal-arn arn:aws:iam::123456789012:role/frontend-developers \
+  --kubernetes-groups frontend-team
+
+# Verify what permissions a user/SA has
+kubectl auth can-i list pods \
+  --as=system:serviceaccount:production:gitlab-ci-runner \
+  -n production
+# yes
+
+kubectl auth can-i delete secrets \
+  --as=system:serviceaccount:production:gitlab-ci-runner \
+  -n production
+# no
+
+# View all permissions for a ServiceAccount (comprehensive audit)
+kubectl get rolebindings,clusterrolebindings -A \
+  -o json | jq -r '
+    .items[] |
+    select(.subjects[]?.name == "gitlab-ci-runner") |
+    [.metadata.name, .roleRef.name] | @tsv'
+```
+
+## RBAC Best Practices
+| Practice | Why |
+|---|---|
+| **Least privilege always** | Start with read-only, add verbs only as needed |
+| **Use Groups not Users** | Groups scale; individual user bindings are hard to audit |
+| **Namespace-scope first** | Use Role before ClusterRole unless cluster-wide truly needed |
+| **Never give `secrets` list to devs** | `list` on secrets reveals all secret names — use `get` with specific name |
+| **Audit regularly** | `kubectl get clusterrolebindings` — revoke unused bindings |
+| **Never use `system:masters`** | Cannot be audited or restricted once granted; use cluster-admin role instead |
+
+## Common Mistake
+Granting `cluster-admin` to CI/CD pipelines "for simplicity." A compromised pipeline token with cluster-admin can delete every resource in the cluster. Always scope CI/CD access to the minimum required verbs in specific namespaces.
+
+
+<Callout variant="tip" title="Key Takeaways">
+RBAC follows the principle of least privilege — start with the minimum permissions needed, use Groups for maintainability, and regularly audit bindings to remove what's no longer needed.
+</Callout>
+
+---

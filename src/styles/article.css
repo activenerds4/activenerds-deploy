@@ -364,6 +364,106 @@
 }
 
 /* ---------------------------------------------------------------------------
+ * Deep Learning Path Q&A Module Article Styles
+ * --------------------------------------------------------------------------- */
+
+.learning-article-prose {
+  font-family: inherit;
+}
+
+/* Header typography and horizontal rule under headers */
+.learning-article-prose h2 {
+  font-family: var(--font-display, "Space Grotesk", sans-serif);
+  font-weight: 700;
+  font-size: 1.5rem;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  color: hsl(var(--foreground));
+  border-bottom: 1px solid hsl(var(--border) / 0.7);
+  padding-bottom: 0.625rem;
+  margin-top: 2.25rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.learning-article-prose h3 {
+  font-family: var(--font-display, "Space Grotesk", sans-serif);
+  font-weight: 600;
+  font-size: 1.2rem;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  color: hsl(var(--foreground));
+  border-bottom: 1px solid hsl(var(--border) / 0.4);
+  padding-bottom: 0.5rem;
+  margin-top: 1.75rem;
+  margin-bottom: 1rem;
+}
+
+/* Italicised font and elevated presentation for questions */
+.learning-article-prose h2#question + p,
+.learning-article-prose h2[id*="question"] + p {
+  font-style: italic;
+  font-family: var(--font-serif, Georgia, Cambria, "Times New Roman", Times, serif);
+  font-size: 1.15rem;
+  line-height: 1.8;
+  color: hsl(var(--foreground));
+  background: hsl(var(--primary) / 0.05);
+  border-left: 3.5px solid hsl(var(--primary));
+  padding: 1.125rem 1.5rem;
+  border-radius: 0 0.75rem 0.75rem 0;
+  margin-top: 0.875rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+/* Quick Answer presentation */
+.learning-article-prose h2#quick-answer + p,
+.learning-article-prose h2[id*="quick-answer"] + p {
+  font-size: 1.0625rem;
+  line-height: 1.8;
+  color: hsl(var(--foreground));
+  background: hsl(var(--card) / 0.6);
+  border: 1px solid hsl(var(--border) / 0.8);
+  padding: 1.25rem 1.5rem;
+  border-radius: 0.75rem;
+  margin-top: 0.875rem;
+  margin-bottom: 2rem;
+}
+
+/* Key Takeaways Callout Box refinement matching article screenshot */
+.learning-article-prose aside[aria-label="Key Takeaways"],
+.learning-article-prose aside[aria-label="Key Takeaway"] {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.05);
+  padding: 1.25rem 1.5rem;
+  margin: 2rem 0;
+}
+
+.learning-article-prose aside[aria-label="Key Takeaways"] p:first-child,
+.learning-article-prose aside[aria-label="Key Takeaway"] p:first-child {
+  font-family: var(--font-display, "Space Grotesk", sans-serif);
+  font-weight: 700;
+  font-size: 1rem;
+  color: hsl(var(--foreground));
+  margin-bottom: 0.75rem;
+}
+
+.learning-article-prose aside[aria-label="Key Takeaways"] li,
+.learning-article-prose aside[aria-label="Key Takeaway"] li {
+  margin: 0.5rem 0;
+  line-height: 1.65;
+}
+
+.learning-article-prose aside[aria-label="Key Takeaways"] strong,
+.learning-article-prose aside[aria-label="Key Takeaway"] strong {
+  color: hsl(var(--foreground));
+}
+
+
+/* ---------------------------------------------------------------------------
  * Print styles
  * --------------------------------------------------------------------------- */
 

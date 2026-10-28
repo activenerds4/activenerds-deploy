@@ -1,0 +1,151 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "statefulsets-vs-deployments-stateful-apps"
+order: 36
+level: "intermediate"
+format: "article"
+title: "StatefulSets vs. Deployments: Managing Stateful Applications with Stable Identities"
+description: "StatefulSets give pods stable, persistent identities (fixed names, stable DNS, ordered startup) — use them for databases, message brokers, and any workload w..."
+question: "Why are standard Deployments unsuitable for stateful applications like database clusters, and how do StatefulSets provide stable network identities, ordinal indices, and persistent storage bindings?"
+domain: "Storage"
+tags: ["StatefulSets", "Storage"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "StatefulSets vs. Deployments: Managing Statef | K8s Guide"
+metaDescription: "Learn StatefulSets vs. Deployments: Managing Stateful Applications with Stable Identities with architecture patterns, practical configurations, and step-by-ste"
+publishDate: "2026-07-05"
+relatedModules: ["persistentvolumes-pvc-storageclasses-persistence", "daemonsets-node-level-agents-logging-monitoring"]
+---
+
+## Question
+Why are standard Deployments unsuitable for stateful applications like database clusters, and how do StatefulSets provide stable network identities, ordinal indices, and persistent storage bindings?
+
+## Quick Answer
+StatefulSets give pods stable, persistent identities (fixed names, stable DNS, ordered startup) — use them for databases, message brokers, and any workload where pod identity matters across restarts.
+
+
+## Detailed Answer
+| Feature | Deployment | StatefulSet |
+|---|---|---|
+| **Pod names** | Random hash (`my-app-7d4b9c-xk9p2`) | Ordered index (`postgres-0`, `postgres-1`) |
+| **Pod DNS** | No stable per-pod DNS | `postgres-0.postgres.ns.svc.cluster.local` |
+| **Storage** | Shared or no persistent storage | Unique PVC per pod (volumeClaimTemplates) |
+| **Startup order** | Parallel (all at once) | Sequential (0, then 1, then 2) |
+| **Shutdown order** | Parallel | Reverse sequential (2, then 1, then 0) |
+| **Scaling** | Instant, any order | Sequential, ordered |
+| **Use case** | Stateless apps | Databases, Kafka, Elasticsearch, ZooKeeper |
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: production
+spec:
+  serviceName: postgres             # REQUIRED: must reference a Headless Service
+  replicas: 3
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            memory: "2Gi"
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          periodSeconds: 10
+          failureThreshold: 3
+
+  # volumeClaimTemplates — creates a UNIQUE PVC for EACH pod
+  # postgres-data-postgres-0, postgres-data-postgres-1, postgres-data-postgres-2
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: gp3-encrypted
+      resources:
+        requests:
+          storage: 100Gi
+---
+# Headless Service — REQUIRED for StatefulSet DNS
+# clusterIP: None means DNS returns pod IPs directly
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres                    # Must match StatefulSet.spec.serviceName
+  namespace: production
+spec:
+  clusterIP: None                   # This makes it headless
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    name: postgres
+```
+
+## Stable DNS for Each Pod
+```bash
+# Each StatefulSet pod gets a stable DNS name:
+postgres-0.postgres.production.svc.cluster.local  → 10.0.1.5
+postgres-1.postgres.production.svc.cluster.local  → 10.0.1.6
+postgres-2.postgres.production.svc.cluster.local  → 10.0.1.7
+
+# This is how replicas find each other for clustering
+# e.g., postgres-1 connects to postgres-0 as the primary
+
+# Verify pod DNS resolution
+kubectl exec -it postgres-0 -- \
+  nslookup postgres-1.postgres.production.svc.cluster.local
+```
+
+## Ordered Operations
+```bash
+# Scaling up: pods created 0 → 1 → 2 (each must be Running/Ready before next)
+kubectl scale statefulset postgres --replicas=3
+
+# Scaling down: pods deleted 2 → 1 → 0 (reverse order)
+kubectl scale statefulset postgres --replicas=1
+
+# Rolling update: pods updated N → N-1 → ... → 0
+kubectl set image statefulset/postgres postgres=postgres:16.1
+
+# Partition update — only update pods with index >= partition
+# Useful for canary: update pod-2 first, verify, then update rest
+kubectl patch statefulset postgres \
+  -p '{"spec":{"updateStrategy":{"rollingUpdate":{"partition":2}}}}'
+```
+
+## Common Mistake
+Using a StatefulSet when a Deployment would work fine. StatefulSets are more complex to manage — ordered updates are slower, scaling is sequential, and you must manage PVCs separately. Only use StatefulSets when you genuinely need stable identity or per-pod storage.
+
+
+<Callout variant="tip" title="Key Takeaways">
+StatefulSets are for workloads where identity matters — if your pods need to know who they are (postgres-0 is primary, postgres-1 is replica), use StatefulSet; if they're interchangeable, use Deployment.
+</Callout>
+
+---

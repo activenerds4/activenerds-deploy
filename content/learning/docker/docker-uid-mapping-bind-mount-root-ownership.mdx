@@ -1,0 +1,46 @@
+---
+pathSlug: "docker"
+moduleSlug: "docker-uid-mapping-bind-mount-root-ownership"
+order: 57
+level: "intermediate"
+format: "article"
+title: "UID Mapping in Docker: Why Bind-Mounted Files End Up Owned by Root"
+description: "A container's root user maps directly to UID 0 on the host by default, so files it writes to a bind mount are genuinely owned by the host's root — not by a sandboxed, container-only identity."
+question: "A container runs as root by default, and a file it writes to a bind-mounted volume ends up owned by `root` on the host, breaking the host user's ability to edit it. Explain the UID mapping reality behind this, and describe two distinct strategies to prevent it."
+domain: "Security"
+tags: ["Security", "UID Mapping", "UID", "RootlessContainers", "Permissions"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "UID Mapping in Docker: Bind-Mount | Docker Guide"
+metaDescription: "Learn UID Mapping in Docker: Why Bind-Mounted Files End Up Owned by Root with practical strategies for fixing host file permission issues."
+publishDate: "2026-08-27"
+relatedModules: ["non-root-containers-dockerfile-migration", "container-lifecycle-pid1-process-exit"]
+---
+
+## Question
+A container runs as root by default, and a file it writes to a bind-mounted volume ends up owned by `root` on the host, breaking the host user's ability to edit it. Explain the UID mapping reality behind this, and describe two distinct strategies to prevent it.
+
+
+## Quick Answer
+Without user-namespace remapping, a container's root user (UID 0) is the **same UID 0** as the host's root user — so a file the container writes to a bind mount really is owned by root on the host, not by some container-scoped identity.
+
+## Detailed Answer
+By default, Docker does not isolate UIDs between the container and the host — it runs containers in the **host's UID namespace**. A process inside a container that's UID 0 (root) is, from the kernel's point of view, the exact same identity as UID 0 on the host machine. There's no automatic translation happening; "root in the container" and "root on the host" are one and the same number, and the kernel's file permission checks operate purely on that number, not on any concept of "which container this came from."
+
+A **bind mount** (`-v /host/path:/container/path`) makes this concrete because it isn't a Docker-managed volume with its own storage — it's the literal host directory, mounted straight into the container. When a root process inside the container writes a file there, the file is created with owner UID 0, and because the bind mount is the actual host filesystem, that's the same UID 0 the host recognizes as its own root account. The host user (typically a non-root UID like 1000) then can't write to or delete that file without `sudo`.
+
+Two distinct strategies fix this:
+
+**1. Run the container as a non-root, matching UID.** Pass `--user $(id -u):$(id -g)` (or set `USER` in the Dockerfile to a fixed UID) so the process inside the container writes files as the same UID as the host user who owns the mount, instead of as root:
+
+```bash
+docker run --user "$(id -u):$(id -g)" -v "$PWD/data:/data" myapp
+```
+
+**2. Use Linux user-namespace remapping (`userns-remap`).** Configure the Docker daemon to remap container UID 0 to an *unprivileged* UID range on the host, so "root" inside the container never corresponds to real host root at all — files still get written with some UID, but it's a mapped, non-privileged one rather than the host's actual superuser.
+
+<Callout variant="tip" title="Key Takeaways">
+Bind-mount permission problems aren't a Docker bug — they're the direct, expected consequence of containers sharing the host's UID space by default; fix it with a matching non-root UID or user-namespace remapping, not by chowning after the fact.
+</Callout>
+
+---

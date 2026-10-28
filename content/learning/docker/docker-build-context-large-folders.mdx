@@ -1,0 +1,52 @@
+---
+pathSlug: "docker"
+moduleSlug: "docker-build-context-large-folders"
+order: 27
+level: "beginner"
+format: "article"
+title: "Docker Build Context: Why an Untouched node_modules Folder Slows Builds"
+description: "docker build sends the entire project directory to the daemon as the build context before any instruction runs — even files the Dockerfile never references."
+question: "A build suddenly takes much longer after a teammate added a large `node_modules` folder to the project directory, even though it's never referenced in the Dockerfile. Explain what's happening and how to fix it."
+domain: "Image Engineering"
+tags: ["Image Engineering", "Build Context", "Dockerfile", "BuildContext"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Docker Build Context: Why an Untouched | Docker Guide"
+metaDescription: "Learn Docker Build Context: Why an Untouched node_modules Folder Slows Builds with architecture patterns, practical configurations, and step-by-step"
+publishDate: "2026-08-01"
+relatedModules: ["alpine-vs-ubuntu-base-image-tradeoffs", "docker-layer-caching-instant-rebuilds"]
+---
+
+## Question
+A build suddenly takes much longer after a teammate added a large `node_modules` folder to the project directory, even though it's never referenced in the Dockerfile. Explain what's happening and how to fix it.
+
+
+## Quick Answer
+`docker build` sends the **entire project directory** to the Docker daemon as the build context before a single instruction runs — a huge `node_modules` folder gets packaged and transferred every time, whether or not the Dockerfile ever mentions it.
+
+## Detailed Answer
+It's easy to assume a Dockerfile only touches the files it explicitly references in `COPY`/`ADD` instructions, but that's not where the cost comes from here. Before Docker even starts interpreting the Dockerfile, the client packages the entire directory passed as the build context (the `.` in `docker build -t myapp .`) into a tarball and streams it to the Docker daemon. This happens unconditionally, on every build, regardless of what the Dockerfile actually does with it — the daemon needs the full context available locally in case any instruction later asks for a file from it.
+
+A `node_modules` folder is exactly the kind of directory that blows this up: it's routinely hundreds of megabytes to multiple gigabytes, made of tens of thousands of small files. Tarring and transferring that on every single build adds real, visible time before the first Dockerfile instruction even executes — and it happens even if the Dockerfile does something sensible like `RUN npm install` and never has a bare `COPY . .` that would touch `node_modules` directly.
+
+```bash
+$ docker build -t myapp .
+Sending build context to Docker daemon  1.2GB
+# ^ this line is the tell — everything before "Step 1" is context transfer
+```
+
+The fix is a `.dockerignore` file in the same directory as the Dockerfile, which works exactly like `.gitignore` — it excludes matching paths from the build context before the tarball is ever built:
+
+```
+node_modules
+.git
+*.log
+dist
+```
+
+With `node_modules` excluded, the build context shrinks back down to just source files, and dependency installation happens inside the container via `RUN npm install` against the checked-in `package.json`/`package-lock.json` — which also means the image gets a clean, reproducible dependency tree instead of whatever happens to be sitting in the developer's local `node_modules`.
+
+<Callout variant="tip" title="Key Takeaways">
+Anything in the project directory affects build speed via the context transfer, whether or not the Dockerfile references it — keep a `.dockerignore` current, especially for dependency folders, VCS metadata, and build artifacts.
+</Callout>
+

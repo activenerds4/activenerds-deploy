@@ -1,0 +1,55 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "dry-run-client-vs-server-validation"
+order: 39
+level: "beginner"
+format: "article"
+title: "Dry-Run Validation: Client-Side vs. Server-Side Mutation Testing"
+description: "`--dry-run=client` validates locally without hitting the API server; `--dry-run=server` sends the request to the API server for full validation including adm..."
+question: "Explain the architecture, failure modes, and operational best practices for Dry-Run Validation: Client-Side vs. Server-Side Mutation Testing in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["kubectl"]
+estimatedMinutes: 2
+xpValue: 10
+seoTitle: "Dry-Run Validation: Client-Side vs. Server-Si | K8s Guide"
+metaDescription: "Learn Dry-Run Validation: Client-Side vs. Server-Side Mutation Testing with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-07-11"
+relatedModules: ["essential-kubectl-commands-debugging-cheatsheet", "imperative-vs-declarative-kubernetes-management"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for Dry-Run Validation: Client-Side vs. Server-Side Mutation Testing in production Kubernetes environments.
+
+## Quick Answer
+`--dry-run=client` validates locally without hitting the API server; `--dry-run=server` sends the request to the API server for full validation including admission webhooks — server-side is more accurate.
+
+
+## Detailed Answer
+```bash
+# Client-side dry run — fast, no API call, limited validation
+kubectl apply -f deployment.yaml --dry-run=client
+# Use for: quick syntax check, generating output
+
+# Server-side dry run — full API server validation including:
+# - Admission webhooks (OPA, Kyverno policies)
+# - Schema validation against CRDs
+# - RBAC (in some configurations)
+kubectl apply -f deployment.yaml --dry-run=server
+# Use for: pre-flight check before production apply
+
+# The most common use — generate YAML scaffold from imperative command
+kubectl create deployment my-app \
+  --image=nginx:1.27 \
+  --replicas=3 \
+  --dry-run=client -o yaml
+
+# Diff live state vs local manifest (uses server-side dry run internally)
+kubectl diff -f deployment.yaml
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+Use `--dry-run=server` before any production change — it catches policy violations that client-side misses.
+</Callout>
+
+---

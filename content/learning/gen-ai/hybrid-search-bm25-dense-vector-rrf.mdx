@@ -1,0 +1,57 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "hybrid-search-bm25-dense-vector-rrf"
+order: 78
+level: "intermediate"
+format: "article"
+title: "Hybrid Search: How Reciprocal Rank Fusion Combines BM25 and Dense Vector Retrieval"
+description: "Dense vectors encode meaning, not exact tokens, so rare identifiers like SKUs or error codes get smoothed away; Reciprocal Rank Fusion fixes this by merging BM25's and dense search's rank positions rather than their scores."
+question: "Why does pure dense-vector retrieval struggle with exact-keyword queries (such as product SKUs or error codes), and how does Reciprocal Rank Fusion (RRF) combine sparse search (BM25) with dense vector search mathematically?"
+domain: "RAG & Data Systems"
+tags: ["RAG & Data Systems", "Hybrid Search", "HybridSearch", "BM25", "ReciprocalRankFusion"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Hybrid Search: RRF Combines BM25 | LLM Guide"
+metaDescription: "Learn Hybrid Search: How Reciprocal Rank Fusion Combines BM25 and Dense Vector Retrieval with the underlying math and practical retrieval trade-offs."
+publishDate: "2026-09-14"
+relatedModules: ["parent-document-retrieval-small-to-big-chunking", "bi-encoder-vs-cross-encoder-reranking-cost"]
+---
+
+## Question
+Why does pure dense-vector retrieval struggle with exact-keyword queries (such as product SKUs or error codes), and how does Reciprocal Rank Fusion (RRF) combine sparse search (BM25) with dense vector search mathematically?
+
+
+## Quick Answer
+Dense-vector retrieval struggles with SKUs and error codes because embeddings compress text into **semantic** representations that treat rare, precise tokens as noise; Reciprocal Rank Fusion fixes this by merging BM25's and the vector search's *rank positions* for each document into one combined score, rather than trying to reconcile their incompatible score scales directly.
+
+## Detailed Answer
+A dense embedding model is trained to place semantically similar text near each other in vector space — "cancel my order" and "I want a refund" end up close together even though they share almost no tokens. That's exactly the property that makes it bad at exact-match queries: a product SKU like `XJ-4471-B` or an error code like `ERR_CONN_RESET` carries almost no semantic meaning on its own. The embedding model has typically seen these tokens rarely (or split into odd sub-word pieces), so it has no strong signal for what makes one SKU different from another — two unrelated SKUs can end up nearly as close in vector space as the exact one you're searching for, because the model is optimizing for *meaning similarity*, not *string identity*.
+
+**BM25** (sparse/keyword search) has the opposite strength: it scores documents by term frequency and inverse document frequency, so an exact token match on a rare string like a SKU produces a very high, very specific score — the rarer the term across the corpus, the more it counts. The problem is combining the two: BM25 scores and cosine-similarity scores live on entirely different, uncalibrated scales, so you can't just add them together meaningfully.
+
+**Reciprocal Rank Fusion (RRF)** sidesteps the score-calibration problem entirely by ignoring the raw scores and using only each result's **rank position** in its own list:
+
+```
+RRF_score(d) = Σ  1 / (k + rank_i(d))
+```
+
+For each document `d`, you sum `1 / (k + rank)` across every ranked list it appears in (the BM25 list and the dense-vector list), where `rank_i(d)` is that document's position in list `i` (1st, 2nd, 3rd...) and `k` is a small constant (commonly 60) that dampens the influence of very high ranks so the fusion isn't dominated by whichever list happens to rank a niche result #1.
+
+```mermaid
+flowchart LR
+    Q[Query] --> BM25[BM25 sparse search]
+    Q --> DENSE[Dense vector search]
+    BM25 --> R1[Ranked list A]
+    DENSE --> R2[Ranked list B]
+    R1 --> RRF[RRF: sum 1 / k + rank]
+    R2 --> RRF
+    RRF --> FINAL[Final fused ranking]
+```
+
+A document that ranks #1 in BM25 (exact SKU match) but doesn't appear in the dense list at all still gets a strong contribution from its BM25 rank alone, and a document ranking highly in both lists gets contributions from both — naturally rewarding results that either method independently considers strong, without needing to normalize scores across the two systems.
+
+<Callout variant="tip" title="Key Takeaways">
+RRF makes hybrid search possible without solving the harder problem of score normalization, by fusing on rank order — a scale every search method already shares.
+</Callout>
+
+---

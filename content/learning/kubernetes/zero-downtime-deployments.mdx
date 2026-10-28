@@ -1,0 +1,258 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "zero-downtime-deployments"
+order: 24
+level: "advanced"
+format: "article"
+title: "Zero-Downtime Deployments: Architecture & Implementation"
+description: "In-depth architectural breakdown and operational implementation for Zero-Downtime Deployments: Architecture & Implementation."
+question: "You manage a critical payment processing API. It handles 10,000 requests/minute with no tolerance for dropped connections. How do you implement zero-downtime deployments?"
+domain: "Workloads & Scheduling"
+tags: ["Deployments", "Production", "Availability"]
+estimatedMinutes: 22
+xpValue: 20
+seoTitle: "Zero-Downtime Deployments: Architecture & Imp | K8s Guide"
+metaDescription: "Learn Zero-Downtime Deployments: Architecture & Implementation with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-06-07"
+relatedModules: []
+---
+
+**Prerequisite knowledge:** Deployments, ReplicaSets, Services, readiness probes
+
+---
+
+## Question
+You manage a critical payment processing API. It handles 10,000 requests/minute with no tolerance for dropped connections. How do you implement zero-downtime deployments?
+
+
+## Quick Answer
+Use `RollingUpdate` strategy with `maxSurge`/`maxUnavailable` tuned to your capacity, combined with properly configured readiness probes, preStop hooks for graceful shutdown, and PodDisruptionBudgets to prevent over-aggressive node drains.
+
+---
+
+
+## Detailed Answer
+Zero-downtime deployment is not just about the Deployment strategy — it requires **coordinating four distinct mechanisms** that each handle a different failure mode.
+
+## ️ The Four Pillars of Zero-Downtime
+```
+1. RollingUpdate Strategy    → Controls how pods are replaced
+2. Readiness Probes          → Prevents traffic to unready pods
+3. preStop + terminationGracePeriodSeconds → Handles in-flight requests
+4. PodDisruptionBudgets      → Protects against simultaneous eviction
+```
+
+## ️ Complete Implementation
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: production
+spec:
+  replicas: 10
+  # Pillar 1: Rolling update strategy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2          # Allow 2 extra pods above desired (surge capacity)
+      maxUnavailable: 0    # NEVER reduce below desired count (critical for payment API)
+      # With 10 replicas: at any point you have 10-12 pods
+      # Old pods are only terminated AFTER new pods pass readiness checks
+  selector:
+    matchLabels:
+      app: payment-api
+  template:
+    metadata:
+      labels:
+        app: payment-api
+    spec:
+      # Pillar 3a: Give pods enough time to finish in-flight requests
+      terminationGracePeriodSeconds: 60
+
+      containers:
+        - name: payment-api
+          image: registry.mycompany.com/payment-api:v2.1.0
+          ports:
+            - containerPort: 8080
+
+          # Pillar 2a: Readiness probe — traffic only sent when ready
+          readinessProbe:
+            httpGet:
+              path: /health/ready    # Must return 200 only when truly ready
+              port: 8080
+            initialDelaySeconds: 10  # Wait 10s before first check
+            periodSeconds: 5         # Check every 5s
+            failureThreshold: 3      # Remove from Service after 3 failures
+            successThreshold: 1      # Re-add after 1 success
+
+          # Pillar 2b: Liveness probe — restart unhealthy pods
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # Pillar 2c: Startup probe — for slow-starting apps
+          startupProbe:
+            httpGet:
+              path: /health/startup
+              port: 8080
+            failureThreshold: 30     # Allow up to 5 minutes to start
+            periodSeconds: 10
+
+          # Pillar 3b: preStop hook — drain connections before SIGTERM
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  # Sleep gives kube-proxy time to remove pod from iptables rules
+                  # BEFORE the app starts shutting down
+                  - "sleep 5 && /app/graceful-shutdown.sh"
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+# Pillar 4: PodDisruptionBudget — protect against simultaneous eviction
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-api-pdb
+  namespace: production
+spec:
+  # Always keep at least 90% of pods running
+  minAvailable: "90%"
+  # Alternatively, use maxUnavailable:
+  # maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: payment-api
+```
+
+## The Critical `preStop` + `sleep` Pattern Explained
+```
+Timeline of pod termination (WITHOUT sleep):
+
+t=0:  Pod receives SIGTERM
+t=0:  kube-proxy starts updating iptables rules (async, takes 1-5s)
+t=0:  App begins shutdown immediately
+t=2:  App stops accepting connections
+t=3:  kube-proxy STILL routing new requests to this pod  ← DROPPED REQUESTS
+
+Timeline WITH preStop sleep:
+
+t=0:  Pod receives SIGTERM
+t=0:  preStop hook runs: sleep 5
+t=0:  kube-proxy starts updating iptables rules
+t=5:  kube-proxy finishes updating rules (no more new requests arrive)
+t=5:  App receives SIGTERM (after preStop completes)
+t=5:  App handles remaining in-flight requests
+t=65: terminationGracePeriodSeconds expires, SIGKILL sent if still running
+      (5s preStop + 60s termination = 65s total window)
+```
+
+## Application-Side Graceful Shutdown (Go example)
+```go
+// main.go — Graceful HTTP server shutdown
+func main() {
+    srv := &http.Server{Addr: ":8080", Handler: router}
+
+    // Channel to listen for OS signals
+    quit := make(chan os.Signal, 1)
+    signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+
+    go func() {
+        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            log.Fatal(err)
+        }
+    }()
+
+    // Block until signal received
+    <-quit
+    log.Println("Shutdown signal received, draining connections...")
+
+    // Give in-flight requests up to 55 seconds to complete
+    ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
+    defer cancel()
+
+    if err := srv.Shutdown(ctx); err != nil {
+        log.Fatal("Server forced to shutdown:", err)
+    }
+    log.Println("Server exited cleanly")
+}
+```
+
+## Readiness Endpoint Implementation
+```go
+// health.go — Readiness check that reflects true app state
+var isReady atomic.Bool
+
+func readinessHandler(w http.ResponseWriter, r *http.Request) {
+    // Check database connection pool
+    if err := db.PingContext(r.Context()); err != nil {
+        http.Error(w, "DB not ready", http.StatusServiceUnavailable)
+        return
+    }
+
+    // Check downstream service dependencies
+    if !paymentGateway.IsHealthy() {
+        http.Error(w, "Payment gateway not ready", http.StatusServiceUnavailable)
+        return
+    }
+
+    // Check internal state (warming up, loading caches, etc.)
+    if !isReady.Load() {
+        http.Error(w, "App still initializing", http.StatusServiceUnavailable)
+        return
+    }
+
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte("OK"))
+}
+```
+
+---
+
+## ️ Trade-offs & Alternatives
+
+| Strategy | Use Case | Zero-Downtime? | Rollback Speed | Resource Cost |
+|---|---|---|---|---|
+| **RollingUpdate** | Most production apps | ✅ Yes (with probes) | Medium | Low (maxSurge only) |
+| **Blue/Green** | Critical APIs, payment systems | ✅ Yes | Instant | 2x resources |
+| **Canary** | Risk-sensitive feature releases | ✅ Yes | Fast | Low (small canary) |
+| **Recreate** | Dev/test only | ❌ No | Fast | None |
+
+---
+
+## ️ Common Mistakes & Misconceptions
+- **"Setting `maxUnavailable: 0` alone is enough."** — Without readiness probes, Kubernetes doesn't know when a new pod is truly ready, so it may mark it ready prematurely and terminate old pods too soon.
+- **"My app handles SIGTERM, so I don't need `preStop` sleep."** — The kube-proxy lag (1–5s) means requests still arrive after SIGTERM. The `preStop` sleep bridges this gap.
+- **"Liveness and readiness probes can use the same endpoint."** — They should not. A failing readiness check removes the pod from the Service (recoverable). A failing liveness check kills and restarts the pod (destructive). Never use a deep dependency check for liveness.
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+Zero-downtime deployment is a **system-level concern**, not just a Deployment setting. The four pillars — rolling strategy, readiness probes, graceful shutdown, and PDBs — must all work in concert. The most overlooked piece is the `preStop` sleep, which accounts for the asynchronous nature of kube-proxy's iptables update propagation.
+</Callout>
+
+---
+
+## Self-Assessment Checklist
+- [ ] Can you explain why `maxUnavailable: 0` alone doesn't guarantee zero downtime?
+- [ ] Can you draw the timeline of pod termination with and without `preStop` sleep?
+- [ ] Can you explain the difference between readiness, liveness, and startup probes?
+- [ ] Can you articulate when Blue/Green is preferable to RollingUpdate?
+
+**➡️ Follow-up Questions
+:** Q48 (Blue/Green and Canary with Argo Rollouts), Q51 (PodDisruptionBudgets deep dive), Q54 (Service mesh traffic management for canary), Q62 (StatefulSet rolling updates)
+
+---

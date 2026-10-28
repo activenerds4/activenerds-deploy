@@ -1,0 +1,43 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "self-correction-reflection-tool-exception-feedback"
+order: 36
+level: "intermediate"
+format: "article"
+title: "Self-Correction Feedback Loops: Healing Agent Errors from Tool Exceptions"
+description: "A tool exception should be fed back as a structured Observation containing the error type, the message, and the specific arguments that caused it — never a bare stack trace — so the model can distinguish a retry-worthy transient failure from an approach that needs to change entirely."
+question: "When a tool call throws an execution exception (e.g., `404 Not Found` or `SyntaxError`), what self-correction/reflection feedback pattern should be fed back into the context to allow the agent to heal its approach without repeating the error?"
+domain: "Error Recovery & Reflection"
+tags: ["Error Recovery & Reflection", "Self-Correction", "SelfCorrection", "Reflection", "ExceptionHandling"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "Self-Correction Feedback for Agent Errors | AI Agents Guide"
+metaDescription: "Learn Self-Correction Feedback Loops: Healing Agent Errors from Tool Exceptions with architecture patterns, practical configurations, and next steps"
+publishDate: "2026-07-04"
+relatedModules: ["state-backtracking-vs-conversational-reflection"]
+---
+
+## Question
+When a tool call throws an execution exception (e.g., `404 Not Found` or `SyntaxError`), what self-correction/reflection feedback pattern should be fed back into the context to allow the agent to heal its approach without repeating the error?
+
+
+## Quick Answer
+When a tool call throws — a `404`, a `SyntaxError`, a timeout — the runtime should feed the model a structured Observation containing the exception type, a concise message, and the exact arguments that triggered it, framed explicitly as an error rather than a normal result, so the model can reason about *why* the call failed instead of just seeing a generic failure and retrying the same thing.
+
+## Detailed Answer
+The lazy version of error handling — appending a raw stack trace or `"Error: 404"` string to the transcript — tends to produce one of two bad outcomes: the model retries the exact same call verbatim (because nothing in the feedback told it what to change), or it overcorrects and abandons a mostly-correct approach entirely. Effective self-correction feedback needs three things present in the Observation: **what kind of error it was** (a distinct category — not-found, validation, permission, timeout, syntax — since each implies a different fix), **the specific detail that caused it** (which field was invalid, which path didn't exist, which line the syntax error is on), and **the arguments that were actually sent**, so the model can compare what it *meant* to send against what happened.
+
+This turns the next Thought into an actual diagnosis instead of a guess: a `404 Not Found` on a file path suggests the path is wrong or the file doesn't exist yet, which is a different fix than a `403 Forbidden`, which suggests a permissions issue no retry will solve. A `SyntaxError` with a line number lets the model target the exact broken line in generated code rather than rewriting the whole file. It also matters to distinguish **retry-worthy** failures (rate limits, transient network errors — where the fix is "wait and try again, possibly unchanged") from **approach failures** (a malformed query, a wrong assumption about the API's shape — where retrying identically will fail every time). Tagging the error category explicitly in the Observation lets the orchestrator apply this distinction deterministically too — e.g. auto-retrying transient categories a bounded number of times before ever bothering the model with them.
+
+```text
+Observation (error):
+  category: "not_found"
+  message: "No file at path 'src/utils/helper.py'"
+  arguments_sent: {"path": "src/utils/helper.py", "mode": "read"}
+  hint: "Path may be misspelled or file may not exist yet — check directory listing"
+```
+
+<Callout variant="tip" title="Key Takeaways">
+Feed the model a structured, categorized error — not a raw exception dump — so its next Thought is a targeted fix instead of a repeat of the same mistake.
+</Callout>
+

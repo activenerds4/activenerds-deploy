@@ -1,0 +1,223 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "networkpolicies-microsegmentation-pod-traffic"
+order: 9
+level: "advanced"
+format: "article"
+title: "NetworkPolicies: Micro-Segmentation and Pod Traffic Filtering with Calico or Cilium"
+description: "NetworkPolicies are pod-level firewalls that whitelist allowed ingress and egress traffic — start with a default-deny-all policy per namespace, then explicit..."
+question: "How do Kubernetes NetworkPolicies enforce micro-segmentation and pod traffic isolation, and how do CNI plugins like Calico or Cilium implement these rules at the kernel network layer?"
+domain: "Services & Networking"
+tags: ["NetworkPolicy", "Security"]
+estimatedMinutes: 6
+xpValue: 20
+seoTitle: "NetworkPolicies: Micro-Segmentation and Pod T | K8s Guide"
+metaDescription: "Learn NetworkPolicies: Micro-Segmentation and Pod Traffic Filtering with Calico or Cilium with architecture patterns, practical configurations, and step-by-ste"
+publishDate: "2026-07-07"
+relatedModules: ["kubernetes-disaster-recovery-velero-etcd-backup", "kubernetes-rbac-roles-clusterroles-bindings"]
+---
+
+## Question
+How do Kubernetes NetworkPolicies enforce micro-segmentation and pod traffic isolation, and how do CNI plugins like Calico or Cilium implement these rules at the kernel network layer?
+
+## Quick Answer
+NetworkPolicies are pod-level firewalls that whitelist allowed ingress and egress traffic — start with a default-deny-all policy per namespace, then explicitly allow only the traffic paths you need.
+
+
+## Detailed Answer
+```yaml
+# STEP 1: Default deny all — apply to every production namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: production
+spec:
+  podSelector: {}                   # Applies to ALL pods in namespace
+  policyTypes:
+  - Ingress
+  - Egress
+  # No ingress or egress rules = deny everything
+
+---
+# STEP 2: Allow DNS egress (without this, nothing resolves)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: production
+spec:
+  podSelector: {}                   # All pods need DNS
+  policyTypes:
+  - Egress
+  egress:
+  - to: []                         # Any destination
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+# STEP 3: Allow specific traffic paths
+# Frontend → API only (not directly to DB)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-to-api
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: api                      # This policy TARGETS the API pods
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: frontend             # Only allow from frontend pods
+    ports:
+    - protocol: TCP
+      port: 8080
+
+---
+# API → Database only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-to-database
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres                 # Targets postgres pods
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: api                  # Only allow from API pods
+    ports:
+    - protocol: TCP
+      port: 5432
+
+---
+# Allow monitoring namespace to scrape metrics from all pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: production
+spec:
+  podSelector: {}                   # All pods
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring          # From monitoring namespace
+    ports:
+    - protocol: TCP
+      port: 9090                   # Prometheus metrics port
+
+---
+# Allow ingress controller to reach pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000
+```
+
+## Testing Network Policies
+```bash
+# Verify NetworkPolicy is enforced (requires CNI support)
+# Deploy test pods
+kubectl run test-frontend --image=nicolaka/netshoot \
+  --labels="app=frontend" -n production
+kubectl run test-attacker --image=nicolaka/netshoot \
+  --labels="app=attacker" -n production
+
+# Test allowed path: frontend → api (should succeed)
+kubectl exec -it test-frontend -n production -- \
+  curl -m 5 http://api-svc:8080/health
+# Expected: 200 OK
+
+# Test blocked path: attacker → database (should fail/timeout)
+kubectl exec -it test-attacker -n production -- \
+  curl -m 5 http://postgres-svc:5432
+# Expected: timeout (connection blocked by NetworkPolicy)
+
+# Check which CNI is installed (must support NetworkPolicy)
+kubectl get pods -n kube-system | grep -E "calico|cilium|weave"
+
+# View all NetworkPolicies
+kubectl get networkpolicies -A
+kubectl describe networkpolicy default-deny-all -n production
+
+# Cilium — advanced policy visualization
+cilium policy get
+hubble observe --namespace production --verdict DROP
+```
+
+## Advanced Cilium Policy (eBPF-based — more powerful than basic NetworkPolicy)
+```yaml
+# Cilium NetworkPolicy — L7 HTTP-aware policies
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: api-http-policy
+  namespace: production
+spec:
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        app: frontend
+    toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP
+      rules:
+        http:                       # L7 HTTP rules — only allow specific paths
+        - method: GET
+          path: /api/v1/.*
+        - method: POST
+          path: /api/v1/orders
+        # Block: DELETE /api/v1/.* even from frontend
+```
+
+## Common Mistakes
+- Forgetting to allow DNS egress — breaks all service discovery silently
+- Not labeling namespaces — `namespaceSelector` without labels matches nothing
+- Assuming NetworkPolicy works without a supporting CNI — flannel ignores policies silently
+- Creating ingress policy without egress policy — traffic blocked in one direction still fails
+
+
+<Callout variant="tip" title="Key Takeaways">
+Always start with default-deny-all, then explicitly allow — and always add DNS egress first or you'll be confused why nothing resolves after applying your "allow" policies.
+</Callout>
+
+---

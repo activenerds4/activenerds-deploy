@@ -49,10 +49,10 @@ const rehypeHighlightConfigured = [rehypeHighlight, { lowlight }];
 const CONTENT_DIR = path.resolve(process.cwd(), "content");
 const POSTS_DIR = path.join(CONTENT_DIR, "posts");
 const AUTHORS_DIR = path.join(CONTENT_DIR, "authors");
-const CHEAT_SHEETS_DIR = path.join(CONTENT_DIR, "pages", "resources", "cheatsheets");
 const CHECKLISTS_DIR = path.join(CONTENT_DIR, "pages", "resources", "checklists");
 const GUIDES_DIR = path.join(CONTENT_DIR, "pages", "resources", "guides");
 const CONFERENCES_DIR = path.join(CONTENT_DIR, "pages", "resources", "conferences");
+const LEARNING_DIR = path.join(CONTENT_DIR, "learning");
 const OUTPUT_DIR = path.resolve(process.cwd(), "src/lib/content/__compiled__");
 
 interface CompileEntry {
@@ -108,30 +108,39 @@ async function main() {
 
   const postEntries = await discoverFiles(POSTS_DIR, "posts");
   const authorEntries = await discoverFiles(AUTHORS_DIR, "authors");
-  const cheatSheetEntries = await discoverFiles(CHEAT_SHEETS_DIR, "pages/resources/cheatsheets");
   const checklistEntries = await discoverFiles(CHECKLISTS_DIR, "pages/resources/checklists");
   const guideEntries = await discoverFiles(GUIDES_DIR, "pages/resources/guides");
   const conferenceEntries = await discoverFiles(CONFERENCES_DIR, "pages/resources/conferences");
+
+  const learningPaths = ["docker", "kubernetes", "gen-ai", "agentic-ai"];
+  const learningEntries: CompileEntry[] = [];
+  for (const lp of learningPaths) {
+    const entries = await discoverFiles(path.join(LEARNING_DIR, lp), `learning/${lp}`);
+    learningEntries.push(...entries);
+  }
+
   const allEntries = [
     ...postEntries,
     ...authorEntries,
-    ...cheatSheetEntries,
     ...checklistEntries,
     ...guideEntries,
     ...conferenceEntries,
+    ...learningEntries,
   ];
 
   console.log(
-    `[precompile-mdx] Found ${postEntries.length} posts, ${authorEntries.length} authors, ${cheatSheetEntries.length} cheat sheets, ${checklistEntries.length} checklists, ${guideEntries.length} guides, ${conferenceEntries.length} conference guides`,
+    `[precompile-mdx] Found ${postEntries.length} posts, ${authorEntries.length} authors, ${learningEntries.length} learning modules, ${checklistEntries.length} checklists, ${guideEntries.length} guides, ${conferenceEntries.length} conference guides`,
   );
 
   // Ensure output directories exist
   await mkdir(path.join(OUTPUT_DIR, "posts"), { recursive: true });
   await mkdir(path.join(OUTPUT_DIR, "authors"), { recursive: true });
-  await mkdir(path.join(OUTPUT_DIR, "pages/resources/cheatsheets"), { recursive: true });
   await mkdir(path.join(OUTPUT_DIR, "pages/resources/checklists"), { recursive: true });
   await mkdir(path.join(OUTPUT_DIR, "pages/resources/guides"), { recursive: true });
   await mkdir(path.join(OUTPUT_DIR, "pages/resources/conferences"), { recursive: true });
+  for (const lp of learningPaths) {
+    await mkdir(path.join(OUTPUT_DIR, "learning", lp), { recursive: true });
+  }
 
   let success = 0;
   let failed = 0;

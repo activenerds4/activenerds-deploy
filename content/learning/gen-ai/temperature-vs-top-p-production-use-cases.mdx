@@ -1,0 +1,47 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "temperature-vs-top-p-production-use-cases"
+order: 54
+level: "beginner"
+format: "article"
+title: "Temperature vs. Top-P: Choosing the Right Lever for Code Generation vs. Creative Writing"
+description: "Temperature reshapes the entire probability curve before any cutoff is applied, while top-p trims the candidate pool adaptively after the curve is set, and production use cases favor different levers."
+question: "From a systems perspective, what is actually happening to the model's output probability distribution when you lower temperature versus when you apply top-p (nucleus) sampling \u2014 and why would you choose one lever over the other for a production use case like code generation vs. creative writing?"
+domain: "Inference Engineering"
+tags: ["Inference Engineering", "Sampling", "Temperature", "TopP"]
+estimatedMinutes: 5
+xpValue: 10
+seoTitle: "Temperature vs. Top-P for Production Use | LLM Guide"
+metaDescription: "Learn what happens to a model's probability distribution when you lower temperature versus apply top-p sampling, and which to use for code vs. creative text."
+publishDate: "2026-09-19"
+relatedModules: ["temperature-top-k-top-p-sampling-strategies", "logit-bias-sampling-degradation"]
+---
+
+## Question
+From a systems perspective, what is actually happening to the model's output probability distribution when you lower temperature versus when you apply top-p (nucleus) sampling — and why would you choose one lever over the other for a production use case like code generation vs. creative writing?
+
+
+## Quick Answer
+Lowering **temperature** reshapes the entire probability distribution before any cutoff is applied — sharpening it so the model's already-favored tokens dominate even more — while **top-p** leaves the underlying distribution's shape untouched and instead trims away the low-probability tail *after* the distribution is computed, so the two levers act on different parts of the pipeline and aren't interchangeable.
+
+## Detailed Answer
+The generation pipeline runs in a fixed order: the model outputs raw logits, temperature rescales those logits before softmax, softmax converts them to a probability distribution, and then a cutoff rule like top-p decides which of those probabilities are even eligible to be sampled.
+
+**Temperature** operates at the first stage. Dividing logits by $T < 1$ before softmax exaggerates the gap between high- and low-probability tokens, concentrating probability mass onto whatever the model already found most likely — it doesn't remove any tokens from consideration, it just makes the winners win by more. Pushed to the extreme ($T \to 0$), this converges to greedy, fully deterministic decoding.
+
+**Top-P (nucleus sampling)** operates at the last stage, after the (possibly temperature-adjusted) distribution already exists. It sorts tokens by probability, keeps adding them until their cumulative mass crosses threshold $P$, and hard-excludes everything else — so it directly controls how many distinct candidates are even in play, adapting turn to turn based on how confident or uncertain the underlying distribution happens to be at that step.
+
+This distinction is exactly why production systems reach for different levers depending on the task:
+
+| Use case | Preferred lever | Why |
+|-----------|------------------|------|
+| Code generation, structured output, tool calls | Low temperature (near 0), narrow or no top-p | Syntax correctness has essentially one right answer at each step; sharpening toward the model's most confident token minimizes the risk of a syntax-breaking outlier, and top-p adds little once the distribution is already this peaked |
+| General-purpose chat, factual Q&A | Moderate temperature (~0.5–0.8) with moderate top-p (~0.9) | Wants some natural variation in phrasing without drifting into implausible or incoherent continuations |
+| Creative writing, brainstorming | Higher temperature (~0.9–1.2) with a wider top-p (~0.95) | Rewards surprising, less-obvious word choices; top-p still guards against genuinely nonsensical low-probability tokens sneaking in even as temperature widens the field |
+
+For code generation specifically, the risk profile is asymmetric: an unusual but grammatically valid word choice in a story is harmless, but an unusual token in the middle of a function signature can break the build entirely — which is why code-focused pipelines lean almost entirely on temperature reduction rather than top-p, since top-p alone doesn't guarantee the *most* likely token wins, only that the tail is excluded.
+
+<Callout variant="tip" title="Key Takeaways">
+Temperature decides how confidently the model commits to its favorites, while top-p decides how large the pool of acceptable alternatives is — production systems tune the one that matches whether the task has a narrow correct answer or a wide space of acceptable ones.
+</Callout>
+

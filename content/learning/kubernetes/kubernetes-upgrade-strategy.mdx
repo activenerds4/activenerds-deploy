@@ -1,0 +1,191 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "kubernetes-upgrade-strategy"
+order: 18
+level: "advanced"
+format: "article"
+title: "Kubernetes Upgrade Strategy: Architecture & Implementation"
+description: "In-depth architectural breakdown and operational implementation for Kubernetes Upgrade Strategy: Architecture & Implementation."
+question: "Your company runs a production Kubernetes cluster on v1.26. The security team has mandated an upgrade to v1.29 due to a CVE. You have 40 nodes, stateful workloads, and a 99.9% uptime SLA. Walk through your complete upgrade strategy."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Upgrades", "Cluster-Management", "Production"]
+estimatedMinutes: 25
+xpValue: 20
+seoTitle: "Kubernetes Upgrade Strategy: Architecture & I | K8s Guide"
+metaDescription: "Learn Kubernetes Upgrade Strategy: Architecture & Implementation with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-06-01"
+relatedModules: ["cicd-pipeline-security-scanning-compliance"]
+---
+
+**Prerequisite knowledge:** Node lifecycle, control plane components, kubeadm basics
+
+---
+
+## Question
+Your company runs a production Kubernetes cluster on v1.26. The security team has mandated an upgrade to v1.29 due to a CVE. You have 40 nodes, stateful workloads, and a 99.9% uptime SLA. Walk through your complete upgrade strategy.
+
+
+## Quick Answer
+Upgrade one minor version at a time (1.26 → 1.27 → 1.28 → 1.29), always upgrading the control plane first, then worker nodes one at a time using cordon + drain + upgrade + uncordon. Never skip minor versions.
+
+---
+
+
+## Detailed Answer
+Kubernetes follows a strict **N-1 minor version skew policy** between control plane and worker nodes, which means you cannot jump from v1.26 directly to v1.29 — you must hop through each minor version sequentially. Skipping versions is explicitly unsupported and risks API incompatibilities and data corruption in etcd.
+
+## ️ Architecture Considerations
+- **Control plane first, always.** The API server, controller manager, and scheduler must be upgraded before any worker node.
+- **etcd is the most critical component.** Back it up before every upgrade hop.
+- **PodDisruptionBudgets (PDBs)** protect stateful workloads during node drains.
+- **Multi-control-plane HA clusters** require rolling the control plane nodes one at a time.
+
+---
+
+## ️ Step-by-Step Implementation
+*Phase 1: Pre-Upgrade Preparation*
+```bash
+# 1. Audit current cluster state
+kubectl get nodes -o wide
+kubectl version --short
+
+# 2. Check for deprecated APIs (critical for each version jump)
+# Install Pluto (API deprecation scanner)
+pluto detect-all-in-cluster --target-versions k8s=v1.27.0
+
+# 3. Review release notes for each version
+# https://kubernetes.io/releases/
+
+# 4. Backup etcd (ALWAYS do this before upgrading)
+ETCDCTL_API=3 etcdctl snapshot save /backup/etcd-$(date +%Y%m%d).db \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key
+
+# 5. Verify snapshot integrity
+ETCDCTL_API=3 etcdctl snapshot status /backup/etcd-20260101.db
+
+# 6. Test the upgrade in a staging cluster first
+# Mirror your production workloads in staging
+```
+
+*Phase 2: Control Plane Upgrade (using kubeadm)*
+```bash
+# On the first control plane node:
+
+# Update kubeadm to target version
+apt-mark unhold kubeadm
+apt-get install -y kubeadm=1.27.x-00
+apt-mark hold kubeadm
+
+# Verify the upgrade plan
+kubeadm upgrade plan v1.27.0
+
+# Apply the upgrade (control plane components only)
+kubeadm upgrade apply v1.27.0
+
+# Upgrade kubelet and kubectl on this node
+apt-mark unhold kubelet kubectl
+apt-get install -y kubelet=1.27.x-00 kubectl=1.27.x-00
+apt-mark hold kubelet kubectl
+
+systemctl daemon-reload
+systemctl restart kubelet
+
+# For additional control plane nodes (HA setup):
+# Run 'kubeadm upgrade node' (not 'apply') on each subsequent control plane node
+kubeadm upgrade node
+```
+
+*Phase 3: Worker Node Rolling Upgrade*
+```bash
+# For EACH worker node (one at a time to maintain capacity):
+
+NODE="worker-node-01"
+
+# Step 1: Cordon (prevent new pods scheduling)
+kubectl cordon $NODE
+
+# Step 2: Drain (evict existing pods gracefully)
+kubectl drain $NODE \
+  --ignore-daemonsets \        # DaemonSet pods cannot be evicted
+  --delete-emptydir-data \     # Accept loss of emptyDir data
+  --grace-period=60 \          # Give pods 60s to terminate
+  --timeout=300s               # Overall drain timeout
+
+# Step 3: SSH into node and upgrade kubelet
+ssh $NODE
+apt-mark unhold kubelet kubectl
+apt-get install -y kubelet=1.27.x-00 kubectl=1.27.x-00
+apt-mark hold kubelet kubectl
+systemctl daemon-reload
+systemctl restart kubelet
+exit
+
+# Step 4: Uncordon (allow scheduling again)
+kubectl uncordon $NODE
+
+# Step 5: Verify node is Ready before proceeding
+kubectl get node $NODE
+# Wait until STATUS = Ready
+
+# Step 6: Validate workloads are healthy
+kubectl get pods -A | grep -v Running | grep -v Completed
+```
+
+*Phase 4: Post-Upgrade Validation*
+```bash
+# Validate all nodes upgraded
+kubectl get nodes -o wide
+
+# Validate core system pods
+kubectl get pods -n kube-system
+
+# Run a smoke test
+kubectl run smoke-test --image=nginx --rm -it --restart=Never -- curl localhost
+
+# Validate your application endpoints
+# Run your integration test suite here
+
+# Remove deprecated API resources if any were flagged by Pluto
+```
+
+---
+
+## ️ Trade-offs & Alternatives
+
+| Approach | Pros | Cons |
+|---|---|---|
+| **In-place kubeadm upgrade** | Simple, no new infrastructure needed | Riskier, less rollback flexibility |
+| **Blue/Green cluster upgrade** | Zero-risk rollback, test new cluster fully | Expensive, requires traffic shifting |
+| **Node replacement (immutable)** | Cleanest approach, cattle not pets | Requires re-scheduling all workloads |
+| **Managed K8s upgrade (EKS/GKE)** | Automated, SLA-backed | Less control, vendor-specific quirks |
+
+> **For your 99.9% SLA scenario:** A **blue/green cluster upgrade** is safest. Spin up a v1.27 cluster, migrate workloads, shift traffic via your load balancer, then decommission the old cluster. Repeat for each minor version hop.
+
+---
+
+## ️ Common Mistakes & Misconceptions
+- **"I can skip minor versions to save time."** — You cannot. The kubelet version skew policy is strictly enforced.
+- **"I don't need to upgrade add-ons separately."** — Wrong. CoreDNS, kube-proxy, CNI plugins, and the metrics server all have their own upgrade paths.
+- **"Drain is enough to protect stateful apps."** — Not without PDBs. Always define `PodDisruptionBudget` for StatefulSets.
+- **"I can roll back a Kubernetes upgrade easily."** — etcd schema changes make rollback extremely difficult. There is no easy undo — your backup is your only rollback path.
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+Kubernetes upgrades are not a single event — they are a **multi-phase operational process**. The risk is in skipping preparation steps. Backup etcd, audit deprecated APIs, upgrade control plane first, and drain/upgrade/uncordon workers one at a time. For production systems, blue/green cluster upgrades eliminate downtime risk entirely.
+</Callout>
+
+---
+
+## Self-Assessment Checklist
+- [ ] Can you explain why you cannot skip minor versions?
+- [ ] Can you describe the version skew policy between kubelet and API server?
+- [ ] Can you write the etcd backup command from memory?
+- [ ] Can you explain what `--ignore-daemonsets` does during drain and why it's needed?
+- [ ] Can you articulate the difference between `kubeadm upgrade apply` and `kubeadm upgrade node`?
+
+
+---

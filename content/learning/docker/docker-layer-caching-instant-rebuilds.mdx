@@ -1,0 +1,61 @@
+---
+pathSlug: "docker"
+moduleSlug: "docker-layer-caching-instant-rebuilds"
+order: 6
+level: "beginner"
+format: "article"
+title: "Docker Layer Caching: Why Unchanged Builds Finish Instantly"
+description: "Docker caches the result of each Dockerfile instruction as an image layer. When the instruction and its build context are unchanged, Docker reuses that layer."
+question: "You run `docker build` twice on the same Dockerfile with no changes and notice the second build finishes in under a second. Explain what mechanism makes this possible and what is actually being reused."
+domain: "Image Engineering"
+tags: ["Image Engineering", "Layers", "UnionFS"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Docker Layer Caching: Why Unchanged Builds | Docker Guide"
+metaDescription: "Learn Docker Layer Caching: Why Unchanged Builds Finish Instantly with architecture patterns, practical configurations, and step-by-step implementation deta"
+publishDate: "2026-07-09"
+relatedModules: ["entrypoint-vs-cmd-runtime-behavior"]
+updatedAt: "2026-08-10"
+faqs:
+  - question: "How does Docker determine if a layer cache hit occurs?"
+    answer: "Docker compares the instruction string and the checksum of inputs (files for COPY/ADD or parent image checksum for RUN) against existing local layer cache entries."
+  - question: "How can I invalidate Docker layer cache when needed?"
+    answer: "You can pass --no-cache to docker build or change an earlier Dockerfile instruction like updating a dependency lockfile."
+---
+
+## Question
+You run `docker build` twice on the same Dockerfile with no changes and notice the second build finishes in under a second. Explain what mechanism makes this possible and what is actually being reused.
+
+
+## Quick Answer
+Docker caches the result of every Dockerfile instruction as an immutable image layer. If neither the instruction nor its inputs changed, Docker reuses that cached layer instead of re-executing it.
+
+## Detailed Answer
+Every instruction in a Dockerfile — `FROM`, `RUN`, `COPY`, `ENV`, and so on — produces a **layer**: a filesystem diff plus metadata, stacked on top of the previous layer using a **union filesystem** (OverlayFS on most modern Docker installs). Layers are content-addressed: Docker computes a cache key from the instruction itself and, for `COPY`/`ADD`, a checksum of the files being copied.
+
+On a second build with no changes, Docker walks the Dockerfile top to bottom and, for each instruction, checks whether a layer already exists in its local cache with a matching key **and** a matching parent-layer chain. If every instruction matches, Docker never re-executes anything — it just points the new image tag at the already-existing layer stack. That's the "under a second" build: no work happened, only a lookup.
+
+```bash
+$ docker build -t myapp .
+Step 1/5 : FROM node:20-alpine
+ ---> 3f8a2c1b9d4e
+Step 2/5 : COPY package.json .
+ ---> Using cache
+ ---> a1b2c3d4e5f6
+Step 3/5 : RUN npm install
+ ---> Using cache
+ ---> f6e5d4c3b2a1
+Step 4/5 : COPY . .
+ ---> Using cache
+ ---> 9d8c7b6a5f4e
+Step 5/5 : CMD ["node", "index.js"]
+ ---> Using cache
+ ---> 1a2b3c4d5e6f
+```
+
+The important consequence is that caching is **sequential and cascading**: the moment one instruction's cache misses (say, `package.json` changed), every instruction after it in the Dockerfile also misses, even if their own inputs are identical to last time — because their cache key depends on the parent layer, which just changed. This is why Dockerfiles are conventionally ordered from least-frequently-changing (base image, dependency manifests) to most-frequently-changing (application source code): it maximizes how many layers survive a typical code change.
+
+<Callout variant="tip" title="Key Takeaways">
+Order Dockerfile instructions from least to most likely to change, since a single cache miss invalidates every layer that comes after it.
+</Callout>
+

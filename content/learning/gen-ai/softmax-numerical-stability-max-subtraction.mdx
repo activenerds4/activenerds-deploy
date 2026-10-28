@@ -1,0 +1,42 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "softmax-numerical-stability-max-subtraction"
+order: 21
+level: "beginner"
+format: "article"
+title: "Softmax Numerical Stability: Why Subtracting the Max Logit Prevents Overflow"
+description: "Subtracting the maximum logit before exponentiating keeps every exponent at or below zero, avoiding the overflow that raw exponentials of large logits cause in FP16."
+question: "Why is subtracting the maximum value ($\\max(x)$) from raw logits before applying Softmax ($\\text{Softmax}(x_i) = \\frac{e^{x_i - \\max(x)}}{\\sum e^{x_j - \\max(x)}}$) mathematically necessary in FP16/BF16 precision arithmetic, and what numerical error occurs without this shift?"
+domain: "Architecture & Mathematics"
+tags: ["Architecture & Mathematics", "Softmax", "FP16", "NumericalStability"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Softmax Numerical Stability Explained | LLM Guide"
+metaDescription: "Learn why subtracting the max logit before softmax is mathematically necessary in FP16/BF16 arithmetic, and what overflow errors happen without it."
+publishDate: "2026-08-17"
+relatedModules: ["scaled-dot-product-attention-sqrt-dk-scaling", "temperature-top-k-top-p-sampling-strategies"]
+---
+
+## Question
+Why is subtracting the maximum value (`max(x)`) from raw logits before applying Softmax (`Softmax(x_i) = exp(x_i - max(x)) / sum(exp(x_j - max(x)))`) mathematically necessary in FP16/BF16 precision arithmetic, and what numerical error occurs without this shift?
+
+## Quick Answer
+Subtracting `max(x)` before exponentiating keeps every exponent at zero or below, which avoids the **numerical overflow** that raw exponentiation of large logits would otherwise cause in limited-precision formats like FP16.
+
+## Detailed Answer
+Softmax involves raising `e` to the power of each logit. In full FP32 precision this is rarely a problem, but **FP16** can only represent values up to roughly 65,504 before overflowing to infinity, and even **BF16**, despite having FP32's exponent range, still loses precision fast when exponentials grow large. A logit as unremarkable as 20 already produces `e^20 ≈ 4.85 × 10^8` — well past what FP16 can hold, and once a single term overflows to `inf`, the entire softmax output becomes `NaN` after that `inf` propagates through the division by the sum.
+
+The **max-subtraction trick** exploits the fact that softmax is invariant to a constant shift: subtracting the same value `c` from every logit before exponentiating doesn't change the final probabilities, because that constant factors out of both numerator and denominator and cancels:
+
+```
+Softmax(x_i - c) = e^(x_i - c) / Σ_j e^(x_j - c) = e^(x_i) / Σ_j e^(x_j) = Softmax(x_i)
+```
+
+Choosing `c = max(x)` guarantees the largest resulting exponent is `e^0 = 1`, and every other exponent is some value between 0 and 1. This keeps all intermediate values comfortably within any floating-point format's safe range, no matter how large the raw logits happen to be.
+
+Without this shift, large logits — which show up routinely in attention scores or classification heads over big vocabularies — cause exponentials to blow past the representable range, silently producing `inf` and then `NaN` once that propagates through subsequent arithmetic, corrupting the model's output with no obvious warning beyond garbage results downstream.
+
+<Callout variant="tip" title="Key Takeaways">
+Max-subtraction is a free, mathematically exact rewrite of softmax that trades nothing for numerical safety, which is why every production implementation uses it by default.
+</Callout>
+

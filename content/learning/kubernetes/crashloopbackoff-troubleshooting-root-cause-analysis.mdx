@@ -1,0 +1,135 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "crashloopbackoff-troubleshooting-root-cause-analysis"
+order: 12
+level: "intermediate"
+format: "article"
+title: "CrashLoopBackOff Troubleshooting: Root Cause Analysis for Application Container Crashes"
+description: "CrashLoopBackOff means the container starts and immediately crashes — get the previous container's logs with `kubectl logs --previous`, then check exit codes..."
+question: "Explain the architecture, failure modes, and operational best practices for CrashLoopBackOff Troubleshooting: Root Cause Analysis for Application Container Crashes in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Troubleshooting", "Debugging"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "CrashLoopBackOff Troubleshooting: Root Cause  | K8s Guide"
+metaDescription: "Learn CrashLoopBackOff Troubleshooting: Root Cause Analysis for Application Container Crashes with architecture patterns, practical configurations, and step-by"
+publishDate: "2026-07-23"
+relatedModules: ["oomkilled-prevention-memory-limits-cgroups"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for CrashLoopBackOff Troubleshooting: Root Cause Analysis for Application Container Crashes in production Kubernetes environments.
+
+## Quick Answer
+CrashLoopBackOff means the container starts and immediately crashes — get the previous container's logs with `kubectl logs --previous`, then check exit codes, env vars, and probe configuration.
+
+
+## Detailed Answer
+```bash
+# Step 1: Confirm it's CrashLoopBackOff and check restart count
+kubectl get pod my-pod
+# NAME      READY   STATUS             RESTARTS   AGE
+# my-pod    0/1     CrashLoopBackOff   8          12m
+
+# High restart count = been crashing repeatedly
+
+# Step 2: Get logs from the crashed container (not the current one)
+kubectl logs my-pod --previous
+kubectl logs my-pod --previous --tail=50   # Last 50 lines of crashed container
+
+# Step 3: Check the exit code — tells you HOW it died
+kubectl describe pod my-pod
+# Look for:
+# Last State: Terminated
+#   Reason: Error / OOMKilled / Completed
+#   Exit Code: 1
+#   Started: Mon, 01 Jan 2026 10:00:00
+#   Finished: Mon, 01 Jan 2026 10:00:01  ← crashed after 1 second!
+
+# Exit code meanings:
+# 0   = Success (shouldn't crash loop)
+# 1   = General application error
+# 2   = Misuse of shell command
+# 126 = Command not executable
+# 127 = Command not found (wrong entrypoint/CMD)
+# 128+signal = Killed by signal
+# 137 = SIGKILL (OOMKilled or manual kill)
+# 143 = SIGTERM (graceful shutdown — may be probe timeout)
+```
+
+## Common Root Causes
+```bash
+# CAUSE 1: Application error on startup
+# Symptom: Logs show exception/panic before crash
+# Fix: Check env vars, config files, missing dependencies
+kubectl exec -it my-pod -- env | grep -i db    # Check env vars are set correctly
+kubectl get secret db-secret -o yaml           # Verify secret exists and has right keys
+
+# CAUSE 2: OOMKilled — memory limit too low
+# Symptom: Exit Code 137, Reason: OOMKilled
+# Fix: Increase memory limit
+kubectl get pod my-pod \
+  -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}'
+# Returns: OOMKilled
+
+# Temporary fix: increase memory limit
+kubectl patch deployment my-app \
+  -p '{"spec":{"template":{"spec":{"containers":[{"name":"app","resources":{"limits":{"memory":"1Gi"}}}]}}}}'
+
+# CAUSE 3: Wrong command/entrypoint
+# Symptom: Exit Code 127 "command not found"
+# Fix: Check your Dockerfile CMD/ENTRYPOINT vs K8s command/args
+# K8s command overrides Docker ENTRYPOINT
+# K8s args overrides Docker CMD
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    command: ["/bin/sh"]           # Overrides ENTRYPOINT
+    args: ["-c", "echo hello"]     # Overrides CMD
+
+# CAUSE 4: Liveness probe too aggressive
+# Symptom: Pod restarts regularly, logs show normal operation
+# Fix: Increase initialDelaySeconds or failureThreshold
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 30          # Was 5 — app needs 20s to initialize
+  failureThreshold: 5              # Was 3 — give more attempts
+
+# CAUSE 5: Missing ConfigMap or Secret
+# Symptom: Pod won't start, describe shows CreateContainerConfigError
+kubectl describe pod my-pod | grep -A5 "Warning"
+# Warning  Failed  CreateContainerConfigError:
+#   couldn't find key DB_HOST in ConfigMap production/app-config
+
+# Fix: Verify the ConfigMap/Secret exists with the correct keys
+kubectl get configmap app-config -o yaml
+kubectl get secret db-secret -o yaml
+
+# CAUSE 6: Image runs as root but security context forbids it
+# Symptom: Exit Code 1 with "permission denied" in logs
+# Fix: Either fix the image to use non-root, or adjust runAsUser
+securityContext:
+  runAsUser: 1000                  # Must match what the image expects
+```
+
+## Debug Trick — Override the entrypoint to get a shell
+```yaml
+# Temporarily override command to keep container alive for inspection
+spec:
+  containers:
+  - name: app
+    image: myapp:v1
+    command: ["sleep", "infinity"]   # Override crashing entrypoint
+    # Then: kubectl exec -it my-pod -- /bin/sh
+    # Manually run your app command to see what error it produces
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+`kubectl logs --previous` is the single most important command for CrashLoopBackOff — it shows what the app was doing in its last moments before dying.
+</Callout>
+
+---

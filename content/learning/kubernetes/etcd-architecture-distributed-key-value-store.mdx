@@ -1,0 +1,53 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "etcd-architecture-distributed-key-value-store"
+order: 18
+level: "beginner"
+format: "article"
+title: "etcd Architecture: Distributed Key-Value Store for Kubernetes Cluster State"
+description: "etcd is the distributed key-value store that holds ALL cluster state — every object, every config, every secret. Losing etcd without a backup means losing th..."
+question: "Explain the architecture, failure modes, and operational best practices for etcd Architecture: Distributed Key-Value Store for Kubernetes Cluster State in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Architecture", "etcd"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "etcd Architecture: Distributed Key-Value Stor | K8s Guide"
+metaDescription: "Learn etcd Architecture: Distributed Key-Value Store for Kubernetes Cluster State with architecture patterns, practical configurations, and step-by-step implem"
+publishDate: "2026-05-22"
+relatedModules: ["control-plane-vs-worker-nodes-architecture"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for etcd Architecture: Distributed Key-Value Store for Kubernetes Cluster State in production Kubernetes environments.
+
+## Quick Answer
+etcd is the distributed key-value store that holds ALL cluster state — every object, every config, every secret. Losing etcd without a backup means losing the entire cluster.
+
+
+## Detailed Answer
+etcd uses the **Raft consensus algorithm** to maintain consistency across multiple replicas. This means it requires a quorum (majority of nodes alive) to function — a 3-node etcd cluster can survive 1 failure; a 5-node cluster can survive 2. Every object you create via `kubectl apply` is ultimately stored as a key-value pair in etcd. The API server is the ONLY component that talks to etcd directly — all other components go through the API server. etcd is optimized for consistency over availability, which means under network partition, it will stop accepting writes rather than risk inconsistency.
+
+## Production Implications
+- Use SSDs for etcd — it's extremely sensitive to disk latency (WAL fsync should be &lt;10ms)
+- Back it up every 6 hours minimum using `etcdctl snapshot save`
+- Run etcd on dedicated nodes separate from worker workloads in large clusters
+- Monitor `etcd_disk_wal_fsync_duration_seconds` — spikes here cause API server slowdowns
+
+```bash
+# Take an etcd snapshot backup
+ETCDCTL_API=3 etcdctl snapshot save /backup/etcd-snapshot.db \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key
+
+# Verify snapshot
+etcdctl snapshot status /backup/etcd-snapshot.db --write-out=table
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+etcd is Kubernetes's brain — back it up religiously and give it fast dedicated storage.
+</Callout>
+
+---

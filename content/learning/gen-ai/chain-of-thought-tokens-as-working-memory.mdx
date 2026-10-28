@@ -1,0 +1,39 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "chain-of-thought-tokens-as-working-memory"
+order: 69
+level: "beginner"
+format: "article"
+title: "Chain-of-Thought Prompting: Why Generated Tokens Act as the Model's Working Memory"
+description: "Asking a model to think step by step spreads a hard reasoning problem across many easier next-token predictions, and each generated token becomes context the model can condition on for the next step."
+question: "Why does asking a model to \"think step by step\" measurably improve accuracy on multi-step reasoning tasks, and what does this imply about how the model uses its own generated tokens as working memory?"
+domain: "Prompt Engineering & Application Design"
+tags: ["Prompt Engineering & Application Design", "Chain of Thought", "ChainOfThought", "Reasoning"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Chain-of-Thought: Tokens as Working Memory | LLM Guide"
+metaDescription: "Learn why chain-of-thought prompting improves multi-step reasoning accuracy, and what it reveals about how models use generated tokens as working memory."
+publishDate: "2026-10-04"
+relatedModules: ["few-shot-prompting-vs-zero-shot-instructions"]
+---
+
+## Question
+Why does asking a model to "think step by step" measurably improve accuracy on multi-step reasoning tasks, and what does this imply about how the model uses its own generated tokens as working memory?
+
+
+## Quick Answer
+A model has a fixed amount of computation per token — it can't do more "thinking" for a hard question than for an easy one within a single forward pass — but asking it to "think step by step" spreads a multi-step problem across many separate token predictions, and each generated token becomes part of the context the next prediction conditions on, effectively giving the model external working memory it wouldn't otherwise have.
+
+## Detailed Answer
+Every token the model generates gets exactly the same fixed compute budget: one forward pass through a fixed number of layers, regardless of whether that token represents a trivial word choice or the answer to a genuinely hard multi-step math problem. If a model is asked to jump directly to a final answer for a problem that actually requires several dependent reasoning steps, it has to somehow compress all of that reasoning into the single forward pass that produces that one answer token — and for sufficiently complex problems, that's simply not enough sequential computation to reliably get the right answer, even though the model's total parameter count and knowledge are unchanged.
+
+**Chain-of-thought** prompting works around this constraint by getting the model to externalize the intermediate steps as generated text, rather than trying to do all the reasoning silently within one token's worth of computation. Once the model writes down "first, we need to calculate X," that statement becomes part of the context for every subsequent token — the model can now condition its next prediction on that explicitly stated intermediate result, the same way it would condition on any other text in its context. Each reasoning step becomes a checkpoint the model can build on, effectively trading breadth of computation (many token-generation steps, each cheap) for what would otherwise require depth of computation within a single step (which the fixed-size forward pass can't provide).
+
+This reveals something important about how these models actually reason: they don't have a persistent, updatable internal memory or scratchpad the way a human working through a problem on paper does — the **context window itself is the only form of memory available across generation steps**. Chain-of-thought prompting essentially exploits this by turning the model's own text output into that scratchpad. Each token it writes is simultaneously an output *and* an input to every future token, which is exactly the mechanism that lets a fixed-compute-per-token architecture still solve problems that genuinely require multiple sequential reasoning steps to reach a correct answer.
+
+This also explains why chain-of-thought helps more on problems with real multi-step structure (arithmetic, logic puzzles, multi-hop questions) than on tasks that are more like direct pattern recall (simple factual lookups), where there isn't a decomposable sequence of intermediate steps for the externalized reasoning to actually help with.
+
+<Callout variant="tip" title="Key Takeaways">
+Chain-of-thought doesn't give the model more raw intelligence per token — it gives the model a way to use its own output as working memory, turning a hard single-step problem into a sequence of easier steps it's actually equipped to solve.
+</Callout>
+

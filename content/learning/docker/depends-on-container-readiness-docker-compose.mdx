@@ -1,0 +1,57 @@
+---
+pathSlug: "docker"
+moduleSlug: "depends-on-container-readiness-docker-compose"
+order: 54
+level: "intermediate"
+format: "article"
+title: "depends_on in Docker Compose: Why Container Startup Order Isn't Application Readiness"
+description: "depends_on by default only waits for the database container to start, not for the database process inside it to finish initializing — the API needs an explicit readiness check to wait on."
+question: "A `docker-compose.yml` uses `depends_on` to ensure the database container starts before the API container, but the API still crashes on startup trying to connect. Explain why `depends_on` alone doesn't solve this problem and what actually needs to happen."
+domain: "Architecture"
+tags: ["Architecture", "Docker Compose", "DockerCompose", "ServiceDependencies"]
+estimatedMinutes: 5
+xpValue: 15
+seoTitle: "depends_on in Compose: Startup vs. | Docker Guide"
+metaDescription: "Learn depends_on in Docker Compose: Why Container Startup Order Isn't Application Readiness with practical Compose configurations and health checks."
+publishDate: "2026-08-24"
+relatedModules: ["container-lifecycle-pid1-process-exit", "docker-compose-healthcheck-application-readiness"]
+---
+
+## Question
+A `docker-compose.yml` uses `depends_on` to ensure the database container starts before the API container, but the API still crashes on startup trying to connect. Explain why `depends_on` alone doesn't solve this problem and what actually needs to happen.
+
+
+## Quick Answer
+Plain `depends_on` only guarantees the database **container starts** before the API container starts — it says nothing about whether the database *process inside it* has finished initializing and is actually ready to accept connections.
+
+## Detailed Answer
+`depends_on` controls **start order**, not **readiness**. When Compose sees `depends_on: [db]` on the API service, it runs `docker start` on the `db` container first and, once that container's process has begun running (its PID 1 is up), immediately proceeds to start the API container. From Compose's point of view, "started" and "ready" are the same thing — but for a database, they usually aren't.
+
+Most database images take real time after the process launches before they're actually able to serve connections: running first-boot initialization scripts, creating the data directory, replaying write-ahead logs, or waiting on disk I/O. During that window the container is running, but the database isn't listening yet (or is listening but rejecting connections). The API container starts immediately afterward, tries to connect, and gets a connection-refused error before the database has caught up — a race condition, not a guaranteed order violation, which is why it can also intermittently *not* crash depending on how fast the database happens to initialize that time.
+
+The fix is to make `depends_on` wait on an explicit **health check** result rather than just process start, using the long-form `condition` syntax:
+
+```yaml
+services:
+  db:
+    image: postgres:16
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+```
+
+With `condition: service_healthy`, Compose won't start the `api` container until `db`'s health check has actually reported success — a real readiness signal, not just a "the process exists" signal.
+
+<Callout variant="tip" title="Key Takeaways">
+`depends_on` alone only orders container starts; pair it with `condition: service_healthy` and a real health check to wait for actual application readiness.
+</Callout>
+
+---

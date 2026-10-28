@@ -1,0 +1,56 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "rag-evaluation-faithfulness-context-precision"
+order: 180
+level: "advanced"
+format: "article"
+title: "RAG Evaluation Metrics: Formulating Faithfulness and Context Precision with LLM-as-a-Judge"
+description: "Faithfulness scores the fraction of claims in a response that are actually supported by the retrieved context, while Context Precision scores the fraction of retrieved chunks that were actually relevant — both typically computed by prompting a judge LLM to verify each claim or chunk individually."
+question: "How do automated RAG evaluation frameworks mathematically formulate Faithfulness (verifying response facts against retrieved context) and Context Precision, and how are bias/hallucination risks controlled when using LLM-as-a-Judge?"
+domain: "RAG & Data Systems"
+tags: ["RAG & Data Systems", "RAG Eval", "LLM-as-a-Judge", "RAGEval", "Faithfulness", "LLMAsAJudge"]
+estimatedMinutes: 8
+xpValue: 20
+seoTitle: "RAG Eval: Faithfulness & Context Precision | LLM Guide"
+metaDescription: "Learn how RAG evaluation frameworks formulate Faithfulness and Context Precision with architecture patterns, practical configurations, and implementation tips"
+publishDate: "2026-08-17"
+relatedModules: ["grammar-constrained-decoding-structured-output"]
+---
+
+## Question
+How do automated RAG evaluation frameworks mathematically formulate Faithfulness (verifying response facts against retrieved context) and Context Precision, and how are bias/hallucination risks controlled when using LLM-as-a-Judge?
+
+
+## Quick Answer
+**Faithfulness** is computed as the fraction of a response's individual claims that can be verified as directly supported by the retrieved context, while **Context Precision** is computed as the fraction of retrieved chunks that were actually relevant to answering the question — and both are typically scored by prompting a separate judge LLM to make each individual verification, with bias controlled through claim-decomposition and multi-sample aggregation rather than a single holistic judgment.
+
+## Detailed Answer
+**Faithfulness** targets hallucination: does the response say only things the retrieved context actually supports? The standard formulation first **decomposes the response into atomic claims** (a step itself usually done by an LLM), then checks each claim against the retrieved context, and computes:
+
+`Faithfulness = (number of claims supported by context) / (total number of claims)`
+
+Decomposing into atomic claims matters because judging an entire response holistically ("is this response faithful, yes/no?") is a much noisier, coarser signal than checking each specific factual assertion — a response can be 90% accurate and 10% fabricated, and holistic judgment tends to miss that the way per-claim decomposition doesn't.
+
+**Context Precision** targets retrieval quality rather than generation quality: of the chunks the retriever actually pulled, how many were relevant to the question? It's computed similarly to information-retrieval precision, but weighted by rank (relevant chunks that appear earlier in the ranked list count more, since they're more likely to actually influence the LLM's generation):
+
+`Context Precision@K = Σ (precision@k × relevance_k) / (total relevant items in top K)`
+
+where `relevance_k` is a binary judgment (again typically from an LLM judge) of whether the chunk at rank k is relevant to the query.
+
+**Controlling LLM-as-a-Judge bias and hallucination** in both metrics relies on a few concrete techniques: decomposing into atomic sub-judgments (claim-level, chunk-level) rather than one holistic score, since smaller judgment units are individually easier for the judge model to verify correctly; using a **different, typically stronger** model as judge than the one being evaluated, to reduce self-preference bias; running the judge multiple times and aggregating (majority vote or averaging) to reduce variance from any single judgment call; and constraining the judge's output format (e.g., forcing a structured yes/no/uncertain per claim) rather than free-form reasoning, which reduces the judge's own tendency to rationalize a plausible-sounding but wrong verdict.
+
+| Metric | Formula (informal) | What it measures |
+|--------|----------------------|-------------------|
+| Faithfulness | Supported claims ÷ total claims | Response grounding in retrieved context |
+| Context Precision | Rank-weighted relevant chunks ÷ total relevant in top K | Retrieval quality (signal-to-noise of retrieved set) |
+
+## Production Implications
+- Log the **atomic claims and their individual verdicts**, not just the aggregate score — this makes it possible to trace exactly which part of a response was unsupported, rather than just knowing the response "scored low."
+- Judge-model drift is real: re-running the same eval suite after a judge model update can shift scores even if the RAG pipeline hasn't changed, so pin judge model versions for comparable benchmarking.
+- Low Context Precision with high Faithfulness suggests the retriever is over-fetching (noisy retrieval) but the generator is still disciplined about only using what's relevant — a different fix (retrieval tuning) than low Faithfulness with high Context Precision, which points at generation-side hallucination despite good retrieval.
+- Combine automated LLM-judge scores with periodic human spot-checks on a sample, since judge bias can be systematic and consistent, not just random noise that averages out.
+
+<Callout variant="tip" title="Key Takeaways">
+Decomposing responses and retrieved chunks into atomic, individually verifiable units is what makes LLM-as-a-Judge scoring for RAG both actionable and resistant to the coarse, hand-wavy bias that holistic judgments invite.
+</Callout>
+

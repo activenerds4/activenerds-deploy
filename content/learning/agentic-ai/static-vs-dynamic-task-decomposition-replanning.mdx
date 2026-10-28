@@ -1,0 +1,35 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "static-vs-dynamic-task-decomposition-replanning"
+order: 12
+level: "beginner"
+format: "article"
+title: "Static vs. Dynamic Task Decomposition: Plan-and-Solve vs. Runtime Re-planning"
+description: "Static decomposition (Plan-and-Solve) commits to a full step list before any tool runs; dynamic re-planning revises the plan mid-execution when telemetry — repeated tool failures, contradictory observations, or a stalled step — signals the plan no longer fits reality."
+question: "What are the structural differences between static step-by-step task decomposition (e.g., Plan-and-Solve) and dynamic re-planning during tool execution, and what runtime telemetry signals that a plan needs to be discarded?"
+domain: "Task Decomposition"
+tags: ["Task Decomposition", "Planning", "TaskDecomposition", "DAG"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Static vs Dynamic Task Decomposition | AI Agents Guide"
+metaDescription: "Learn Static vs. Dynamic Task Decomposition: Plan-and-Solve vs. Runtime Re-planning with architecture patterns, practical configurations, and next steps"
+publishDate: "2026-06-10"
+relatedModules: ["dag-task-decomposition-data-dependencies", "react-loop-thought-action-observation-state"]
+---
+
+## Question
+What are the structural differences between static step-by-step task decomposition (e.g., Plan-and-Solve) and dynamic re-planning during tool execution, and what runtime telemetry signals that a plan needs to be discarded?
+
+
+## Quick Answer
+Static decomposition (e.g. Plan-and-Solve) generates the full step-by-step plan up front and executes it in order without revisiting it; dynamic re-planning treats the plan as a hypothesis and rebuilds it mid-execution when runtime signals — repeated failures, an observation that contradicts an earlier assumption, or a step that can't make progress — show it no longer matches reality.
+
+## Detailed Answer
+**Plan-and-Solve** style decomposition asks the model to produce the entire sequence of sub-tasks before any tool call happens, then executes that list step by step, trusting each step is still valid by the time it's reached. This is simple and cheap — one planning call instead of many — but it's brittle whenever the world changes between planning and execution: a file that was supposed to exist doesn't, an API returns a different shape than expected, or step 3 turns out to depend on information only step 5 discovers.
+
+**Dynamic re-planning** treats the plan as provisional. After each step (or after a step fails), the runtime re-evaluates whether the remaining plan is still sound, and can discard or regenerate it if not. The trigger for that re-evaluation is runtime telemetry, not vibes — concretely: a tool call that fails more than once or twice in a row on the same step, an observation whose content directly contradicts an assumption baked into a later step, a step that produces no forward progress after a bounded number of attempts (a loop-detection signal), or a validation failure that repeats even after the model has tried to correct it. Any of these should trip a "replan" branch in the orchestrator rather than letting the agent keep executing a plan it's already invalidated.
+
+<Callout variant="tip" title="Key Takeaways">
+Static plans are fine for short, predictable tasks; anything involving unreliable tools or incomplete upfront information needs explicit telemetry-driven triggers for discarding and rebuilding the plan mid-run.
+</Callout>
+

@@ -1,0 +1,52 @@
+---
+pathSlug: "docker"
+moduleSlug: "why-oom-killer-kills-the-wrong-container-process"
+order: 39
+level: "expert"
+format: "article"
+title: "cgroup OOM Killing: Why the Kernel Kills the Wrong Process in Your Container"
+description: "The kernel scores every process in a cgroup's memory limit by oom_score_adj and RSS, and PID 1 inside the container's PID namespace often ends up with a low..."
+question: "Your Go application's final image is 900MB because it includes the full compiler toolchain. Design a multi-stage build that resolves this, and explain precisely what gets carried between stages and what gets discarded."
+domain: "Image Engineering"
+tags: ["Operations", "cgroups", "OOM Killer", "MultiStageBuilds", "BuildArtifacts"]
+estimatedMinutes: 12
+xpValue: 25
+seoTitle: "cgroup OOM Killing: Why the Wrong PID Dies | Docker Guide"
+metaDescription: "Learn how cgroup-aware OOM killing and oom_score_adj decide which process dies under memory pressure, with diagnostic commands for production incidents"
+publishDate: "2026-07-14"
+relatedModules: ["cgroups-memory-accounting-page-cache", "cpu-throttling-under-cfs-quotas"]
+---
+
+## Question
+Your Go application's final image is 900MB because it includes the full compiler toolchain. Design a multi-stage build that resolves this, and explain precisely what gets carried between stages and what gets discarded.
+
+
+## Quick Answer
+When a container's cgroup hits its memory limit, the kernel doesn't necessarily kill the biggest memory consumer — it kills the process with the worst combined score of `oom_score_adj` and memory usage *within that cgroup*, and PID 1's role inside the container's PID namespace can skew which process that ends up being.
+
+
+## Detailed Answer
+Under `cgroups v2`, memory limits are enforced per-cgroup, and when a container's cgroup crosses its `memory.max`, the kernel's OOM killer is scoped to **only the processes inside that cgroup** — it will never reach outside to kill an unrelated host process, but within the cgroup it picks a target using each process's `oom_score`, which is derived from RSS usage adjusted by `oom_score_adj`. Processes running as PID 1 inside a container's PID namespace are frequently a lightweight init/wrapper (e.g., `tini`, a shell, or an entrypoint script) rather than the actual memory-hungry application — if that wrapper process has a lower adjusted score than expected, or if the real application forked into multiple processes each individually under the "biggest single consumer" threshold, the kernel can end up killing a supporting process instead of the true offender, corrupting application state without actually freeing enough memory to resolve the pressure. This is compounded by the fact that `docker stats` reports cgroup-aggregate memory, not per-process attribution, so the dashboard telling you "the container is at 300MB" gives no visibility into which single process inside it is actually driving the kill decision.
+
+## Production Implications
+- Run `cat /proc/<pid>/oom_score` and `/proc/<pid>/oom_score_adj` for every process inside the container's PID namespace *before* an incident, not during one — you need a baseline to know what "wrong" looks like
+- Use a proper init process (`tini`, `dumb-init`) as PID 1 specifically because ad-hoc shell wrappers behave unpredictably under reaping and signal forwarding during an OOM event
+- Check `dmesg | grep -i "killed process"` for the actual PID and comm name the kernel selected — don't assume it was your main process
+- Prefer one process per container where possible; multi-process containers make OOM attribution genuinely ambiguous
+
+```bash
+# Inspect OOM scoring for every process inside a running container's PID namespace
+for pid in $(docker exec <container> ps -eo pid --no-headers); do
+  echo "PID $pid: score=$(docker exec <container> cat /proc/$pid/oom_score 2>/dev/null) adj=$(docker exec <container> cat /proc/$pid/oom_score_adj 2>/dev/null)"
+done
+
+# Confirm which process the kernel actually killed
+dmesg -T | grep -i "killed process"
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+`docker stats` shows you the cgroup's aggregate memory, not who's actually responsible — when OOM kills happen, go straight to `dmesg` and per-process `oom_score` rather than trusting that the container's "main" process was the one targeted.
+</Callout>
+
+---

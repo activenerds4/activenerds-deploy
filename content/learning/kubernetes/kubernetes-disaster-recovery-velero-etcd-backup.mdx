@@ -1,0 +1,310 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "kubernetes-disaster-recovery-velero-etcd-backup"
+order: 12
+level: "advanced"
+format: "article"
+title: "Kubernetes Disaster Recovery: Cluster Backup, etcd Snapshots, and Velero"
+description: "A complete DR strategy has three layers — GitOps (cluster config in Git), Velero (PVC data backup), and infrastructure-as-code (cluster rebuild automation) —..."
+question: "How do you design a comprehensive disaster recovery strategy for Kubernetes using etcd snapshots for control plane state and Velero for persistent volume backups?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Disaster Recovery", "Velero", "Backup"]
+estimatedMinutes: 7
+xpValue: 20
+seoTitle: "Kubernetes Disaster Recovery: Cluster Backup, | K8s Guide"
+metaDescription: "Learn Kubernetes Disaster Recovery: Cluster Backup, etcd Snapshots, and Velero with architecture patterns, practical configurations, and step-by-step implement"
+publishDate: "2026-05-04"
+relatedModules: ["zero-downtime-cluster-upgrades-kubeadm", "cicd-pipeline-security-scanning-compliance"]
+---
+
+## Question
+How do you design a comprehensive disaster recovery strategy for Kubernetes using etcd snapshots for control plane state and Velero for persistent volume backups?
+
+## Quick Answer
+A complete DR strategy has three layers — GitOps (cluster config in Git), Velero (PVC data backup), and infrastructure-as-code (cluster rebuild automation) — with regular tested restore drills to verify it actually works.
+
+
+## Detailed Answer
+## DR Layers
+```
+Layer 1: Configuration Recovery (GitOps)
+  → All K8s manifests in Git → can redeploy to new cluster in minutes
+  → ArgoCD/Flux re-syncs entire cluster state from Git automatically
+  → RTO: ~15 minutes for stateless apps
+  → RPO: Last Git commit (effectively zero for config)
+
+Layer 2: Data Recovery (Velero + AWS Backup)
+  → PVC snapshots via Velero → stored in S3
+  → EBS snapshots via AWS Backup → point-in-time recovery
+  → RTO: 30-60 minutes (restore + verify)
+  → RPO: Last backup (typically 1-6 hours)
+
+Layer 3: Infrastructure Recovery (Terraform)
+  → EKS cluster, VPC, node groups defined in Terraform
+  → Can rebuild entire infrastructure from scratch
+  → RTO: 20-30 minutes for cluster provisioning
+  → RPO: N/A (infrastructure is stateless config)
+```
+
+## Velero Setup and Configuration
+```bash
+# Install Velero with AWS S3 backend
+# First create S3 bucket and IAM role for Velero
+
+# IAM policy for Velero (attach to IRSA role)
+aws iam create-policy \
+  --policy-name VeleroPolicy \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": [
+          "ec2:DescribeVolumes",
+          "ec2:DescribeSnapshots",
+          "ec2:CreateTags",
+          "ec2:CreateVolume",
+          "ec2:CreateSnapshot",
+          "ec2:DeleteSnapshot"
+        ],
+        "Resource": "*"
+      },
+      {
+        "Effect": "Allow",
+        "Action": [
+          "s3:GetObject",
+          "s3:DeleteObject",
+          "s3:PutObject",
+          "s3:AbortMultipartUpload",
+          "s3:ListMultipartUploadParts"
+        ],
+        "Resource": "arn:aws:s3:::my-velero-backups/*"
+      },
+      {
+        "Effect": "Allow",
+        "Action": ["s3:ListBucket"],
+        "Resource": "arn:aws:s3:::my-velero-backups"
+      }
+    ]
+  }'
+
+# Install Velero via Helm with IRSA
+helm install velero vmware-tanzu/velero \
+  --namespace velero \
+  --create-namespace \
+  --set configuration.provider=aws \
+  --set configuration.backupStorageLocation.bucket=my-velero-backups \
+  --set configuration.backupStorageLocation.config.region=us-east-1 \
+  --set configuration.volumeSnapshotLocation.config.region=us-east-1 \
+  --set serviceAccount.server.annotations."eks\.amazonaws\.com/role-arn"=\
+    arn:aws:iam::123456789012:role/VeleroRole \
+  --set initContainers[0].name=velero-plugin-for-aws \
+  --set initContainers[0].image=velero/velero-plugin-for-aws:v1.9.0 \
+  --set initContainers[0].volumeMounts[0].mountPath=/target \
+  --set initContainers[0].volumeMounts[0].name=plugins
+```
+
+## Backup Schedules
+```yaml
+# Schedule 1: Full cluster backup every 6 hours
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: cluster-backup-6h
+  namespace: velero
+spec:
+  schedule: "0 */6 * * *"
+  template:
+    includedNamespaces:
+    - "*"
+    excludedNamespaces:
+    - velero
+    - kube-system                   # Usually no need to back up system namespace
+    includeClusterResources: true   # PVs, StorageClasses, ClusterRoles
+    snapshotVolumes: true           # Snapshot EBS volumes
+    storageLocation: default
+    volumeSnapshotLocations:
+    - default
+    ttl: 720h                       # Retain for 30 days
+    labelSelector:
+      matchExpressions:
+      - key: backup-exclude
+        operator: DoesNotExist      # Skip pods labeled backup-exclude=true
+
+---
+# Schedule 2: Critical namespace backup every hour
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: production-backup-1h
+  namespace: velero
+spec:
+  schedule: "0 * * * *"
+  template:
+    includedNamespaces:
+    - production
+    snapshotVolumes: true
+    storageLocation: default
+    ttl: 168h                       # Retain for 7 days
+```
+
+## Backup and Restore Operations
+```bash
+# Manual backup before risky operation
+velero backup create pre-upgrade-backup \
+  --include-namespaces production \
+  --snapshot-volumes \
+  --wait
+
+# Check backup status
+velero backup describe pre-upgrade-backup
+velero backup logs pre-upgrade-backup
+
+# List all backups
+velero backup get
+
+# Restore entire namespace
+velero restore create \
+  --from-backup pre-upgrade-backup \
+  --include-namespaces production \
+  --wait
+
+# Restore specific resources only
+velero restore create \
+  --from-backup pre-upgrade-backup \
+  --include-resources deployments,services \
+  --namespace-mappings production:production-restored
+
+# Check restore status
+velero restore describe <restore-name>
+velero restore logs <restore-name>
+```
+
+## Multi-Region DR with Cross-Region Replication
+```hcl
+# Terraform — S3 bucket with cross-region replication for Velero backups
+resource "aws_s3_bucket" "velero_primary" {
+  bucket = "my-velero-backups-us-east-1"
+  provider = aws.us_east_1
+}
+
+resource "aws_s3_bucket" "velero_dr" {
+  bucket = "my-velero-backups-us-west-2"
+  provider = aws.us_west_2
+}
+
+resource "aws_s3_bucket_replication_configuration" "velero" {
+  provider = aws.us_east_1
+  bucket   = aws_s3_bucket.velero_primary.id
+  role     = aws_iam_role.replication.arn
+
+  rule {
+    id     = "replicate-to-dr-region"
+    status = "Enabled"
+
+    destination {
+      bucket        = aws_s3_bucket.velero_dr.arn
+      storage_class = "STANDARD_IA"  # Cheaper for DR storage
+    }
+  }
+}
+```
+
+## DR Runbook — Complete Cluster Recovery
+```bash
+#!/bin/bash
+# DR Runbook: Restore production cluster after catastrophic failure
+
+echo "=== STEP 1: Provision new EKS cluster ==="
+cd terraform/eks
+terraform init
+terraform apply -var="cluster_name=production-dr" \
+  -var="region=us-west-2" \
+  -auto-approve
+
+echo "=== STEP 2: Configure kubectl ==="
+aws eks update-kubeconfig \
+  --name production-dr \
+  --region us-west-2
+
+echo "=== STEP 3: Install Velero ==="
+helm install velero vmware-tanzu/velero \
+  --namespace velero \
+  --create-namespace \
+  --values velero-values.yaml
+
+echo "=== STEP 4: Connect to backup storage ==="
+velero backup-location create default \
+  --provider aws \
+  --bucket my-velero-backups-us-west-2 \
+  --config region=us-west-2
+
+echo "=== STEP 5: Wait for backup sync ==="
+velero backup get                   # Wait until backups appear
+
+echo "=== STEP 6: Restore from latest backup ==="
+LATEST_BACKUP=$(velero backup get \
+  --output json | \
+  jq -r '.items | sort_by(.metadata.creationTimestamp) | last | .metadata.name')
+
+velero restore create dr-restore \
+  --from-backup $LATEST_BACKUP \
+  --wait
+
+echo "=== STEP 7: Verify restoration ==="
+kubectl get pods -A
+kubectl get pvc -A
+
+echo "=== STEP 8: Bootstrap ArgoCD ==="
+kubectl apply -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml -n argocd
+# ArgoCD auto-syncs remaining config from Git
+
+echo "=== STEP 9: Update DNS ==="
+# Point your domain to new cluster's load balancer
+NEW_LB=$(kubectl get svc -n ingress-nginx \
+  -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}')
+echo "Update DNS to point to: $NEW_LB"
+
+echo "=== DR Recovery Complete ==="
+```
+
+## DR Testing — Monthly Drill
+```bash
+# Test restore without affecting production
+# Use a separate namespace to validate backup integrity
+
+velero restore create test-restore-$(date +%Y%m%d) \
+  --from-backup production-backup-latest \
+  --namespace-mappings production:dr-test \
+  --include-namespaces production
+
+# Verify data integrity
+kubectl exec -it postgres-0 -n dr-test -- \
+  psql -U postgres -c "SELECT COUNT(*) FROM orders;"
+
+# Compare with production count
+kubectl exec -it postgres-0 -n production -- \
+  psql -U postgres -c "SELECT COUNT(*) FROM orders;"
+
+# Clean up test restore
+kubectl delete namespace dr-test
+```
+
+## DR Checklist
+| Item | Frequency | Tool | Owner |
+|---|---|---|---|
+| Full cluster backup | Every 6 hours | Velero | Automated |
+| Production namespace backup | Every 1 hour | Velero | Automated |
+| EBS snapshots | Every 6 hours | AWS Backup | Automated |
+| Backup integrity check | Daily | Velero describe | Automated |
+| Full restore drill | Monthly | Velero restore | Ops team |
+| Terraform plan (drift check) | Weekly | Terraform plan | Automated |
+| RTO/RPO verification | Quarterly | Restore drill | Ops team |
+| DR runbook review | Quarterly | Manual | Ops team |
+
+
+<Callout variant="tip" title="Key Takeaways">
+A DR strategy you've never tested is not a DR strategy — schedule monthly restore drills into a separate namespace or cluster to verify your backups are valid and your team knows the runbook.
+</Callout>
+
+---

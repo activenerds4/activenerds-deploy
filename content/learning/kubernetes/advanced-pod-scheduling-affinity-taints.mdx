@@ -1,0 +1,514 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "advanced-pod-scheduling-affinity-taints"
+order: 45
+level: "advanced"
+format: "article"
+title: "Advanced Pod Scheduling: Affinity, Taints, and Topology"
+description: "In-depth architectural breakdown and operational implementation for Advanced Pod Scheduling: Affinity, Taints, and Topology."
+question: "You have a cluster with three node types: GPU nodes (expensive), high-memory nodes, and standard nodes. ML training jobs must run only on GPU nodes, memory-intensive analytics must prefer high-memory nodes, and web frontends must be spread across standard nodes in different AZs. Also, the GPU nodes should not accept any non-ML workloads. Implement this scheduling strategy."
+domain: "Workloads & Scheduling"
+tags: ["Scheduling", "Affinity", "Taints", "Topology", "Resource Management"]
+estimatedMinutes: 30
+xpValue: 20
+seoTitle: "Advanced Pod Scheduling: Affinity, Taints, an | K8s Guide"
+metaDescription: "Learn Advanced Pod Scheduling: Affinity, Taints, and Topology with architecture patterns, practical configurations, and step-by-step implementation."
+publishDate: "2026-05-07"
+relatedModules: []
+---
+
+**Prerequisite knowledge:** Nodes, Labels, Resource requests/limits, basic scheduling concepts
+
+---
+
+## Question
+You have a cluster with three node types: GPU nodes (expensive), high-memory nodes, and standard nodes. ML training jobs must run only on GPU nodes, memory-intensive analytics must prefer high-memory nodes, and web frontends must be spread across standard nodes in different AZs. Also, the GPU nodes should not accept any non-ML workloads. Implement this scheduling strategy.
+
+
+## Quick Answer
+Use **taints** on GPU nodes to repel non-ML workloads (with `NoSchedule`), **tolerations** on ML jobs to accept the GPU taint, **nodeAffinity** to target specific node types, **podAntiAffinity** with `topologyKey: topology.kubernetes.io/zone` to spread frontends across AZs, and **topology spread constraints** for fine-grained distribution control.
+
+---
+
+
+## Detailed Answer
+## ️ Cluster Node Layout
+```
+Cluster Nodes:
+┌─────────────────────────────────────────────────────────────┐
+│  GPU Nodes (4x)              High-Memory Nodes (6x)         │
+│  label: node-type=gpu         label: node-type=high-memory  │
+│  taint: gpu=true:NoSchedule  taint: (none)                  │
+│  GPU: 8x A100                RAM: 512Gi                     │
+│  AZ: us-east-1a/1b           AZ: us-east-1a/1b/1c           │
+│                                                             │
+│  Standard Nodes (20x)                                       │
+│  label: node-type=standard                                  │
+│  taint: (none)                                              │
+│  AZ: us-east-1a/1b/1c (balanced)                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## ️ Step-by-Step Implementation
+*Step 1: Label and Taint Nodes*
+```bash
+# Label GPU nodes
+for node in gpu-node-01 gpu-node-02 gpu-node-03 gpu-node-04; do
+  kubectl label node $node \
+    node-type=gpu \
+    accelerator=nvidia-a100 \
+    topology.kubernetes.io/zone=us-east-1a
+
+  # Taint: Only ML workloads with toleration can schedule here
+  kubectl taint node $node \
+    gpu=true:NoSchedule       # NoSchedule: new pods rejected without toleration
+                              # NoExecute: existing pods also evicted
+                              # PreferNoSchedule: soft version of NoSchedule
+done
+
+# Label high-memory nodes
+for node in highmem-node-01 highmem-node-02 highmem-node-03; do
+  kubectl label node $node \
+    node-type=high-memory \
+    memory-tier=xlarge
+done
+
+# Label standard nodes with AZ distribution
+kubectl label node standard-node-01 node-type=standard topology.kubernetes.io/zone=us-east-1a
+kubectl label node standard-node-02 node-type=standard topology.kubernetes.io/zone=us-east-1a
+kubectl label node standard-node-03 node-type=standard topology.kubernetes.io/zone=us-east-1b
+kubectl label node standard-node-04 node-type=standard topology.kubernetes.io/zone=us-east-1b
+kubectl label node standard-node-05 node-type=standard topology.kubernetes.io/zone=us-east-1c
+kubectl label node standard-node-06 node-type=standard topology.kubernetes.io/zone=us-east-1c
+# ... continue for all 20 standard nodes
+
+# Verify node labels and taints
+kubectl get nodes -o custom-columns=\
+"NAME:.metadata.name,\
+TYPE:.metadata.labels.node-type,\
+ZONE:.metadata.labels.topology\.kubernetes\.io/zone,\
+TAINTS:.spec.taints[*].key"
+```
+
+*Step 2: ML Training Job — GPU Nodes Only*
+```yaml
+# ml-training-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-training-resnet50
+  namespace: ml-platform
+spec:
+  parallelism: 4              # Run on all 4 GPU nodes simultaneously
+  completions: 4
+  template:
+    spec:
+      # REQUIRED: Tolerate the GPU taint to schedule on GPU nodes
+      tolerations:
+        - key: "gpu"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+
+      # REQUIRED: Target GPU nodes specifically
+      affinity:
+        nodeAffinity:
+          # Hard requirement: MUST be on GPU node
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values: ["gpu"]
+                  - key: accelerator
+                    operator: In
+                    values: ["nvidia-a100"]    # Specific GPU model required
+
+          # Soft preference: prefer nodes with fewer running jobs
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              preference:
+                matchExpressions:
+                  - key: workload-count
+                    operator: Lt
+                    values: ["2"]
+
+        # Spread across different GPU nodes (one job per node)
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  job-name: ml-training-resnet50
+              topologyKey: kubernetes.io/hostname  # One pod per node
+
+      containers:
+        - name: training
+          image: registry.mycompany.com/ml-trainer:latest
+          command: ["python", "train.py", "--model=resnet50", "--epochs=100"]
+
+          # Request GPU resources
+          resources:
+            requests:
+              cpu: "8"
+              memory: "64Gi"
+              nvidia.com/gpu: "1"     # Request 1 GPU per pod
+            limits:
+              cpu: "16"
+              memory: "128Gi"
+              nvidia.com/gpu: "1"     # GPU limits must equal requests
+
+          env:
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0"
+            - name: NCCL_DEBUG
+              value: "INFO"
+
+      restartPolicy: OnFailure
+
+      # Give ML jobs priority over regular workloads
+      priorityClassName: ml-high-priority
+```
+
+*Step 3: Analytics — Prefer High-Memory Nodes*
+```yaml
+# analytics-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-engine
+  namespace: analytics
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: analytics-engine
+  template:
+    metadata:
+      labels:
+        app: analytics-engine
+    spec:
+      affinity:
+        nodeAffinity:
+          # Soft preference: prefer high-memory nodes
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100           # Highest possible weight — strongly prefer this
+              preference:
+                matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values: ["high-memory"]
+            - weight: 50            # Fallback: standard nodes are acceptable
+              preference:
+                matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values: ["standard"]
+
+          # Hard requirement: NEVER schedule on GPU nodes
+          # (GPU nodes are expensive and reserved for ML)
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-type
+                    operator: NotIn
+                    values: ["gpu"]     # Exclude GPU nodes
+
+        # Spread analytics pods across nodes
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: analytics-engine
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: analytics
+          image: registry.mycompany.com/analytics:latest
+          resources:
+            requests:
+              cpu: "4"
+              memory: "128Gi"       # High memory workload
+            limits:
+              cpu: "8"
+              memory: "256Gi"
+```
+
+*Step 4: Frontend — Spread Across AZs with Topology Spread*
+```yaml
+# frontend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-frontend
+  namespace: production
+spec:
+  replicas: 12           # 4 per AZ (3 AZs × 4 pods)
+  selector:
+    matchLabels:
+      app: web-frontend
+  template:
+    metadata:
+      labels:
+        app: web-frontend
+    spec:
+      # Topology Spread Constraints (Kubernetes 1.19+)
+      # More expressive than podAntiAffinity for spreading
+      topologySpreadConstraints:
+        # Constraint 1: Spread evenly across AZs
+        - maxSkew: 1                  # Max difference in pod count between AZs
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule  # Hard constraint
+          labelSelector:
+            matchLabels:
+              app: web-frontend
+          # With 12 replicas and 3 AZs: 4 pods per AZ
+          # maxSkew: 1 means AZs can have 4 or 5 pods, but not 3 and 6
+
+        # Constraint 2: Spread across nodes within each AZ
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway   # Soft constraint
+          labelSelector:
+            matchLabels:
+              app: web-frontend
+
+      affinity:
+        # Hard requirement: only standard nodes for frontend
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values: ["standard"]
+
+      containers:
+        - name: frontend
+          image: registry.mycompany.com/frontend:latest
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+```
+
+*Step 5: Priority Classes (Ensuring ML Jobs Preempt Lower Priority)*
+```yaml
+# priority-classes.yaml
+
+# Highest priority: ML training (preempts everything else if needed)
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ml-high-priority
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "ML training jobs — highest priority, can preempt other workloads"
+---
+# High priority: Production workloads
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: production-high
+value: 100000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "Production web services"
+---
+# Default priority: Standard workloads
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: default-priority
+value: 1000
+globalDefault: true
+description: "Default priority for all workloads"
+---
+# Low priority: Batch jobs and background tasks
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: batch-low
+value: 100
+globalDefault: false
+preemptionPolicy: Never           # Cannot preempt others
+description: "Batch jobs — lowest priority, never preempt"
+```
+
+*Step 6: Descheduler — Continuously Rebalance Pods*
+```yaml
+# descheduler-policy.yaml
+# The descheduler runs periodically and evicts pods that violate
+# scheduling constraints (e.g., due to cluster changes after initial scheduling)
+
+apiVersion: "descheduler/v1alpha1"
+kind: "DeschedulerPolicy"
+strategies:
+  # Remove pods that violated their node affinity after node label changes
+  RemovePodsViolatingNodeAffinity:
+    enabled: true
+    params:
+      nodeAffinityType:
+        - requiredDuringSchedulingIgnoredDuringExecution
+
+  # Rebalance pods that are violating topology spread constraints
+  RemovePodsViolatingTopologySpreadConstraint:
+    enabled: true
+    params:
+      constraints:
+        - DoNotSchedule
+
+  # Remove duplicate pods on the same node (fix anti-affinity violations)
+  RemoveDuplicates:
+    enabled: true
+
+  # Evict pods from over-utilized nodes
+  LowNodeUtilization:
+    enabled: true
+    params:
+      nodeResourceUtilizationThresholds:
+        thresholds:
+          cpu: 20          # Node is underutilized if CPU < 20%
+          memory: 20
+          pods: 20
+        targetThresholds:
+          cpu: 50          # Target utilization after descheduling
+          memory: 50
+          pods: 50
+```
+
+```bash
+# Deploy descheduler as a CronJob
+helm repo add descheduler https://kubernetes-sigs.github.io/descheduler/
+helm install descheduler descheduler/descheduler \
+  --namespace kube-system \
+  --set schedule="*/30 * * * *"   # Run every 30 minutes
+```
+
+*Step 7: Verify Scheduling Decisions*
+```bash
+# Check where pods are scheduled
+kubectl get pods -n ml-platform -o wide
+# Verify all ml-training pods are on GPU nodes
+
+kubectl get pods -n production -o wide | grep web-frontend
+# Verify pods are spread across AZs
+
+# Check why a pod is not scheduling (Pending state)
+kubectl describe pod <pending-pod> | grep -A 20 "Events:"
+# Common messages:
+# "0/26 nodes are available: 4 node(s) had taint {gpu: true}..."
+# "0/26 nodes are available: 6 node(s) didn't match node affinity..."
+# "0/26 nodes are available: topology.kubernetes.io/zone, maxSkew=1..."
+
+# Simulate scheduling without actually creating pods
+kubectl apply --dry-run=server -f ml-training-job.yaml
+
+# Use kube-scheduler simulator for complex scenarios
+# https://github.com/kubernetes-sigs/kube-scheduler-simulator
+```
+
+---
+
+## ️ Scheduling Mechanism Comparison
+
+| Mechanism | Type | Use Case | Flexibility |
+|---|---|---|---|
+| **nodeSelector** | Hard | Simple label matching | Low |
+| **nodeAffinity** | Hard/Soft | Complex label expressions | Medium |
+| **podAffinity** | Hard/Soft | Co-locate pods | Medium |
+| **podAntiAffinity** | Hard/Soft | Spread pods apart | Medium |
+| **Taints + Tolerations** | Hard/Soft | Reserve nodes for workloads | High |
+| **Topology Spread** | Hard/Soft | Even distribution across zones | High |
+| **Priority + Preemption** | Hard | Resource contention resolution | High |
+| **Descheduler** | Ongoing | Post-scheduling rebalancing | High |
+
+---
+
+## ️ Common Mistakes & Misconceptions
+- **"`requiredDuringScheduling` rules are checked after scheduling too."** — The `IgnoredDuringExecution` suffix means node label changes after scheduling are ignored. Pods won't be evicted if node labels change. Use the descheduler to fix this.
+- **"Taints alone prevent unauthorized workloads."** — A taint with `NoSchedule` prevents NEW pods without a toleration. Add `NoExecute` to also evict existing pods that don't have the toleration.
+- **"Topology spread constraints replace podAntiAffinity."** — They complement each other. Topology spread is better for even distribution (`maxSkew`). PodAntiAffinity is better for absolute co-location rules.
+- **"`preferredDuringScheduling` is always respected."** — It is a best-effort preference. Under resource pressure, the scheduler may ignore preferences entirely to schedule the pod. Don't rely on soft rules for security or compliance.
+
+---
+
+<Callout variant="tip" title="Key Takeaways">
+Advanced scheduling is a **layered system**: taints/tolerations control which nodes accept which workloads (the "reservation" layer), node affinity controls which nodes pods prefer or require (the "targeting" layer), pod affinity/anti-affinity controls pod-to-pod relationships (the "social" layer), and topology spread constraints ensure even distribution (the "balance" layer). Use `requiredDuringScheduling` for correctness requirements (security, compliance, hardware) and `preferredDuringScheduling` for optimization (cost, latency).
+</Callout>
+
+---
+
+## Self-Assessment Checklist
+- [ ] Can you explain the difference between `NoSchedule`, `NoExecute`, and `PreferNoSchedule` taints?
+- [ ] Can you explain what `IgnoredDuringExecution` means in affinity rules?
+- [ ] Can you write a topology spread constraint that limits skew to 1 across AZs?
+- [ ] Can you describe when the descheduler is necessary and what it does?
+- [ ] Can you explain why `preferredDuringScheduling` rules can be ignored?
+
+
+---
+
+# Kubernetes Advanced Q&A Curriculum
+
+> **How to use this guide:** Each question is tagged, timed, and leveled. Use the Index to jump to a topic, or follow the progressive sequence from Q1 → Q60. Checkboxes let you track mastery. Three answer depths are provided per question: **Quick**, **Detailed**, and **Deep Dive**.
+
+---
+
+## 📋 Master Index
+
+| # | Question Summary | Level | Topic Tags | Time |
+|---|---|---|---|---|
+| Q1 | What is the Kubernetes API extension model? | Advanced | API, Extensions | 8 min |
+| Q2 | How do Validating vs. Mutating Admission Webhooks differ? | Advanced | Admission, Security | 10 min |
+| Q3 | How do you build a custom admission webhook from scratch? | Expert | Admission, API | 20 min |
+| Q4 | What is OPA/Gatekeeper and how does it extend admission control? | Expert | Security, Policy | 15 min |
+| Q5 | Scenario: Enforce image registry policy cluster-wide | Expert | Admission, Security | 15 min |
+| Q6 | How does etcd store Kubernetes state internally? | Advanced | etcd, Storage | 8 min |
+| Q7 | What are the key levers for etcd performance tuning? | Expert | etcd, Performance | 15 min |
+| Q8 | How do you benchmark and monitor etcd health in production? | Expert | etcd, Monitoring | 12 min |
+| Q9 | Scenario: etcd is slow — diagnose and fix it | Expert | etcd, Troubleshooting | 20 min |
+| Q10 | How do you design etcd topology for HA clusters? | Expert | etcd, HA | 15 min |
+| Q11 | What is Pod Security Admission (PSA) and how does it replace PSP? | Advanced | Security, Policy | 10 min |
+| Q12 | How do you implement Seccomp and AppArmor profiles in Kubernetes? | Expert | Security, Linux | 15 min |
+| Q13 | How do you harden the Kubernetes API server? | Expert | Security, API | 15 min |
+| Q14 | How do you implement mTLS between microservices in Kubernetes? | Expert | Security, Networking | 15 min |
+| Q15 | Scenario: A developer leaked credentials in a ConfigMap | Advanced | Security, Secrets | 12 min |
+| Q16 | Scenario: Design a secure RBAC setup for 3 teams | Advanced | Security, RBAC | 15 min |
+| Q17 | How do you scale Kubernetes control plane components? | Expert | Scaling, HA | 15 min |
+| Q18 | How does the Horizontal Pod Autoscaler work internally? | Advanced | Scaling, HPA | 10 min |
+| Q19 | How do you implement custom metrics for HPA scaling? | Expert | Scaling, Metrics | 15 min |
+| Q20 | What is KEDA and when should you use it over native HPA? | Expert | Scaling, KEDA | 12 min |
+| Q21 | Scenario: Cluster is running out of resources — what do you do? | Advanced | Scaling, Monitoring | 15 min |
+| Q22 | How do you manage and monitor 100+ clusters at scale? | Expert | Multi-cluster, Monitoring | 20 min |
+| Q23 | How do you tune kube-scheduler for large clusters? | Expert | Scheduling, Performance | 15 min |
+| Q24 | How do you optimize container startup time (cold start)? | Advanced | Performance, Pods | 10 min |
+| Q25 | How do you configure resource QoS classes and why does it matter? | Advanced | Performance, Resources | 10 min |
+| Q26 | How do CNI plugin choices affect network performance? | Expert | Networking, Performance | 15 min |
+| Q27 | Scenario: Stateless web app that scales on traffic | Advanced | Deployments, Scaling | 15 min |
+| Q28 | How do you implement zero-downtime deployments? | Advanced | Deployments, HA | 12 min |
+| Q29 | Scenario: Pod is stuck in Pending state | Intermediate | Troubleshooting, Scheduling | 10 min |
+| Q30 | Scenario: Stateful database across cluster updates | Advanced | Storage, StatefulSets | 15 min |
+| Q31 | How do you implement Velero for cluster backup and DR? | Expert | DR, Storage | 15 min |
+| Q32 | How do you design a multi-cluster disaster recovery strategy? | Expert | DR, Multi-cluster | 20 min |
+| Q33 | Scenario: Design a geographically distributed multi-cluster setup | Expert | Multi-cluster, DR | 20 min |
+| Q34 | How do you manage microservice dependencies in Kubernetes? | Advanced | Microservices, Networking | 12 min |
+| Q35 | How does a service mesh (Istio/Linkerd) manage traffic? | Expert | Networking, Service Mesh | 15 min |
+| Q36 | How do you implement circuit breaking and retry logic? | Expert | Microservices, Resilience | 12 min |
+| Q37 | What are advanced Helm chart patterns (library charts, hooks)? | Advanced | Helm, Packaging | 12 min |
+| Q38 | How do you develop a custom Helm plugin? | Expert | Helm, Plugins | 20 min |
+| Q39 | How do you manage multi-environment Helm releases at scale? | Expert | Helm, GitOps | 15 min |
+| Q40 | Scenario: Build a Helm plugin that enforces chart standards | Expert | Helm, Policy | 20 min |
+
+---
+
+## 🔵 SECTION 1: Kubernetes API Extensions & Admission Controllers
+
+This section assumes you know: CRDs, basic RBAC, TLS concepts, basic Go or Python.
+
+---

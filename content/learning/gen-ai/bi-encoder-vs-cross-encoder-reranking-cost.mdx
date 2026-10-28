@@ -1,0 +1,47 @@
+---
+pathSlug: "gen-ai"
+moduleSlug: "bi-encoder-vs-cross-encoder-reranking-cost"
+order: 99
+level: "intermediate"
+format: "article"
+title: "Bi-Encoders vs. Cross-Encoders: Why Re-Ranking Costs Quadratic Attention"
+description: "Bi-Encoders embed queries and documents separately so millions of precomputed vectors can be compared instantly, while Cross-Encoders process the query and each document together through full self-attention, making them far more accurate but too expensive to run on an entire corpus."
+question: "Why are Bi-Encoders used for initial vector candidate generation while Cross-Encoders are reserved for re-ranking, and what are the quadratic self-attention costs ($O(N^2)$) associated with Cross-Encoder re-ranking?"
+domain: "RAG & Data Systems"
+tags: ["RAG & Data Systems", "Re-Ranking", "CrossEncoder", "BiEncoder", "ReRanking"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Bi-Encoders vs. Cross-Encoders: | LLM Guide"
+metaDescription: "Learn Bi-Encoders vs. Cross-Encoders: Why Re-Ranking Costs Quadratic Attention with the architectural trade-offs behind two-stage retrieval."
+publishDate: "2026-10-05"
+relatedModules: ["hybrid-search-bm25-dense-vector-rrf", "parent-document-retrieval-small-to-big-chunking"]
+---
+
+## Question
+Why are Bi-Encoders used for initial vector candidate generation while Cross-Encoders are reserved for re-ranking, and what are the quadratic self-attention costs ($O(N^2)$) associated with Cross-Encoder re-ranking?
+
+
+## Quick Answer
+**Bi-Encoders** embed the query and each document **independently**, so document embeddings can be precomputed once and compared to a query instantly at search time; **Cross-Encoders** feed the query and document **together** through full self-attention, which is far more accurate but requires a fresh forward pass per document — too expensive to run across an entire corpus, which is why it's reserved for re-ranking a small candidate set.
+
+## Detailed Answer
+A Bi-Encoder passes the query through the model to get one vector, and passes each document through the *same* model separately to get its own vector — the two never interact inside the model at all. Because documents are encoded independently of any particular query, their embeddings can be computed **once, offline**, and stored in a vector index. At search time, only the query needs a fresh forward pass; comparing it against millions of precomputed document vectors is then just a fast distance computation (dot product or cosine similarity), not a model inference call. This is what makes Bi-Encoders viable for **initial candidate generation** over an entire corpus.
+
+The cost of that speed is that the model never gets to reason about the query and a specific document *together* — it has to compress each one into a fixed vector in isolation, losing the fine-grained, token-level interactions (which query words relate to which document phrases) that often matter most for judging true relevance.
+
+A Cross-Encoder keeps the query and a single candidate document concatenated in the **same input sequence**, and runs the full transformer's self-attention across both simultaneously — every query token can attend directly to every document token, letting the model capture exactly the kind of fine-grained interaction a Bi-Encoder loses. This produces meaningfully better relevance judgments, but at a structural cost: self-attention's compute scales as `O(N²)` in sequence length, and here `N` is the **combined** length of query plus document. Critically, this full computation has to be **repeated from scratch for every single document** you want to score, because query and document were never encoded independently — there's no precomputed document vector to reuse.
+
+| | Bi-Encoder | Cross-Encoder |
+|---|---|---|
+| Query/document interaction | None — encoded separately | Full — joint self-attention |
+| Precomputable document vectors | Yes | No |
+| Cost per document at search time | Near-zero (vector comparison) | Full forward pass, O(N²) attention |
+| Typical role | Initial retrieval over full corpus | Re-ranking a small candidate set |
+
+Running a Cross-Encoder over an entire corpus of millions of documents per query would mean millions of full transformer forward passes per query — computationally infeasible at that scale. Running it over the 20–100 candidates a Bi-Encoder already narrowed things down to is cheap enough to do in real time, which is exactly why the two are used in sequence rather than as alternatives to each other.
+
+<Callout variant="tip" title="Key Takeaways">
+Bi-Encoders trade accuracy for scale by encoding independently; Cross-Encoders trade scale for accuracy by encoding jointly — using both in sequence gets the scale of one and the precision of the other.
+</Callout>
+
+---

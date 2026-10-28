@@ -1,0 +1,43 @@
+---
+pathSlug: "agentic-ai"
+moduleSlug: "memory-backends-tradeoffs-code-generation-agents"
+order: 39
+level: "intermediate"
+format: "article"
+title: "Key-Value Stores vs. Vector Search vs. Knowledge Graphs: Long-Term Memory for Code-Generation Agents"
+description: "Key-value stores give fast exact-match recall for facts like file locations, vector search surfaces semantically similar past code or errors, and knowledge graphs capture structural relationships like call graphs and dependencies — most code-generation agents need at least two of the three."
+question: "What are the trade-offs between using key-value state stores, semantic vector search, and structured knowledge graphs for long-term agent memory when building a code-generation agent?"
+domain: "Memory Systems"
+tags: ["Memory Systems", "Knowledge Graphs", "MemoryCompaction", "SemanticMemory", "Retrieval"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Memory Backends for Code-Gen Agents | AI Agents Guide"
+metaDescription: "Learn Key-Value vs. Vector Search vs. Knowledge Graphs: Long-Term Memory for Code-Generation Agents with architecture patterns and implementation details"
+publishDate: "2026-07-07"
+relatedModules: ["dual-layer-agent-memory-episodic-semantic", "state-reducers-concurrent-updates-agent-graphs"]
+---
+
+## Question
+What are the trade-offs between using key-value state stores, semantic vector search, and structured knowledge graphs for long-term agent memory when building a code-generation agent?
+
+
+## Quick Answer
+Key-value stores are fastest and cheapest for exact-match facts (a file's path, a variable's last known type), vector search is best for fuzzy "find something similar to this" recall (past bugs, similar functions), and knowledge graphs are the only option that natively represents structural relationships (what calls what, what imports what) — a serious code-generation agent typically combines at least two.
+
+## Detailed Answer
+**Key-value stores** are the right tool when the lookup is exact and the agent already knows the key — "what's the current content of `config.py`," "what was the last test result for this function." They're cheap, fast, and trivial to reason about, but they're useless for anything fuzzy: you can't ask a key-value store "have I seen an error like this before" unless you already know the exact key to look under.
+
+**Semantic vector search** solves exactly that gap — embeddings let you ask "what's similar to this," which is valuable for surfacing a past fix for a comparable bug, a similar function elsewhere in the codebase, or related documentation, even when the wording doesn't match. Its weakness is that similarity is not the same as structural correctness: a vector search can surface a function that *looks* similar in prose/embedding space but has no actual call relationship to the code being edited, and it has no native way to answer relational questions like "what would break if I change this function's signature."
+
+**Knowledge graphs** are the only backend that natively models structure — nodes for functions, classes, and modules, edges for "calls," "imports," "inherits from," "tested by." This is exactly what a code-generation agent needs to answer questions like "if I change this function's return type, which callers need updating" or "what's the full dependency chain for this module" — queries that are naturally graph traversals, not similarity searches or key lookups. The cost is that keeping the graph accurate requires either static analysis tooling (parsing an AST to build/maintain edges) or careful, ongoing extraction, which is more engineering investment than the other two.
+
+| Backend | Best for | Weak at | Typical use in code-gen |
+|---------|----------|---------|--------------------------|
+| Key-value store | Exact-match facts, current file state | Fuzzy or relational queries | "What's in this file right now" |
+| Vector search | Similar past code, bugs, docs | Structural/relational accuracy | "Have I fixed something like this before" |
+| Knowledge graph | Call graphs, dependencies, impact analysis | Fuzzy similarity, upkeep cost | "What breaks if I change this signature" |
+
+<Callout variant="tip" title="Key Takeaways">
+Pick the backend to match the *shape* of the question the agent needs to answer — exact-match, fuzzy-similar, or structural — and expect a production code-generation agent to need more than one.
+</Callout>
+

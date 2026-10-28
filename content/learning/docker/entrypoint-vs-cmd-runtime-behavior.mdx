@@ -1,0 +1,43 @@
+---
+pathSlug: "docker"
+moduleSlug: "entrypoint-vs-cmd-runtime-behavior"
+order: 9
+level: "beginner"
+format: "article"
+title: "ENTRYPOINT vs. CMD: Why Removing CMD Changes Runtime Behavior"
+description: "ENTRYPOINT sets the fixed command a container always runs; CMD supplies its default arguments. Drop CMD and you lose the overridable default — not the command."
+question: "Your team's Dockerfile uses both `ENTRYPOINT` and `CMD`. A teammate wants to remove `CMD` because \"it seems redundant.\" Explain why removing it would change the container's runtime behavior and give a scenario where this distinction matters operationally."
+domain: "Image Engineering"
+tags: ["Image Engineering", "Dockerfile", "CMD", "ENTRYPOINT"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "ENTRYPOINT vs. CMD: Why Removing CMD Changes | Docker Guide"
+metaDescription: "Learn ENTRYPOINT vs. CMD: Why Removing CMD Changes the Container's Runtime Behavior with architecture patterns, practical configurations, and step-by-step"
+publishDate: "2026-07-13"
+relatedModules: ["docker-layer-caching-instant-rebuilds", "bind-mounts-vs-copy-dev-vs-production"]
+---
+
+## Question
+Your team's Dockerfile uses both `ENTRYPOINT` and `CMD`. A teammate wants to remove `CMD` because "it seems redundant." Explain why removing it would change the container's runtime behavior and give a scenario where this distinction matters operationally.
+
+
+## Quick Answer
+`ENTRYPOINT` sets the fixed executable a container always runs; `CMD` supplies its **default arguments**, which anyone running the container can override. Removing `CMD` doesn't remove the redundancy the teammate assumes — it removes the overridable default.
+
+## Detailed Answer
+The two instructions serve different, complementary jobs, and they only look redundant if you've only ever seen them written together for a single command.
+
+`ENTRYPOINT` defines what the container *is* — the process that always runs when the container starts, and can't be casually overridden without passing `--entrypoint` on `docker run`. `CMD` defines the *default arguments* passed to that entrypoint if the person running the container doesn't supply their own. When both are set in exec form, Docker concatenates them: `ENTRYPOINT`'s array plus `CMD`'s array become the full command line, unless the caller replaces `CMD` by appending their own arguments after the image name in `docker run`.
+
+| Setup | `docker run myimage` | `docker run myimage --verbose` |
+|-------|----------------------|----------------------------------|
+| `ENTRYPOINT ["mytool"]` + `CMD ["--help"]` | Runs `mytool --help` | Runs `mytool --verbose` |
+| `ENTRYPOINT ["mytool"]`, no `CMD` | Runs `mytool` (no args) | Runs `mytool --verbose` |
+| `CMD ["mytool", "--help"]`, no `ENTRYPOINT` | Runs `mytool --help` | Runs `--verbose` (replaces everything, likely breaks) |
+
+Removing `CMD` while keeping `ENTRYPOINT` means the container now runs the bare entrypoint with **no arguments at all** when nobody supplies any. If the tool wrapped by the entrypoint requires an argument to do anything sensible — for example a CLI that prints usage and exits cleanly with `--help`, but errors out or hangs waiting for input when called bare — that's a real, operationally visible regression. A support engineer who runs the image with no arguments to sanity-check it, expecting the previous helpful default, now gets an error or a hang instead.
+
+<Callout variant="tip" title="Key Takeaways">
+`ENTRYPOINT` fixes *what* runs; `CMD` fixes the *default arguments* to it — dropping `CMD` doesn't simplify the image, it just changes what happens when nobody passes arguments.
+</Callout>
+

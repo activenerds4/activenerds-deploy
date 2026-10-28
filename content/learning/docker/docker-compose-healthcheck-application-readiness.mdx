@@ -1,0 +1,61 @@
+---
+pathSlug: "docker"
+moduleSlug: "docker-compose-healthcheck-application-readiness"
+order: 66
+level: "intermediate"
+format: "article"
+title: "Docker Compose Health Checks: Reporting True Application Readiness, Not Just Process State"
+description: "A HEALTHCHECK runs an application-level probe inside the container on a schedule, giving Compose a real readiness signal instead of just reporting that a process is running."
+question: "A Compose stack reports all containers as \"running,\" yet the application is non-functional because the API started before the database finished initializing. Design a `HEALTHCHECK`-based solution and explain how it changes container state reporting versus a plain process check."
+domain: "Operations"
+tags: ["Operations", "Health Checks", "HealthChecks", "Compose"]
+estimatedMinutes: 6
+xpValue: 15
+seoTitle: "Docker Compose Health Checks: True | Docker Guide"
+metaDescription: "Learn Docker Compose Health Checks: Reporting True Application Readiness, Not Just Process State with practical HEALTHCHECK configuration examples."
+publishDate: "2026-09-05"
+relatedModules: ["depends-on-container-readiness-docker-compose", "container-lifecycle-pid1-process-exit"]
+---
+
+## Question
+A Compose stack reports all containers as "running," yet the application is non-functional because the API started before the database finished initializing. Design a `HEALTHCHECK`-based solution and explain how it changes container state reporting versus a plain process check.
+
+
+## Quick Answer
+Compose's default "running" status only means each container's PID 1 is alive — a `HEALTHCHECK` adds an application-level probe that Compose runs on a schedule, so container status reflects whether the app inside is actually functional, not just whether its process hasn't crashed.
+
+## Detailed Answer
+Without a `HEALTHCHECK`, Docker (and Compose) can only observe one thing about a container: whether its main process is still running. That's a process-liveness check, not an application-readiness check — a database container can report "running" the entire time it's still replaying its write-ahead log and refusing connections, and an API container can report "running" while it's stuck in an infinite retry loop trying to reach a database that isn't ready yet. "Running" and "working" are simply different questions.
+
+A `HEALTHCHECK` closes that gap by having Docker periodically execute a command *inside* the container and interpret its exit code as a real status:
+
+```yaml
+services:
+  db:
+    image: postgres:16
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  api:
+    build: .
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      db:
+        condition: service_healthy
+```
+
+With this in place, `docker compose ps` reports each container's state as `starting`, `healthy`, or `unhealthy` — not just `running` — and any consumer of that state (`depends_on: condition: service_healthy`, an orchestrator, a load balancer's target-health check) can react to real application readiness instead of guessing. The `start_period` gives new containers a grace window before failed checks count against them, which matters for anything with a real startup/initialization cost.
+
+<Callout variant="tip" title="Key Takeaways">
+`HEALTHCHECK` turns "the process hasn't died" into "the application actually responds," and that distinction is what lets Compose (and anything downstream of it) make correct decisions about startup ordering and traffic routing.
+</Callout>
+
+---

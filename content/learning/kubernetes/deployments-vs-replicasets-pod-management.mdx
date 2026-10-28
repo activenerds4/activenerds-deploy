@@ -1,0 +1,63 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "deployments-vs-replicasets-pod-management"
+order: 54
+level: "beginner"
+format: "article"
+title: "Deployments vs. ReplicaSets: Declarative Scaling and Pod Template Management"
+description: "A ReplicaSet ensures a specified number of pod replicas are running at all times; a Deployment manages ReplicaSets and adds rolling update and rollback capab..."
+question: "Explain the architecture, failure modes, and operational best practices for Deployments vs. ReplicaSets: Declarative Scaling and Pod Template Management in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Deployments", "ReplicaSets"]
+estimatedMinutes: 3
+xpValue: 10
+seoTitle: "Deployments vs. ReplicaSets: Declarative Scal | K8s Guide"
+metaDescription: "Learn Deployments vs. ReplicaSets: Declarative Scaling and Pod Template Management with architecture patterns, practical configurations, and step-by-step imple"
+publishDate: "2026-05-08"
+relatedModules: ["kubernetes-deployment-spec-configuration", "rolling-update-strategy-zero-downtime"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for Deployments vs. ReplicaSets: Declarative Scaling and Pod Template Management in production Kubernetes environments.
+
+## Quick Answer
+A ReplicaSet ensures a specified number of pod replicas are running at all times; a Deployment manages ReplicaSets and adds rolling update and rollback capabilities on top.
+
+
+## Detailed Answer
+The relationship is a **management hierarchy**: Deployment → ReplicaSet → Pods. You almost never create a ReplicaSet directly — you create a Deployment which creates and manages ReplicaSets for you.
+
+```
+Deployment (my-app)
+├── ReplicaSet (my-app-7d4b9c8f6)     ← current version (v2)
+│   ├── Pod (my-app-7d4b9c8f6-x2k9p)
+│   ├── Pod (my-app-7d4b9c8f6-m7n3q)
+│   └── Pod (my-app-7d4b9c8f6-p8r1t)
+└── ReplicaSet (my-app-6c3a8b7e5)     ← previous version (v1), scaled to 0
+    └── (0 pods — kept for rollback)
+```
+
+## Why Deployments Keep Old ReplicaSets
+When you update a Deployment's image, it creates a NEW ReplicaSet and gradually scales it up while scaling the old one down. The old ReplicaSet is kept (scaled to 0) to enable instant rollbacks — `kubectl rollout undo` simply scales the old RS back up.
+
+```bash
+# See the ReplicaSets a Deployment manages
+kubectl get replicasets -l app=my-app
+
+# ReplicaSet names include a pod-template hash
+# my-app-7d4b9c8f6 — the hash changes when pod spec changes
+
+# How many old ReplicaSets to keep (default: 10)
+spec:
+  revisionHistoryLimit: 5             # Keep last 5 RS for rollback
+```
+
+## Common Mistake
+Editing a ReplicaSet directly. Any change to a ReplicaSet owned by a Deployment will be immediately overwritten by the Deployment controller. Always edit the Deployment.
+
+
+<Callout variant="tip" title="Key Takeaways">
+ReplicaSets provide the self-healing replica count; Deployments provide the upgrade orchestration layer on top — always work at the Deployment level.
+</Callout>
+
+---

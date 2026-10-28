@@ -1,0 +1,235 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "how-do-you-benchmark-and"
+order: 30
+level: "expert"
+format: "article"
+title: "How Do You Benchmark and Monitor etcd Health in Production?: Architecture & Implementation"
+description: "Monitor etcd with its native Prometheus metrics endpoint (`:2381/metrics`), alert on `etcd_disk_wal_fsync_duration_seconds` p99 &gt; 10ms, `etcd_server_leader_c..."
+question: "How Do You Benchmark and Monitor etcd Health in Production?: Architecture & Implementation?"
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["etcd", "Monitoring", "Observability"]
+estimatedMinutes: 12
+xpValue: 25
+seoTitle: "How Do You Benchmark and Monitor etcd Health  | K8s Guide"
+metaDescription: "Learn How Do You Benchmark and Monitor etcd Health in Production?: Architecture & Implementation with architecture patterns, practical configurations, and step"
+publishDate: "2026-06-28"
+relatedModules: []
+---
+
+---
+
+## Question
+How Do You Benchmark and Monitor etcd Health in Production?: Architecture & Implementation?
+
+## Quick Answer
+## Monitor etcd with its native Prometheus metrics endpoint (`:2381/metrics`), alert on `etcd_disk_wal_fsync_duration_seconds` p99 &gt; 10ms, `etcd_server_leader_changes_seen_total` &gt; 0 in 5 minutes, and `etcd_mvcc_db_total_size_in_bytes` approaching quota.
+---
+
+
+## Detailed Answer
+etcd exposes a rich Prometheus metrics endpoint on its client port. The **four critical signal categories** are: disk health (WAL fsync latency), Raft health (leader changes, proposal failures), DB health (size vs. quota, compaction lag), and network health (peer round-trip time). Leader changes are the most operationally significant metric — every leader change causes a brief write unavailability and triggers all API server connections to reconnect. In a healthy cluster, leader changes should be rare (fewer than 1 per day in steady state).
+
+---
+
+## Deep Dive
+## Essential Prometheus alert rules
+```yaml
+# prometheus-etcd-alerts.yaml
+groups:
+  - name: etcd.critical
+    interval: 30s
+    rules:
+
+      # Disk: WAL fsync too slow → writes will back up
+      - alert: EtcdWALFsyncLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])
+          ) > 0.010
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "etcd WAL fsync p99 > 10ms on {{ $labels.instance }}"
+          description: |
+            Current value: {{ $value | humanizeDuration }}
+            Cause: Disk I/O contention or slow underlying storage.
+            Action: Check disk scheduler, iostat, and consider NVMe upgrade.
+
+      # Raft: Leader change detected
+      - alert: EtcdLeaderChange
+        expr: |
+          increase(etcd_server_leader_changes_seen_total[10m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "etcd leader change detected on {{ $labels.instance }}"
+          description: |
+            Leader changes cause write unavailability and API server reconnects.
+            Check network between control plane nodes and disk latency.
+
+      # Raft: Proposals failing (writes being rejected)
+      - alert: EtcdHighNumberOfFailedProposals
+        expr: |
+          rate(etcd_server_proposals_failed_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "etcd proposals failing at {{ $value }}/s"
+          description: "Quorum may be lost or members unreachable."
+
+      # DB: Size approaching quota (default 2GB, you should set 6GB+)
+      - alert: EtcdDatabaseSizeApproachingQuota
+        expr: |
+          (etcd_mvcc_db_total_size_in_bytes /
+           etcd_server_quota_backend_bytes) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "etcd DB is {{ $value | humanizePercentage }} of quota"
+          description: "Run compaction and defrag, or increase quota-backend-bytes."
+
+      # DB: Quota exceeded → etcd is read-only
+      - alert: EtcdDatabaseQuotaExceeded
+        expr: etcd_server_quota_backend_bytes - etcd_mvcc_db_total_size_in_bytes < 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "etcd quota exceeded — cluster is READ ONLY"
+          description: |
+            Immediately run: etcdctl compact && etcdctl defrag
+            Then raise --quota-backend-bytes in etcd config.
+
+      # Network: Peer RTT too high → risk of spurious elections
+      - alert: EtcdPeerNetworkLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            rate(etcd_network_peer_round_trip_time_seconds_bucket[5m])
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "etcd peer RTT p99 > 100ms on {{ $labels.instance }}"
+
+      # Member: etcd member down
+      - alert: EtcdMemberDown
+        expr: up{job="etcd"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "etcd member {{ $labels.instance }} is down"
+```
+
+## Grafana dashboard key panels — query reference
+```promql
+# Panel 1: WAL fsync latency (p50, p99, p999)
+histogram_quantile(0.99,
+  sum by (le, instance) (
+    rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])
+  )
+)
+
+# Panel 2: DB backend commit latency
+histogram_quantile(0.99,
+  rate(etcd_disk_backend_commit_duration_seconds_bucket[5m])
+)
+
+# Panel 3: DB size vs. quota (all members)
+etcd_mvcc_db_total_size_in_bytes
+etcd_server_quota_backend_bytes
+
+# Panel 4: Proposal rate and failure rate
+rate(etcd_server_proposals_committed_total[1m])
+rate(etcd_server_proposals_failed_total[1m])
+rate(etcd_server_proposals_pending[1m])
+
+# Panel 5: Leader changes (should be near-zero)
+increase(etcd_server_leader_changes_seen_total[1h])
+
+# Panel 6: Active connections from kube-apiserver
+etcd_grpc_server_started_total
+etcd_grpc_server_handled_total
+
+# Panel 7: Key space size (total stored keys)
+etcd_debugging_mvcc_keys_total
+
+# Panel 8: Compaction lag
+etcd_mvcc_db_total_size_in_bytes - etcd_mvcc_db_total_size_in_use_in_bytes
+# Large gap = fragmented space waiting for defrag
+```
+
+## Operational runbook — etcd health check script
+```bash
+#!/bin/bash
+# etcd-healthcheck.sh — run daily or include in on-call runbook
+
+ETCDCTL="etcdctl \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/peer.crt \
+  --key=/etc/kubernetes/pki/etcd/peer.key"
+
+echo "=== etcd Cluster Health ==="
+$ETCDCTL endpoint health --cluster
+
+echo ""
+echo "=== Member List ==="
+$ETCDCTL member list --write-out=table
+
+echo ""
+echo "=== Endpoint Status ==="
+$ETCDCTL endpoint status --cluster --write-out=table
+# Key columns: DB SIZE, IS LEADER, RAFT TERM, RAFT INDEX
+# All members should have same RAFT TERM and nearly same RAFT INDEX
+
+echo ""
+echo "=== DB Size vs Quota ==="
+$ETCDCTL endpoint status --cluster --write-out=json | jq -r '
+  .[] | {
+    endpoint: .Endpoint,
+    db_size_mb: (.Status.dbSize / 1024 / 1024 | round),
+    db_size_in_use_mb: (.Status.dbSizeInUse / 1024 / 1024 | round),
+    fragmented_mb: ((.Status.dbSize - .Status.dbSizeInUse) / 1024 / 1024 | round)
+  }
+'
+
+echo ""
+echo "=== WAL fsync latency (last 60s via metrics) ==="
+curl -s http://127.0.0.1:2381/metrics | \
+  grep etcd_disk_wal_fsync_duration_seconds | \
+  grep -v "^#"
+
+echo ""
+echo "=== Recent Leader Changes ==="
+curl -s http://127.0.0.1:2381/metrics | \
+  grep etcd_server_leader_changes_seen_total
+```
+
+## etcd health signal summary
+| Signal | Healthy | Warning | Critical |
+|---|---|---|---|
+| WAL fsync p99 | &lt; 10ms | 10–50ms | &gt; 50ms |
+| DB size / quota | &lt; 60% | 60–80% | &gt; 80% |
+| Leader changes / day | 0 | 1–3 | &gt; 3 |
+| Proposal failure rate | 0 | &lt; 0.1/s | &gt; 0.1/s |
+| Peer RTT p99 | &lt; 10ms | 10–100ms | &gt; 100ms |
+| Fragmented space | &lt; 100MB | 100MB–1GB | &gt; 1GB |
+
+> **Production lesson:** The most commonly missed metric in on-call runbooks is `etcd_mvcc_db_total_size_in_bytes - etcd_mvcc_db_total_size_in_use_in_bytes` — the fragmented space gap. A cluster can report "healthy" with 4GB DB size but only 800MB in actual use, meaning 3.2GB is fragmented garbage waiting to be reclaimed. Defrag will instantly bring the DB from 4GB back to 800MB.
+
+> **Common mistake:** Only monitoring the etcd endpoint that kube-apiserver connects to. Monitor all members — a follower with a slow disk creates a bottleneck because the leader must wait for quorum acknowledgment from all followers before committing a write.
+
+> **Self-assessment:** Can you write the three most important Prometheus alert rules for etcd from memory? Can you interpret `etcdctl endpoint status` output and identify a lagging member? Can you explain why fragmented space doesn't
+
+<Callout variant="tip" title="Key Takeaways">
+- **WAL Disk Latency**: Dedicated NVMe storage for etcd WAL is the highest-ROI optimization, targeting p99 fsync latency < 10ms.
+- **Leader Stability**: Alert immediately on any leader elections (leader changes > 0) and monitor database quota limits closely.
+</Callout>
+

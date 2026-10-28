@@ -1,0 +1,135 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "coredns-architecture-in-cluster-resolution"
+order: 21
+level: "intermediate"
+format: "article"
+title: "CoreDNS Architecture: In-Cluster DNS Resolution and Service Record Lookup"
+description: "CoreDNS runs as a Deployment in `kube-system` and automatically creates DNS records for every Service — pods resolve services using short names within the sa..."
+question: "Explain the architecture, failure modes, and operational best practices for CoreDNS Architecture: In-Cluster DNS Resolution and Service Record Lookup in production Kubernetes environments."
+domain: "Cluster Architecture, Installation & Configuration"
+tags: ["Networking", "DNS"]
+estimatedMinutes: 4
+xpValue: 15
+seoTitle: "CoreDNS Architecture: In-Cluster DNS Resoluti | K8s Guide"
+metaDescription: "Learn CoreDNS Architecture: In-Cluster DNS Resolution and Service Record Lookup with architecture patterns, practical configurations, and step-by-step implemen"
+publishDate: "2026-05-09"
+relatedModules: ["kubernetes-services-stable-networking-discovery", "service-types-clusterip-nodeport-loadbalancer", "advanced-pod-scheduling-affinity-taints"]
+---
+
+## Question
+Explain the architecture, failure modes, and operational best practices for CoreDNS Architecture: In-Cluster DNS Resolution and Service Record Lookup in production Kubernetes environments.
+
+## Quick Answer
+CoreDNS runs as a Deployment in `kube-system` and automatically creates DNS records for every Service — pods resolve services using short names within the same namespace or fully qualified names across namespaces.
+
+
+## Detailed Answer
+```bash
+# Every pod gets /etc/resolv.conf automatically configured:
+kubectl exec -it my-pod -- cat /etc/resolv.conf
+# nameserver 10.96.0.10          ← CoreDNS ClusterIP
+# search production.svc.cluster.local svc.cluster.local cluster.local
+# options ndots:5
+
+# The 'search' domains allow short names to resolve:
+# curl my-svc                    → tries my-svc.production.svc.cluster.local
+# curl my-svc.staging            → tries my-svc.staging.svc.cluster.local
+# curl my-svc.staging.svc.cluster.local → fully qualified, always works
+```
+
+## DNS Record Types Created by Kubernetes
+```bash
+# For a Service named 'my-svc' in namespace 'production':
+# A record:  my-svc.production.svc.cluster.local → ClusterIP (e.g., 10.96.1.5)
+
+# For a Headless Service (StatefulSet):
+# A records per pod:
+# postgres-0.postgres.production.svc.cluster.local → 10.0.1.5 (pod IP directly)
+# postgres-1.postgres.production.svc.cluster.local → 10.0.1.6
+# postgres-2.postgres.production.svc.cluster.local → 10.0.1.7
+
+# For a Service with named ports — SRV records:
+# _http._tcp.my-svc.production.svc.cluster.local → port 80
+
+# For ExternalName Service:
+# my-ext-svc.production.svc.cluster.local → CNAME → mydb.rds.amazonaws.com
+```
+
+## Debugging DNS Inside the Cluster
+```bash
+# Run a debug pod with DNS tools
+kubectl run dnsutils --image=nicolaka/netshoot \
+  --rm -it --restart=Never -- bash
+
+# Inside the pod:
+nslookup my-svc.production.svc.cluster.local
+# Server:   10.96.0.10
+# Address:  10.96.0.10#53
+# Name:     my-svc.production.svc.cluster.local
+# Address:  10.96.1.5
+
+dig my-svc.production.svc.cluster.local
+nslookup kubernetes.default.svc.cluster.local   # Should always resolve
+
+# Check CoreDNS is healthy
+kubectl get pods -n kube-system -l k8s-app=kube-dns
+kubectl logs -n kube-system -l k8s-app=kube-dns
+
+# Check CoreDNS ConfigMap for custom DNS rules
+kubectl get configmap coredns -n kube-system -o yaml
+```
+
+## Custom DNS Configuration
+```yaml
+# CoreDNS ConfigMap — add custom DNS rules
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+          pods insecure
+          fallthrough in-addr.arpa ip6.arpa
+        }
+        # Forward internal company DNS to corporate resolver
+        forward corp.example.com 10.0.0.1
+        # Forward everything else to public DNS
+        forward . 8.8.8.8 8.8.4.4
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+```
+
+## The ndots:5 Performance Issue
+```bash
+# ndots:5 means any hostname with fewer than 5 dots triggers search domain lookups
+# curl external-api.example.com triggers:
+# 1. external-api.example.com.production.svc.cluster.local (fails)
+# 2. external-api.example.com.svc.cluster.local (fails)
+# 3. external-api.example.com.cluster.local (fails)
+# 4. external-api.example.com (finally resolves — 4 DNS lookups wasted!)
+
+# Fix for pods making many external calls:
+spec:
+  dnsConfig:
+    options:
+    - name: ndots
+      value: "2"                    # Reduce unnecessary search domain lookups
+  dnsPolicy: ClusterFirst           # Default — use CoreDNS
+  # Other options: None (custom only), Default (use node DNS), ClusterFirstWithHostNet
+```
+
+
+<Callout variant="tip" title="Key Takeaways">
+DNS is the glue of Kubernetes networking — when services can't talk to each other, always verify DNS resolution first with `nslookup` from inside a pod before investigating network policies or service selectors.
+</Callout>
+
+---

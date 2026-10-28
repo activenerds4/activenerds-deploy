@@ -1,0 +1,95 @@
+---
+pathSlug: "kubernetes"
+moduleSlug: "kubernetes-deployment-spec-configuration"
+order: 57
+level: "beginner"
+format: "article"
+title: "Kubernetes Deployment Spec: Pod Templates, Replicas, and Rollout Controls"
+description: "A Deployment is the standard way to run stateless applications — it manages ReplicaSets, handles rolling updates, and maintains desired pod count through sel..."
+question: "What key fields inside a Deployment specification control replica count, update strategy, and pod revision history, and how does a Deployment controller manage underlying ReplicaSets?"
+domain: "Workloads & Scheduling"
+tags: ["Deployments"]
+estimatedMinutes: 4
+xpValue: 10
+seoTitle: "Kubernetes Deployment Spec: Pod Templates, Re | K8s Guide"
+metaDescription: "Learn Kubernetes Deployment Spec: Pod Templates, Replicas, and Rollout Controls with architecture patterns, practical configurations, and step-by-step implemen"
+publishDate: "2026-06-16"
+relatedModules: ["rolling-update-strategy-zero-downtime", "deployments-vs-replicasets-pod-management"]
+---
+
+## Question
+What key fields inside a Deployment specification control replica count, update strategy, and pod revision history, and how does a Deployment controller manage underlying ReplicaSets?
+
+## Quick Answer
+A Deployment is the standard way to run stateless applications — it manages ReplicaSets, handles rolling updates, and maintains desired pod count through self-healing.
+
+
+## Detailed Answer
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: production
+  labels:
+    app: my-app
+spec:
+  # ── HOW MANY ────────────────────────────────────────────────
+  replicas: 3
+
+  # ── WHICH PODS ──────────────────────────────────────────────
+  selector:
+    matchLabels:
+      app: my-app                     # MUST match pod template labels exactly
+
+  # ── HOW TO UPDATE ───────────────────────────────────────────
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1                     # Max extra pods during update
+      maxUnavailable: 0               # Never reduce below desired count
+
+  # Rollback history (default: 10)
+  revisionHistoryLimit: 5
+
+  # ── WHAT TO RUN ─────────────────────────────────────────────
+  template:                           # This IS a pod spec
+    metadata:
+      labels:
+        app: my-app                   # Must match selector.matchLabels
+        version: v1.2.3
+    spec:
+      containers:
+      - name: app
+        image: myrepo/my-app:v1.2.3
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            memory: "512Mi"
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          periodSeconds: 15
+          failureThreshold: 3
+```
+
+## The Selector Contract
+The `selector.matchLabels` in the Deployment and the `template.metadata.labels` must match — this is how the Deployment knows which pods belong to it. If they don't match, the API server rejects the manifest.
+
+
+<Callout variant="tip" title="Key Takeaways">
+A Deployment's `selector` is immutable after creation — if you need to change labels, you must delete and recreate the Deployment.
+</Callout>
+
+---
