@@ -7,10 +7,19 @@ import FooterNewsletterCTA from "@/components/growth/FooterNewsletterCTA";
 
 const exploreNav = [
   { label: "Articles", to: "/articles" },
-  { label: "Tools", to: "/tools" },
+  { label: "Developer Tools", to: "/tools" },
   { label: "Resources", to: "/resources" },
+  { label: "Conferences & Summits", to: "/resources/conferences" },
   { label: "Browse by Category", to: "/articles#categories" },
   { label: "Browse by Tag", to: "/articles#tags" },
+];
+
+const deepLearningNav = [
+  { label: "Deep Learning Hub", to: "/learning" },
+  { label: "Learning Paths", to: "/learning/paths" },
+  { label: "Engineering Glossary", to: "/learning/glossary" },
+  { label: "Q&A Challenges", to: "/learning/challenges" },
+  { label: "Cheat Sheets", to: "/learning/cheat-sheets" },
 ];
 
 const aboutNav = [
@@ -29,7 +38,7 @@ const socialLinks = [
 ];
 
 /**
- * Site footer with above-footer conversion slot, partitioned 4-column navigation, and legal bar.
+ * Site footer with above-footer conversion slot, partitioned 5-column navigation, and legal bar.
  */
 export const SiteFooter = () => {
   const year = new Date().getFullYear();
@@ -41,7 +50,7 @@ export const SiteFooter = () => {
         <FooterNewsletterCTA />
 
         {/* SLOT 2: Brand and Multi-Column Sitemap Grid */}
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           {/* Brand Column */}
           <div className="max-w-xs">
             <Link
@@ -58,6 +67,23 @@ export const SiteFooter = () => {
             <h2 className="eyebrow mb-3">Explore</h2>
             <ul className="space-y-2">
               {exploreNav.map((item) => (
+                <li key={item.to}>
+                  <Link
+                    to={item.to}
+                    className="text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring rounded-sm"
+                  >
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          {/* Deep Learning Column (Migrated) */}
+          <nav aria-label="Deep learning and roadmaps">
+            <h2 className="eyebrow mb-3">Deep Learning</h2>
+            <ul className="space-y-2">
+              {deepLearningNav.map((item) => (
                 <li key={item.to}>
                   <Link
                     to={item.to}
