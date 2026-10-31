@@ -397,6 +397,28 @@ const App = () => (
                 }
               />
 
+              {/* Certs Central Routes */}
+              <Route
+                path="/learning/certs-central"
+                element={<Navigate to="/learning/certs-central/vmware/study-notes" replace />}
+              />
+              <Route
+                path="/learning/certs-central/vmware"
+                element={<Navigate to="/learning/certs-central/vmware/study-notes" replace />}
+              />
+              <Route
+                path="/learning/certs-central/*"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <MdxSubPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+
               {/* Legacy Cheatsheet Redirects */}
               <Route path="/resources/cheatsheets" element={<Navigate to="/learning/cheat-sheets" replace />} />
               <Route path="/resources/cheatsheets/*" element={<Navigate to="/learning/cheat-sheets" replace />} />

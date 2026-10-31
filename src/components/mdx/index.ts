@@ -24,3 +24,5 @@ export { default as VideoEmbed } from "./VideoEmbed";
 export { default as ImageZoom } from "./ImageZoom";
 export { default as SponsoredBadge } from "./SponsoredBadge";
 export { default as PollWidget } from "@/components/growth/PollWidget";
+export { default as TrackCard } from "./TrackCard";
+export { default as ModuleCard } from "./ModuleCard";

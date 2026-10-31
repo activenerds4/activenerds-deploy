@@ -79,6 +79,34 @@ async function discoverFiles(dir: string, subdir: string): Promise<CompileEntry[
   });
 }
 
+async function discoverFilesRecursive(
+  baseDir: string,
+  currentDir: string = baseDir,
+  relPrefix: string = "pages",
+): Promise<CompileEntry[]> {
+  if (!existsSync(currentDir)) return [];
+  const entries = await readdir(currentDir, { withFileTypes: true });
+  const results: CompileEntry[] = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      const subEntries = await discoverFilesRecursive(baseDir, fullPath, relPrefix);
+      results.push(...subEntries);
+    } else if (entry.isFile() && (entry.name.endsWith(".mdx") || entry.name.endsWith(".md"))) {
+      const relToPages = path.relative(baseDir, fullPath);
+      const slug = relToPages.replace(/\.(mdx|md)$/, "");
+      results.push({
+        source: fullPath,
+        output: path.join(OUTPUT_DIR, relPrefix, `${slug}.js`),
+        slug: `${relPrefix}/${slug}`,
+      });
+    }
+  }
+
+  return results;
+}
+
 async function compileFile(entry: CompileEntry): Promise<void> {
   const raw = await readFile(entry.source, "utf-8");
 
@@ -108,9 +136,7 @@ async function main() {
 
   const postEntries = await discoverFiles(POSTS_DIR, "posts");
   const authorEntries = await discoverFiles(AUTHORS_DIR, "authors");
-  const checklistEntries = await discoverFiles(CHECKLISTS_DIR, "pages/resources/checklists");
-  const guideEntries = await discoverFiles(GUIDES_DIR, "pages/resources/guides");
-  const conferenceEntries = await discoverFiles(CONFERENCES_DIR, "pages/resources/conferences");
+  const pageEntries = await discoverFilesRecursive(path.join(CONTENT_DIR, "pages"), path.join(CONTENT_DIR, "pages"), "pages");
 
   const learningPaths = ["docker", "kubernetes", "gen-ai", "agentic-ai"];
   const learningEntries: CompileEntry[] = [];
@@ -122,22 +148,18 @@ async function main() {
   const allEntries = [
     ...postEntries,
     ...authorEntries,
-    ...checklistEntries,
-    ...guideEntries,
-    ...conferenceEntries,
+    ...pageEntries,
     ...learningEntries,
   ];
 
   console.log(
-    `[precompile-mdx] Found ${postEntries.length} posts, ${authorEntries.length} authors, ${learningEntries.length} learning modules, ${checklistEntries.length} checklists, ${guideEntries.length} guides, ${conferenceEntries.length} conference guides`,
+    `[precompile-mdx] Found ${postEntries.length} posts, ${authorEntries.length} authors, ${learningEntries.length} learning modules, ${pageEntries.length} pages`,
   );
 
   // Ensure output directories exist
   await mkdir(path.join(OUTPUT_DIR, "posts"), { recursive: true });
   await mkdir(path.join(OUTPUT_DIR, "authors"), { recursive: true });
-  await mkdir(path.join(OUTPUT_DIR, "pages/resources/checklists"), { recursive: true });
-  await mkdir(path.join(OUTPUT_DIR, "pages/resources/guides"), { recursive: true });
-  await mkdir(path.join(OUTPUT_DIR, "pages/resources/conferences"), { recursive: true });
+  await mkdir(path.join(OUTPUT_DIR, "pages"), { recursive: true });
   for (const lp of learningPaths) {
     await mkdir(path.join(OUTPUT_DIR, "learning", lp), { recursive: true });
   }

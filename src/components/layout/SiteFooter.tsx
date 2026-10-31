@@ -16,6 +16,7 @@ const exploreNav = [
 
 const deepLearningNav = [
   { label: "Deep Learning Hub", to: "/learning" },
+  { label: "Certs Central (VMware)", to: "/learning/certs-central/vmware/study-notes" },
   { label: "Learning Paths", to: "/learning/paths" },
   { label: "Engineering Glossary", to: "/learning/glossary" },
   { label: "Q&A Challenges", to: "/learning/challenges" },

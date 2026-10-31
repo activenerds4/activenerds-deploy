@@ -19,6 +19,8 @@ import VideoEmbed from "./VideoEmbed";
 import ImageZoom from "./ImageZoom";
 import SponsoredBadge from "./SponsoredBadge";
 import PollWidget from "@/components/growth/PollWidget";
+import TrackCard from "./TrackCard";
+import ModuleCard from "./ModuleCard";
 
 /**
  * Centralized MDX component registry.
@@ -239,6 +241,8 @@ export const mdxComponents = {
   ImageZoom,
   SponsoredBadge,
   PollWidget,
+  TrackCard,
+  ModuleCard,
 };
 
 export type MdxComponents = typeof mdxComponents;

@@ -218,7 +218,13 @@ function CascadingMegaMenuPanel({
                 <div>
                   <h3 className="text-sm font-bold text-foreground">{activeGroup.label}</h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {activeGroup.items.length} interactive utilities available
+                    {activeGroup.items.length}{" "}
+                    {item.id === "tools"
+                      ? "interactive utilities"
+                      : item.id === "deep-learning"
+                        ? "guides & certifications"
+                        : "resources"}{" "}
+                    available
                   </p>
                 </div>
                 <span className="text-[11px] font-mono text-accent bg-accent/10 px-2 py-0.5 rounded-full border border-accent/20">

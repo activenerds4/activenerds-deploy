@@ -122,28 +122,59 @@ export const navigationConfig: NavigationConfig = {
       label: "Deep Learning",
       href: "/learning",
       enabled: true,
-      children: [
+      groups: [
         {
-          label: "Learning Paths",
-          href: "/learning/paths",
-          description: "Curated roadmaps: Docker, Kubernetes, Gen AI, Agentic AI",
+          label: "Roadmaps & Reference",
+          items: [
+            {
+              label: "Learning Paths",
+              href: "/learning/paths",
+              description: "Curated roadmaps: Docker, Kubernetes, Gen AI, Agentic AI",
+            },
+            {
+              label: "Q&A Challenges",
+              href: "/learning/challenges",
+              description: "Interactive mechanism puzzles with Flashcards, Scenarios, and Quizzes",
+            },
+            {
+              label: "Glossary",
+              href: "/learning/glossary",
+              description: "Mechanism-first definitions with failure modes and mental models",
+            },
+            {
+              label: "Cheat Sheets",
+              href: "/learning/cheat-sheets",
+              description: "High-density terminal and architecture reference cards",
+            },
+          ],
         },
         {
-          label: "Q&A Challenges",
-          href: "/learning/challenges",
-          description: "Interactive mechanism puzzles with Flashcards, Scenarios, and Quizzes",
-        },
-        {
-          label: "Glossary",
-          href: "/learning/glossary",
-          description: "Mechanism-first definitions with failure modes and mental models",
-        },
-        {
-          label: "Cheat Sheets",
-          href: "/learning/cheat-sheets",
-          description: "High-density terminal and architecture reference cards",
+          label: "Certs Central: VMware",
+          items: [
+            {
+              label: "VMware Study Notes Hub",
+              href: "/learning/certs-central/vmware/study-notes",
+              description: "Master VCF 9: Administrator, Architect & Tanzu Kubernetes notes",
+            },
+            {
+              label: "VCF Administrator Exam Notes",
+              href: "/learning/certs-central/vmware/study-notes/vcf-administrator",
+              description: "18-module deep dive: architecture, NSX, vSAN, SDDC & LCM",
+            },
+            {
+              label: "VCF 9 Architect Exam Notes",
+              href: "/learning/certs-central/vmware/study-notes/vcf9-architect",
+              description: "13-section guide: conceptual, logical, physical, AMPRS-M",
+            },
+            {
+              label: "VKS Tanzu (3V0-24.25) Notes",
+              href: "/learning/certs-central/vmware/study-notes/vks-tanzu",
+              description: "5-section guide: Supervisor, vSphere Pods, Cluster API & TKGS",
+            },
+          ],
         },
       ],
+      viewAll: { label: "Explore VMware Study Notes Hub", href: "/learning/certs-central/vmware/study-notes" },
     },
     {
       id: "tools",

@@ -15,7 +15,7 @@ export function extractHeadings(container: HTMLElement | null): TocHeading[] {
 
   headings.forEach((el) => {
     const id = el.id;
-    const text = el.textContent?.trim() ?? "";
+    const text = (el.textContent?.trim() ?? "").replace(/#$/, "").trim();
     if (!id || !text) return;
 
     const level = parseInt(el.tagName.substring(1), 10);
