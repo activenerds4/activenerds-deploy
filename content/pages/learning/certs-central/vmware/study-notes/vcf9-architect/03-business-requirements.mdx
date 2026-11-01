@@ -1,0 +1,184 @@
+---
+title: "Section 03: Eliciting & Validating Business Requirements"
+description: "Stakeholder interviewing, compliance frameworks (PCI-DSS, HIPAA, GDPR), SLA definition, and architectural traceability."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF 9.0 Architect Exam Revision Notes"
+trackSlug: "/learning/certs-central/vmware/study-notes/vcf9-architect"
+moduleNumber: 3
+totalModules: 13
+layout: "article"
+---
+
+**Objective 3.1:** Gathering and analyzing business objectives and requirements
+**Objective 3.2:** Creating a Conceptual Model from business objectives
+
+→ Verify exact VCF 9.0 product names and feature details against the current documentation and exam guide. The method (requirements → conceptual model) is the main exam focus; VCF 9.0 supplies the vocabulary.
+
+---
+
+## Objective 3.1: Gathering and Analyzing Business Objectives and Requirements
+
+### 3.1.1 The Flow
+
+```
+Business drivers → Business objectives → Business requirements
+   → (analysis) → Technical requirements, Constraints, Assumptions, Risks
+   → VCF 9.0 design goals (AMPRS-aligned)
+```
+
+| Term | Meaning | Example |
+|---|---|---|
+| **Business driver** | External/internal force motivating change | Cost pressure, regulation, cloud repatriation, M&A, faster time-to-market, vendor/licence changes |
+| **Business objective** | Strategic, measurable goal the business wants | "Cut infrastructure cost 20% in 18 months" |
+| **Business requirement** | What the solution must deliver to meet the objective (solution-agnostic) | "Developers get environments within hours, not weeks" |
+| **Technical requirement** | Testable capability derived from a business requirement | "Self-service provisioning with approval workflow; &lt;1 hour deploy time" |
+
+### 3.1.2 Gathering Techniques
+
+| Technique | Use for |
+|---|---|
+| **Stakeholder interviews** | Strategy, priorities, pain points (executives, app owners, security, operations, finance) |
+| **Workshops** | Resolving conflicts, building consensus, prioritising |
+| **Questionnaires/surveys** | Broad, consistent input from many stakeholders |
+| **Document review** | Existing policies, SLAs, architecture docs, audit findings, compliance standards |
+| **Current-state assessment / discovery** | Inventory, utilisation, dependencies, capacity (e.g., via VCF Operations data or assessment tools) |
+| **Observation / process walkthrough** | Real operational practices vs documented ones |
+
+### 3.1.3 Who to Engage
+
+- **Executive sponsor**: objectives, budget, priorities
+- **Business/application owners**: workload needs, SLAs
+- **Infrastructure/operations**: operability, skills, tooling
+- **Security/compliance/audit**: regulatory and policy requirements
+- **Network, storage, DR, finance teams**: dependencies, cost models
+
+### 3.1.4 Analysing Requirements
+
+1. **Classify**: business vs technical; functional vs non-functional (AMPRS qualities).
+2. **Clarify** ambiguity and make requirements **specific, measurable, achievable, relevant, testable**.
+3. **Prioritise** (must / should / could); resolve conflicts with stakeholders.
+4. **Identify** constraints, assumptions, risks; validate assumptions.
+5. **Trace**: give each requirement an ID so design decisions can map to it later.
+6. **Get sign-off** on the requirements baseline.
+
+### 3.1.5 Translating Business Drivers into VCF 9.0 Design Goals
+
+| Business driver / objective | Design goal | VCF 9.0 architectural implications |
+|---|---|---|
+| **Reduce cost / TCO**, consolidate sprawl | Standardise and consolidate on one private cloud platform; raise utilisation | Standard VCF domains, HCI (vSAN), right-sized clusters, VCF Operations for capacity/cost optimisation, consolidated architecture for small sites |
+| **Faster delivery / agility** | Self-service, automation | **VCF Automation**, templates/blueprints, API/IaC, workload domains per consumer group, Kubernetes via VKS |
+| **Regulatory compliance / data sovereignty** | Isolation, auditability, location control | Separate workload domains or instances per region, NSX micro-segmentation, encryption, RBAC, **VCF Identity Broker**/SSO, logging (VCF Operations for logs), compliance monitoring |
+| **Business continuity / high uptime** | High availability, defined RTO/RPO | Clustered management domain, vSphere HA, vSAN failure tolerance, stretched cluster or multi-instance with DR, redundant NSX Edge |
+| **Growth / scalability** | Predictable scale-out | Scalable domains/clusters, modular workload domains, capacity planning, fleet model for multiple sites |
+| **Security / zero-trust posture** | Defence in depth | NSX distributed firewall, segmentation, hardening, certificate and identity management |
+| **Operational efficiency, skills gap** | Simplify operations | Centralised lifecycle (SDDC Manager, fleet management in VCF Operations), standardised architecture, automation, validated patterns |
+| **Modern applications / AI** | Platform for containers and new workloads | VKS, GPU-capable hosts, private AI services (where in scope) |
+| **Cloud repatriation / hybrid strategy** | Consistent operating model across sites/clouds | VCF as common stack, HCX or replication-based migration |
+| **M&A / site consolidation** | Integrate quickly, migrate workloads | Brownfield convert/import, migration tooling, multi-instance fleet |
+
+### 3.1.6 Key Takeaways (3.1)
+
+- Business requirements are about **outcomes**, not technology; do not let a product choice appear in a business requirement.
+- **Every technical requirement and later design decision must trace to a business requirement.**
+- A requirement is **testable** only if it is measurable (numbers for RTO/RPO, uptime %, deploy time, capacity growth).
+- **Conflicting requirements** (e.g., high availability vs low cost) are resolved by stakeholder prioritisation, and the **trade-off is documented**.
+- **Constraints** come from outside (budget, existing hardware, policy, skills, timeline, legal); the architect designs *within* them.
+- **Unvalidated assumptions** must be confirmed or logged as risks.
+- Gathering is **iterative**: incomplete or unclear requirements mean going back to stakeholders, not guessing.
+
+---
+
+## Objective 3.2: Creating a Conceptual Model from Business Objectives
+
+### 3.2.1 What a Conceptual Model Is
+
+- **Highest-level** view of the solution: *what* it provides and *why*; **technology- and vendor-neutral** (or only broad-category).
+- Audience: **business stakeholders and executives**, then used as the foundation for the logical design.
+- Shows **capabilities, major components/services, actors, relationships and boundaries**, not sizing, IPs, versions or product configuration.
+
+### 3.2.2 Typical Contents
+
+| Element | Description | Example |
+|---|---|---|
+| **Scope and boundaries** | What is in and out | "Private cloud for production and dev workloads at two data centres; public cloud and end-user computing out of scope" |
+| **Actors / consumers** | Who uses the platform | Developers, application owners, operations, security, auditors |
+| **Capabilities / services** | What the platform provides | Compute, storage, networking and security services; self-service provisioning; monitoring; backup/DR; identity and access |
+| **Major building blocks** | Abstract components | Management layer, workload layer, automation layer, operations layer, security layer |
+| **Relationships / interactions** | How blocks and actors connect | Consumers request via self-service → automation provisions on infrastructure → operations monitors |
+| **Principles / guiding design goals** | Direction from objectives | "Standardise", "automate by default", "secure by design", "site-resilient" |
+| **Constraints, assumptions, risks** | High-level, carried from analysis | "Budget capped", "existing network ready", "skills gap" |
+
+### 3.2.3 Mapping Business Objectives → Conceptual Model → VCF 9.0 (Next Steps)
+
+| Business objective | Conceptual element | Becomes (logical/physical, later) |
+|---|---|---|
+| Faster provisioning | Self-service consumption layer | VCF Automation, templates, workload domains |
+| Regulatory isolation | Security and isolation zones | Separate domains/instances, NSX segmentation, identity broker |
+| High availability / DR | Resilience capability across sites | Clusters with HA, stretched cluster or multi-instance plus DR |
+| Cost efficiency | Standardised, shared infrastructure pool | HCI with vSAN, consolidated or standard architecture, capacity management |
+| Operational simplicity | Centralised management and monitoring | SDDC Manager, VCF Operations (fleet management), VCF Operations for logs/networks |
+
+### 3.2.4 Process to Build It
+
+1. Start from **validated business objectives and requirements** (3.1 output).
+2. Define **scope and boundaries**.
+3. Identify **actors and capabilities** needed.
+4. Group capabilities into **abstract building blocks/layers**.
+5. Draw **relationships and flows** between blocks and actors.
+6. Add **guiding principles, constraints, assumptions, risks**.
+7. **Review with business stakeholders** and obtain agreement before moving to logical design.
+
+### 3.2.5 Key Takeaways (3.2)
+
+- The conceptual model is **derived from business objectives**, not from hardware or product choice.
+- **No product versions, IP addresses, VLANs, host counts or sizing**; those belong in the **physical design**. Components and their relationships (without vendor detail) belong in the **logical design**.
+- It must be **understandable to non-technical stakeholders** and **traceable** to objectives.
+- It is the **bridge**: Business requirements → **Conceptual** → Logical → Physical.
+- Stakeholder agreement on the conceptual model **reduces rework** later.
+- Mentioning broad VCF 9.0 capability categories (private cloud platform with compute, storage, network, automation, operations) is acceptable; naming specific configuration is not.
+
+---
+
+## Practical Exam Scenarios
+
+| # | Scenario | Best answer / reasoning |
+|---|---|---|
+| 1 | Executive says "We must cut datacentre cost by 20% and speed up provisioning." Which is the business requirement? | The cost and provisioning outcomes (not "deploy vSAN" or "use VCF Automation"), because requirements are outcomes; technologies come later |
+| 2 | A statement reads "Use NSX distributed firewall for micro-segmentation." Classify it. | **Technical requirement** (or design decision); it names a technology |
+| 3 | "The project must finish before the lease on the old DC ends in 9 months." | **Constraint** (timeline) |
+| 4 | "We assume the network team will provide 25 GbE links." | **Assumption**; validate or record as a risk |
+| 5 | Two stakeholders request conflicting needs (maximum availability vs minimal cost). | Facilitate a **prioritisation workshop**, document the **trade-off** and decision with sponsor approval |
+| 6 | Requirements are vague ("fast and secure"). | **Clarify** with stakeholders into measurable, testable requirements before designing |
+| 7 | Which artefact would you show executives to confirm you understand the goals? | **Conceptual model** |
+| 8 | A diagram shows host counts, VLAN IDs, and ESXi build numbers. Which level is it? | **Physical design**, not conceptual |
+| 9 | Data must remain in-country across two regions. | Compliance requirement drives **separate instances/domains per region**, controlled access and logging; document as a design goal in the conceptual model (isolation by region) |
+| 10 | Customer wants "private cloud with self-service and strong governance." | Conceptual layers: consumption/automation, governance/security, infrastructure, operations → later mapped to VCF Automation, NSX/identity, workload domains, VCF Operations |
+| 11 | The requirements baseline changes mid-project. | Follow **change control**, update traceability, reassess impact on risks and design |
+| 12 | No existing documentation about the current environment. | Perform **current-state discovery/assessment** to gather utilisation and dependency data |
+
+---
+
+## Quick Recall Sheet
+
+- **Driver → Objective → Business requirement → Technical requirement → Design goal.**
+- Gather via **interviews, workshops, surveys, document review, discovery**; engage **all stakeholder groups**.
+- Requirements must be **measurable and testable**; assumptions **validated**; conflicts **prioritised and documented**.
+- **Conceptual model** = what and why, vendor-neutral, for business audience; **no sizing, IPs, versions**.
+- Flow: **Business → Conceptual → Logical → Physical**; keep **traceability** throughout.
+- Typical VCF 9.0 translations: cost → standardisation and HCI; agility → VCF Automation; compliance → domain/instance isolation, NSX, identity; availability → HA/stretched/DR; operations → fleet and lifecycle management.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/02-fundamentals" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 02: Architecture Fundamentals & VCF 9 Building Blocks
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VMware Study Notes Hub
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/04-logical-design" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 04: Logical Design Specifications →
+  </a>
+</div>

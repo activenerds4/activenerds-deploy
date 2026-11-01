@@ -1,0 +1,265 @@
+---
+title: "Section 06: Availability Architecture & High Availability (HA)"
+description: "vSphere HA, DRS admission control, vSAN Stretched Clusters, witness placement (< 5ms latency), multi-region active-active."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF 9.0 Architect Exam Revision Notes"
+trackSlug: "/learning/certs-central/vmware/study-notes/vcf9-architect"
+moduleNumber: 6
+totalModules: 13
+layout: "article"
+---
+
+**Design for Availability**
+
+→ Verify exact limits (latency/RTT, bandwidth, witness sizes, minimum hosts, FT vCPU limits, supported stretched-cluster options for management and workload domains) against the current VCF 9.0 documentation, vSAN and vSphere docs, and the exam guide. Values below are typical design guidance.
+
+---
+
+## 0. Availability Fundamentals
+
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: vSAN Stretched Cluster vs Disaster Recovery (LSR / SRM)">
+
+Architects must choose the appropriate availability pattern based on Recovery Point Objective (RPO) and network latency:
+
+| Availability Solution | Typical RPO | Maximum Network Latency | Fault Domain Quorum |
+|---|---|---|---|
+| **vSAN Stretched Cluster** | **RPO = 0** (Synchronous) | **&lt; 5ms RTT** between data sites | **Witness Host** at a neutral 3rd site (latency &lt; 100ms) |
+| **VMware Live Site Recovery (SRM)** | RPO &ge; 5 min (Asynchronous) | Up to 100ms+ RTT across metro/WAN | Independent vCenters at each site; automated runbook failover |
+| **NSX Federation** | Active/Active or Active/Standby | &lt; 150ms RTT between Global Managers | Global Managers stretch Tier-0/Tier-1 across regions |
+
+**Exam Guideline:** If the customer demands **zero data loss (RPO=0)** between two physical datacenters separated by 30 kilometers, the correct architectural solution is a **vSAN Stretched Cluster with a 3rd-site Witness**, provided Round Trip Time (RTT) latency is guaranteed below 5 milliseconds.
+
+</AccordionItem>
+
+</AccordionGroup>
+
+
+| Concept | Meaning |
+|---|---|
+| **Availability (A in AMPRS)** | Service is accessible when needed; measured as uptime % / SLA |
+| **SPOF** | Single point of failure: any component whose failure causes outage; **eliminate or mitigate** |
+| **Failure domain** | Boundary of a failure: host, rack, cluster, site/AZ |
+| **Availability Zone (AZ)** | Independent failure domain (own power, cooling, network); in VCF typically a site or data hall |
+| **Redundancy models** | N+1 (survive one failure), N+2 (survive two), 2N (full duplication) |
+| **RTO / RPO** | Recovery time / data loss targets; availability designs aim to keep these near zero, DR designs accept non-zero values |
+| **Availability vs Recoverability** | Availability **prevents or limits** outage (HA, redundancy); recoverability **restores** after outage (backup, DR) |
+
+**Design flow:** requirement (uptime/RTO/RPO) → identify failure domains → protect each layer (compute, storage, network, management plane) → validate with failure testing.
+
+**Key rule:** availability is only as strong as the **weakest layer**: a stretched cluster with a single upstream router is still a SPOF.
+
+---
+
+## 1. Availability Within a Single AZ
+
+### 1.1 Compute: vSphere HA
+
+| Setting | Guidance |
+|---|---|
+| **Function** | Restarts VMs on surviving hosts after host failure (restart, not zero downtime) |
+| **Admission control** | Reserve capacity to tolerate failures: **cluster resource percentage** (flexible, common) or **host failures to tolerate** / dedicated failover hosts |
+| **Capacity headroom** | **N+1** minimum; **N+2** for critical clusters or large clusters; include maintenance windows |
+| **Host isolation response** | Match to storage/network design (e.g., power off & restart, or leave powered on where vSAN partition logic applies) |
+| **VM monitoring** | Detect guest OS/app hangs; optional |
+| **VM restart priority** | Order critical services first (e.g., DNS/AD before apps) |
+| **Heartbeat** | Network + datastore heartbeats (vSAN uses its own network for heartbeating considerations) |
+| **Proactive HA / DRS** | DRS balances load and honours rules; Proactive HA evacuates hosts on hardware degradation |
+
+### 1.2 vSphere Fault Tolerance (FT)
+
+| Aspect | Guidance |
+|---|---|
+| **What it gives** | **Zero downtime, zero data loss** for a VM via lockstep secondary VM on another host |
+| **Use for** | Small number of **critical, single-instance** workloads that cannot tolerate HA restart |
+| **Limits** | vCPU count per FT VM limits, network bandwidth/latency for FT logging, **doubles resource consumption** for protected VMs, feature restrictions |
+| **Trade-off** | Highest VM-level availability, but cost and scale limits; protects against **host** failure, **not** guest/application failure or site loss |
+
+**HA vs FT:** HA = restart after failure (brief outage). FT = continuous availability (no outage) for select VMs.
+
+### 1.3 Anti-Affinity and Placement Rules
+
+| Rule | Purpose | Example |
+|---|---|---|
+| **VM-VM anti-affinity** | Keep redundant VMs on different hosts | NSX Manager nodes, vCenter/clustered app nodes, domain controllers, load-balanced web nodes |
+| **VM-Host rules (should/must)** | Pin or prefer VMs to host groups | Rack/site affinity, licence-bound hosts, stretched cluster site affinity |
+| **VM-VM affinity** | Co-locate chatty VMs | Latency-sensitive app and DB (trade-off: shared fate) |
+| **Fault domains (vSAN)** | Spread data across racks | Rack-failure tolerance |
+
+**Key points**
+- Anti-affinity **only helps if enough hosts exist** to place VMs apart (3 NSX Manager nodes need ≥3 hosts to separate).
+- **"Must" rules** can block HA restart; prefer **"should"** unless strict licensing/compliance demands "must".
+- Management appliances (NSX Manager cluster, VCF Operations/Automation HA nodes) should use **anti-affinity**.
+
+### 1.4 Storage Availability (vSAN in a Single AZ)
+
+| Decision | Guidance |
+|---|---|
+| **FTT (failures to tolerate)** | FTT=1 (survive 1 host/disk failure), FTT=2 (survive 2); higher = more capacity overhead and more hosts |
+| **RAID level** | RAID-1 mirroring (performance, more capacity); RAID-5/6 erasure coding (capacity-efficient; ESA minimises performance penalty) |
+| **Host count** | Minimum depends on policy (e.g., FTT=1 RAID-1: 3 hosts; RAID-5: 4; FTT=2 RAID-6: 6; verify) plus **extra host(s)** to allow rebuild/maintenance while retaining compliance |
+| **Fault domains** | Define by rack to survive rack/ToR/power failure (requires enough fault domains) |
+| **Slack space** | Keep free capacity (~25-30%) for rebuilds and maintenance |
+| **Maintenance mode choice** | "Ensure accessibility" vs "Full data migration" balances speed vs protection |
+| **Hardware** | Redundant controllers/HBAs, multiple capacity devices, spare capacity |
+
+### 1.5 Management Plane Availability
+
+| Component | Availability design |
+|---|---|
+| **vCenter** | Protected by HA; backups; careful on restore/ordering; (in VCF, one vCenter per domain) |
+| **NSX Manager** | **3-node cluster** with anti-affinity (and VIP) |
+| **SDDC Manager** | Single appliance: protect with HA + **backups** (recoverability) |
+| **VCF Operations / VCF Automation / logs** | **HA (clustered) deployment form** for critical use; anti-affinity; backups |
+| **Core services** | Redundant DNS, NTP, identity source, certificate authority |
+
+### 1.6 High-Availability Networking (Within AZ)
+
+| Layer | Design |
+|---|---|
+| **Physical** | Dual ToR switches, dual NICs per host to separate ToRs, dual power feeds (A/B), redundant cabling paths |
+| **Fabric** | Spine-leaf with multiple spines; ECMP; L3 to the leaf for smaller failure domains |
+| **Host teaming (VDS)** | ≥2 uplinks; teaming policy (route based on originating port, LBT, or LACP if switches support); NIOC for traffic protection |
+| **NSX Edge** | Edge cluster with ≥2 Edge nodes on separate hosts; **T0 Active/Active (ECMP)** for throughput or **Active/Standby** for stateful services |
+| **North-south routing** | **BGP + BFD** to both ToRs for fast failover; ECMP |
+| **Edge uplinks** | Two uplink VLANs, one per ToR |
+| **TEP redundancy** | Multiple TEPs per host mapped to separate uplinks |
+| **Core services path** | Redundant routing/firewall/load balancer in the north-south path |
+
+**Exam signals**
+- "Survive loss of one ToR switch" → dual ToRs, dual-homed hosts, BGP peering to both.
+- "Survive loss of a single host with no restart delay for a critical VM" → **vSphere FT** (HA restarts, FT does not).
+- "Redundant NSX Manager nodes must not share a host" → **VM-VM anti-affinity** (and ≥3 hosts).
+
+---
+
+## 2. Availability Across Multiple AZs
+
+### 2.1 Options Compared
+
+| Option | Description | RPO / RTO | Requirements | Trade-offs |
+|---|---|---|---|---|
+| **Single AZ, multi-rack** | Cluster spread across racks via fault domains | RPO=0; survives rack failure | Enough racks/hosts | No protection against site/AZ loss |
+| **vSAN stretched cluster (multi-AZ)** | One cluster split across two AZs + witness in third location | **RPO≈0**, automatic HA restart in surviving AZ (RTO = HA restart time) | Low inter-AZ latency (typically ≤5 ms RTT), high bandwidth, witness (≤ 200 ms RTT typical), balanced hosts | Higher cost (capacity in both sites), bandwidth/latency dependency, complexity |
+| **Multiple instances + replication/DR** | Separate VCF instances at different sites; async replication; orchestrated recovery | Non-zero RPO (minutes+); RTO depends on runbook/automation | Replication tooling, DR runbooks, recovery capacity | Longer distance, looser coupling; not automatic like stretched cluster |
+| **Active/Active apps across instances** | Application-level HA (load balancing, clustering, global load balancing) | Application-defined | App design supports it | Highest application resilience; requires app architecture |
+| **Hybrid** | Stretched cluster per metro pair plus DR to a third distant site | Combines near-zero RPO locally and DR for regional events | More infrastructure and operations | Highest protection and cost |
+
+→ Verify in VCF 9.0 docs: which domains (management/workload) support stretched clusters and any NSX/Edge constraints.
+
+### 2.2 vSAN Stretched Cluster: Design Decisions
+
+| Decision | Guidance |
+|---|---|
+| **Topology** | **Preferred site + secondary site + witness host/appliance** at a third location |
+| **Host distribution** | **Equal** number of hosts per data site |
+| **Witness** | Stores metadata only; must be at **independent third location** (not co-located with a data site); witness appliance sizing per object count |
+| **Latency/bandwidth** | Data-to-data: low RTT (typically ≤5 ms), bandwidth sized for write traffic (≈ peak write rate); data-to-witness: higher latency tolerated, modest bandwidth |
+| **Storage policy** | **Site disaster tolerance** (dual-site mirroring, or none/preferred/secondary) plus **FTT within site** (e.g., RAID-1/5/6 locally) |
+| **HA admission control** | Reserve **50% of cluster resources** so one site can run all workloads |
+| **Site affinity rules** | VM-Host "should" rules to run VMs in intended site; avoid cross-site chatter |
+| **Network** | Dedicated, redundant inter-site links (L2 or L3 as supported); routing for vSAN/witness traffic; MTU consistency |
+| **Failure behaviour** | Site failure: surviving site + witness keep quorum; HA restarts VMs. Inter-site link failure (ISL): preferred site retains quorum; secondary site VMs restart in preferred (split-brain protection) |
+| **Recovery** | On site return, resync; plan bandwidth and DRS behaviour |
+
+**Failure scenarios**
+
+| Failure | Result |
+|---|---|
+| One host | HA restarts VMs locally; vSAN rebuilds per FTT |
+| One data site | Witness + surviving site maintain quorum; VMs restart in survivor |
+| Witness only | Data stays available; further failure at that point risks loss of quorum (restore witness quickly) |
+| Inter-site link | Preferred site continues; secondary site hosts isolated, VMs restart in preferred site |
+| Site + witness simultaneously | Loss of quorum → data unavailable (**double failure beyond design**) |
+
+### 2.3 Networking Across AZs
+
+| Topic | Design |
+|---|---|
+| **Management/vMotion/vSAN** | Reachable between AZs; L2 or L3 with supported routing; sufficient bandwidth/latency |
+| **NSX overlay across AZs** | TEPs routable between sites; **MTU consistent** |
+| **Edge placement** | **Edge nodes in each AZ**; T0 uplinks per AZ with BGP to local ToRs; consider north-south traffic locality (avoid hair-pinning via the remote AZ) |
+| **IP mobility** | Overlay segments stretched across AZs keep VM IPs after restart |
+| **Gateway failover** | T0 active/standby with preferred site, or active/active per site with ECMP and routing metrics (design for symmetry for stateful services) |
+| **Physical connectivity** | Redundant, diverse-path inter-AZ links (separate carriers/paths) |
+| **Core services per AZ** | DNS, NTP, identity source, CA available in **both** AZs and the witness location where needed |
+| **Management components** | Management domain stretched if management plane must survive AZ loss; verify supported pattern and capacity for **all** management VMs to run in one site |
+| **Fleet/NSX Federation** | For multiple instances: global policy consistency, RTEP connectivity |
+
+### 2.4 Multi-AZ Design Rules
+
+- **Capacity:** each AZ must be able to carry **100% of protected workloads** (≈50% utilisation per site) if the requirement is full workload survival.
+- **Witness independence:** a witness in the same failure domain as a data site defeats the design.
+- **Consistency:** hosts per site equal; same hardware class.
+- **Test failover and failback**, including network partition scenarios.
+- **Don't forget backups**: stretched clusters protect against site loss, **not** against data corruption, deletion or ransomware; keep **backups/immutable copies** (recoverability).
+
+---
+
+## 3. Decision Guide
+
+| Requirement | Design |
+|---|---|
+| Survive host failure | vSphere HA with N+1 admission control, vSAN FTT=1+ |
+| Zero downtime for a single critical VM | vSphere FT (accept resource and feature limits) |
+| Redundant app/management nodes separated | VM-VM anti-affinity (enough hosts) |
+| Survive rack failure | vSAN fault domains by rack, hosts spread across racks, dual power |
+| Survive ToR/switch failure | Dual ToR, dual-homed hosts, BGP to both, BFD |
+| Survive AZ/site failure with RPO≈0, automatic restart | vSAN stretched cluster, equal hosts per site, third-site witness, 50% admission control |
+| Regional disaster, distant sites, tolerable data loss | Separate instances with replication/DR |
+| Both local zero-data-loss and regional protection | Stretched cluster (metro) + DR to third region |
+| Survive ransomware/corruption | Backups, immutable copies, DR (not just availability) |
+| Management plane must survive AZ loss | Stretch/duplicate management components with supported pattern; ensure services (DNS, NTP, identity) in both AZs |
+
+---
+
+## 4. Availability Trade-offs (AMPRS Lens)
+
+| Choice                                 | Benefit                 | Cost                                               |
+| -------------------------------------- | ----------------------- | -------------------------------------------------- |
+| Higher N+x headroom                    | A                       | Cost (idle capacity), P not harmed                 |
+| FTT=2 / RAID-6                         | A                       | Capacity, hosts, cost                              |
+| vSphere FT                             | A (zero downtime)       | Double resources, feature/scale limits             |
+| Stretched cluster                      | A, R (RPO≈0)            | Cost, bandwidth/latency dependency, complexity (M) |
+| Dedicated Edge cluster/bare-metal Edge | A, P                    | Cost                                               |
+| Separate instances plus DR             | R, regulatory isolation | Non-zero RPO/RTO, operational complexity           |
+| Strict "must" affinity rules           | S/licence compliance    | Can reduce A (blocks restarts)                     |
+
+---
+
+## 5. Exam Traps
+
+- **HA ≠ FT**: HA restarts (outage); FT is continuous (no outage).
+- **Availability ≠ recoverability**: stretched cluster does **not** replace backups.
+- **Witness must be at a third site**, not in either data AZ.
+- **50% admission control** for stretched clusters if all workloads must run in one site.
+- **Anti-affinity requires enough hosts**; "must" rules can hinder HA.
+- **Stretched cluster needs low latency**; for long distance use **DR/replication** instead.
+- **Network SPOFs** (single ToR, single inter-site link, single upstream router) defeat compute/storage redundancy.
+- Management components like **NSX Manager need 3 nodes**; SDDC Manager is a single appliance, so protect it with **HA + backups**.
+
+---
+
+## 6. Quick Recall
+
+- **In AZ**: HA (N+1/N+2), FT for select VMs, anti-affinity, vSAN FTT + fault domains, dual ToR/NIC/power, NSX Edge cluster with BGP+BFD, 3-node NSX Manager.
+- **Across AZs**: vSAN stretched cluster (equal hosts, third-site witness, RTT low, 50% reserve, site affinity) for RPO≈0; separate instances + DR for distance and non-zero RPO.
+- **Network**: redundant everything, Edge in each AZ, MTU consistent, core services in each AZ.
+- **Always**: eliminate SPOFs, size for failure, test failures, and keep backups.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/05-physical-design" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 05: Physical Infrastructure Design
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VMware Study Notes Hub
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/07-manageability" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 07: Manageability Architecture & Operational Governance →
+  </a>
+</div>

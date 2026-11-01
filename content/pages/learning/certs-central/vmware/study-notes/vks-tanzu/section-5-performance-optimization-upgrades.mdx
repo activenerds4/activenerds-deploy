@@ -1,0 +1,178 @@
+---
+title: "Section 5: Performance, Optimization, and Lifecycle Upgrades"
+description: "Surge node upgrades, control plane etcd maintenance, node pool scaling, Antrea traceflow, pod troubleshooting with kubectl-vsphere."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VMware Kubernetes (VKS 3V0-24.25)"
+trackSlug: "/learning/certs-central/vmware/study-notes/vks-tanzu"
+moduleNumber: 5
+totalModules: 5
+layout: "article"
+---
+
+**Troubleshoot and Optimize the VMware Solution**
+
+
+
+<Callout variant="tip" title="Exam Tip">
+Section 5 gives you a symptom and asks for the layer, the log, or the command. Build the mental map first: **VCF layer (networking/storage/compute) vs Supervisor layer vs VKS cluster layer**, then drill into the right controller log. Support bundles can be collected from the vSphere Client **even when the Supervisor is in an error or configuring state**.
+</Callout>
+
+
+
+---
+
+## Objective 5.1: Diagnose and Resolve Supervisor and VKS Cluster Provisioning, Connectivity, or Namespace Errors
+
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Non-Disruptive VKS Cluster Upgrades & Surge Node Pattern">
+
+Upgrading a Kubernetes workload cluster from version 1.29 to 1.30 must happen without service interruption:
+
+* **Surge Node Provisioning:** CAPI deploys a new control plane VM running the target Kubernetes release.
+* **Quorum Expansion:** The new node joins the existing `etcd` cluster.
+* **Safe Drain & Retirement:** The oldest control plane node is cordoned and drained of pods, then powered off and destroyed. This repeats sequentially for all control plane nodes.
+* **Worker Node Rollout:** Worker nodes are upgraded in batches based on `maxSurge` settings (e.g., +1 worker added, traffic migrated, old node removed).
+* **Exam Takeaway:** Never attempt to patch container binaries or OS packages in place on running worker nodes. Kubernetes nodes are strictly **immutable cattle**, not pets.
+
+</AccordionItem>
+
+</AccordionGroup>
+
+
+**Triage order (official approach):**
+1. Identify the stack: networking (**NSX VPC, NSX Classic/T1, or VDS**), storage (vSAN or other datastores via storage policies), load balancer (**FLB, NSX LB, Avi, or HA Proxy**).
+2. Get evidence early: exact error messages, what changed recently, and a **Supervisor support bundle** (vSphere Client).
+3. Match the symptom to a layer and owner: networking (connectivity, image pulls, LBs, firewall), authN/authZ (certificates, login, RBAC), storage (policy mismatch, CNS, capacity), lifecycle (enablement/upgrade prechecks).
+
+**Supervisor API unreachable - the four buckets:**
+
+| Bucket | Check |
+|---|---|
+| API server down | Core Supervisor health; control plane VM status |
+| Control plane VIP / LB not responding | LB health (NSX LB, Avi SEs, FLB) |
+| Authentication | Certificates, credentials, kubeconfig tokens |
+| Authorization | User exists but lacks RBAC on the namespace/resource |
+
+**VKS cluster provisioning workflow checkpoints (where it can stall):**
+
+| Stage | Owner / check |
+|---|---|
+| VirtualNetwork created and Ready | **CAPV** (Cluster API Provider vSphere) - `kubectl logs -n vmware-system-capw -c manager <capv-controller-manager-pod>` |
+| VirtualMachineService created, external IP assigned | CAPV + LB; a common stall is "**VirtualMachineService LB does not yet have VIP assigned**" - LB/IPAM problem |
+| Node VMs created | **VM Service** controller |
+| NSX objects realized | **NCP** watches VirtualNetwork and creates the T1 router + segment; check NCP logs on the Supervisor control plane |
+| Namespace errors | vSphere Namespace config: permissions, storage policies, VM class bindings, network settings |
+
+**Key takeaways**
+- NSX-backed stacks: TEP (tunnel endpoint) health on ESX hosts and NSX distributed LB health directly affect ClusterIP services and node/pod networking - validate NSX fabric health first.
+- Management network vs workload network on the **same subnet** causes system errors - check for this misconfiguration.
+- Control plane VM IP changes are unsupported; broken DHCP client-identifier reservations can sever API access.
+- Some steps need SSH to control plane VMs (see Broadcom KB 90194).
+
+---
+
+## Objective 5.2: Troubleshoot VM Class, Cluster Plans, Content Library, Storage, and Networking Errors
+
+| Symptom | Likely cause | Resolution |
+|---|---|---|
+| `VirtualMachineClassBindingNotFound` on the Cluster (ControlPlaneReady false, nodes not healthy) | VM class not associated with the namespace | Bind the VM classes to the vSphere Namespace; verify with `kubectl get virtualmachineclass` (singular - bound classes only). `virtualmachineclassbindings` is **deprecated since vSphere 8 U3** |
+| `kubectl get virtualmachineclasses` (plural) shows a class but provisioning fails | Plural lists **all** classes on the Supervisor, not the bound ones | Informational only; provision with bound classes from the singular command |
+| VKr missing from `kubectl get kr` | Content library not synced, not associated with the Supervisor, or OVF verification failed (`Verification Failed` tag on local library items) | Sync the library, associate it, re-import signed OVAs |
+| Cluster stuck after spec change | Wrong versioned ClusterClass (`classRef` / plan) or invalid variables | Check `kubectl describe cluster`, machine objects, and controller logs |
+| PVCs pending | Storage policy mismatch: datastore tags changed, policy not assigned to the namespace, or datastore out of capacity | Verify policy->StorageClass mapping and namespace assignment; check CNS logs (FCD registration/cleanup failures) |
+| LoadBalancer service pending | LB capacity/size exhausted, VIP pool (ingress CIDR) depleted, Avi SE not placed | Check LB objects and the ingress pool; for Avi, check Controller/SE state |
+| Node/pod/ClusterIP failures on NSX stacks | TEP or NSX fabric health | Validate NSX fabric in NSX Manager |
+
+**Key takeaways**
+- VM class errors = **namespace binding** problem almost every time.
+- Content library problems present as **missing releases**, not explicit errors - always check sync and association first.
+- CNS is the bridge: if provisioning/deprovisioning fails, look for FCD registration or cleanup failures in CNS logs.
+
+---
+
+## Objective 5.3: Troubleshoot Container Deployment, Registry, and Trusted CA Errors
+
+| Symptom | Likely cause | Resolution |
+|---|---|---|
+| Pods stuck `ImagePullBackOff` / vSphere Pod initialization fails | Registry unreachable, wrong image path, missing registry credentials | Check network path to the registry, image name/tag, and the **registry credential secret** (imagePullSecrets on the pod) |
+| Pulls fail with x509 / unknown authority | Registry CA not trusted by cluster nodes | Add the CA through the cluster spec **trust variables / additional trusted CA certificates** (documented v1beta1/v1beta2 and v1alpha3 examples) and roll the cluster |
+| Private registry auth works interactively but pods fail | Secret in wrong namespace or not referenced | Secrets are namespace-scoped; create the credential secret in the workload's namespace and reference it |
+| Deployment runs but is unreachable | Service type/selector mismatch, missing ingress/LB, network policy blocking | Check selectors, Service type, Contour/Envoy service IP, Antrea/Calico policies |
+| YAML apply rejected | Invalid key names (spaces), schema errors | Keys may use only `[-._a-zA-Z0-9]`; fix and re-apply |
+
+**Key takeaways**
+- Trusted-CA problems are solved **declaratively in the cluster spec**, never by logging into nodes - the "SSH in and edit the trust store" answer is always wrong.
+- For Harbor: verify the Harbor service health, its FQDN/DNS resolution, and that the consuming clusters trust its CA.
+
+---
+
+## Objective 5.4: Restart or Recover Failed VKS Upgrades
+
+**Recover a failed cluster update job:**
+1. Cluster status shows `upgradefailed` (common cause example: insufficient storage).
+2. On the Supervisor, find the update job:
+   `kubectl get jobs -n vmware-system-tkg -l "run.tanzu.vmware.com/cluster-namespace=``{cluster_namespace}`,cluster.x-k8s.io/cluster-name=`{cluster_name}"`
+3. Run `kubectl proxy &` (you cannot patch `.status` with kubectl).
+4. Raise the job's backoffLimit via curl:
+   `curl -H "Accept: application/json" -H "Content-Type: application/json-patch+json" --request PATCH --data '[{"op":"replace","path":"/spec/backoffLimit","value":8}]' http://127.0.0.1:8001/apis/batch/v1/namespaces/vmware-system-tkg/jobs/${update_job_name}`
+5. Clear the job's status conditions so the Job controller creates new pods:
+   `curl ... --request PATCH --data '[{"op":"remove","path":"/status/conditions"}]' http://127.0.0.1:8001/apis/batch/v1/namespaces/vmware-system-tkg/jobs/${update_job_name}/status`
+
+**Blocked upgrades (prechecks):** VKS runs software-misconfiguration prechecks; a failing check sets `SystemChecksSucceeded: False` (reasons include `MisconfiguredSoftwareChecks failed` and `DryRunChecks failed`, the latter simulating node/namespace creation every 24h to catch blocking webhooks). Fix the root cause; if the check is invalid, override it with the annotation `kubernetes.vmware.com/dangerous-skip-misconfigured-software-check-for-update: ""` on the Cluster spec.
+
+**Key takeaways**
+- First fix the underlying cause (storage, capacity, PDBs that block draining), then restart the job - restarting without fixing just fails again.
+- The override annotation is a documented last resort, not a first response.
+- Sequential-upgrade rule still applies on retry: you cannot jump minor versions.
+
+---
+
+## Objective 5.5: Optimize Cluster Performance Using Monitoring and Scaling Features
+
+| Tool | Use |
+|---|---|
+| **VCF Operations** | Monitors Supervisor state and resources; dedicated **vSphere Supervisor dashboards** after enabling the Supervisor data source/collection |
+| **vSphere Client** | Namespace resource monitoring (CPU/memory/storage capacity and usage per namespace), volume health for persistent volumes |
+| **Log forwarding** | Forward Supervisor logs to VCF Operations or an external syslog target - required for meaningful troubleshooting history |
+| **Metrics streaming** | Stream Supervisor metrics to a custom observability platform |
+| **In-cluster monitoring** | **Prometheus + Fluent Bit + Telegraf** standard packages for metrics, alerting, and log forwarding inside VKS clusters |
+| **Scaling levers** | Manual scaling (`kubectl edit` replicas), **Cluster Autoscaler** (demand-driven worker scaling), control plane sizing (scale-up only), VM class changes (rolling) |
+
+**Optimization play**
+- Right-size: match VM classes to workload profiles; separate node pools by OS/workload type with matching labels and taints.
+- Let the autoscaler handle elasticity; set realistic min/max and PDBs so scale-down and rolls are safe.
+- Watch namespace capacity/usage to catch quota ceilings before provisioning fails.
+
+**Key takeaways**
+- Monitoring is layered: platform (VCF Operations), Supervisor (vSphere Client, log forwarding), cluster (Prometheus/Fluent Bit packages). Map the question to the layer.
+- Performance issue + full namespace quota = the quota is the ceiling, not the cluster.
+
+---
+
+## Quick Recall Sheet
+
+- Triage: identify stack (VPC/T1/VDS + FLB/NSX LB/Avi) -> evidence + support bundle -> layer (network/auth/storage/lifecycle).
+- API down = API server, VIP/LB, authN, or authZ - four buckets.
+- Provisioning chain to check in order: **CAPV (VirtualNetwork) -> VirtualMachineService VIP -> VM Service (node VMs) -> NCP (NSX objects)**. Logs: `vmware-system-capw`.
+- VM class error = namespace **binding** (`VirtualMachineClassBindingNotFound`); plural `virtualmachineclasses` is informational only.
+- Missing VKr = library sync/association/`Verification Failed`. Pending PVC = policy/CNS. Pending LoadBalancer = LB capacity or ingress pool.
+- Registry/CA: imagePullSecrets per namespace; CA trust via **cluster spec trust variables**, never node edits.
+- Failed upgrade: fix cause, then raise job **backoffLimit** + clear **status.conditions** via `kubectl proxy` + curl; override bad prechecks with the `dangerous-skip-misconfigured-software-check-for-update` annotation.
+- Optimize: VCF Operations dashboards, log/metric forwarding, Prometheus/Fluent Bit in-cluster, autoscaler + right-sized VM classes + PDBs.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/learning/certs-central/vmware/study-notes/vks-tanzu/section-4-install-configure-administrate" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 4: Install, Configure, and Administrate VMware Tanzu
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VMware Study Notes Hub
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes/vks-tanzu" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 text-sm font-semibold transition-colors text-right">
+    Completed Track: VMware Kubernetes (VKS 3V0-24.25) ✓
+  </a>
+</div>

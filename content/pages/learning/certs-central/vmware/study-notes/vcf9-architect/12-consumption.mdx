@@ -1,0 +1,298 @@
+---
+title: "Section 12: Consumption Architecture & Private Cloud Self-Service"
+description: "VCF Automation templates, Terraform / Kubernetes providers, custom self-service catalog, approvals, pricing and metering."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF 9.0 Architect Exam Revision Notes"
+trackSlug: "/learning/certs-central/vmware/study-notes/vcf9-architect"
+moduleNumber: 12
+totalModules: 13
+layout: "article"
+---
+
+**Design a Consumption Strategy for VCF**
+
+→ Verify product names, tenancy constructs, supported features and limits against the current VCF 9.0 documentation and exam guide. In VCF 9.0 the Aria Automation role is delivered as **VCF Automation**, and Tanzu Kubernetes capabilities are delivered through **vSphere Kubernetes Service (VKS)** on the vSphere Supervisor. Terminology for tenancy (organisations, projects, regions, supervisor namespaces, etc.) has changed across releases, so confirm the current object model before the exam.
+
+---
+
+## 0. Consumption Fundamentals
+
+| Concept | Meaning |
+|---|---|
+| **Consumption strategy** | How the private cloud is **offered, requested, governed, billed and operated** by its consumers |
+| **Provider vs consumer** | **Provider** (platform team) builds and operates infrastructure; **consumers** (tenants, BUs, developers) request and use services |
+| **Cloud operating model** | Self-service, automation, policy-based governance, metering/showback, standardised catalogue |
+| **Service catalogue** | Pre-approved, templated offerings (VMs, databases, Kubernetes clusters, networks) |
+| **Guardrails, not gates** | Policy enforces compliance automatically while preserving developer speed |
+| **Trade-offs** | More automation/self-service = agility but needs upfront design, governance and skills; tight control = safety but slower delivery |
+
+**Design flow:** business drivers (agility, cost, compliance; see 3.1) → consumer personas and use cases → tenancy model → catalogue and governance → automation integration → day-2 operations/metering → modern-app (Kubernetes) offering.
+
+---
+
+## 1. VCF Automation: Tenant Design
+
+### 1.1 Tenancy Concepts
+
+| Construct                           | Purpose (verify exact names in VCF 9.0)                                                                               |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Provider (system) level**         | Platform administrators manage the platform, regions/infrastructure resources, policies, quotas, tenant onboarding    |
+| **Organisation (tenant)**           | Top-level tenant boundary: users, identity, quotas, catalogue, policies                                               |
+| **Project / space / namespace**     | Team or application grouping inside an organisation with its own members, quota and resources                         |
+| **Region / infrastructure mapping** | Mapping of VCF resources (workload domains/clusters/supervisors, NSX, storage policies) to tenant-consumable capacity |
+| **Roles**                           | Provider admin, organisation admin, project admin/member/viewer, consumer/developer (see RBAC in 3.9)                 |
+| **Identity**                        | Federation through **VCF Identity Broker** / enterprise IdP, groups mapped to roles                                   |
+
+### 1.2 Tenant Design Decisions
+
+| Decision | Options | Guidance / trade-off |
+|---|---|---|
+| **Tenant boundary** | Single organisation vs one organisation per business unit/customer/compliance zone | Multiple orgs = stronger isolation (identity, policy, quota, catalogue), more administration; single org = simpler, relies on projects for separation |
+| **Project structure** | By application, team, environment (dev/test/prod), or cost centre | Align to ownership and chargeback; avoid excessive proliferation |
+| **Mapping to infrastructure** | Shared workload domain vs **dedicated workload domain per tenant** | Dedicated = isolation, compliance, noisy-neighbour protection, independent lifecycle (higher cost); shared = efficiency |
+| **Network isolation** | Per-tenant **NSX T1** (or VPC-style constructs where applicable), segments, DFW policy; shared T0 vs dedicated T0/Edge | Per-tenant T1 on shared T0 is the common balance; dedicated T0/Edge cluster for strict isolation or throughput |
+| **Storage isolation** | Dedicated storage policies/datastores per tenant tier | Performance and compliance separation |
+| **Quotas and limits** | CPU/memory/storage/VM count/Kubernetes cluster counts per org/project | Prevent resource hogging, support capacity planning |
+| **Identity and RBAC** | Groups from enterprise IdP mapped to org/project roles; least privilege; separation of duties | Offboarding via directory; audit |
+| **Multi-region / multi-instance** | Expose multiple VCF instances/regions to a tenant | Placement policies for latency, residency, DR |
+| **Tenant onboarding process** | Automated: create org, quotas, identity, network, catalogue, policies | Repeatable with IaC/APIs |
+| **Branding and portal** | Per-tenant UX/branding where needed (service provider scenario) | Optional |
+
+### 1.3 Key Takeaways
+- **Organisation = strongest tenant boundary**; **project = team/app boundary**.
+- **Isolation level follows the requirement**: regulatory/contractual isolation → dedicated org **and** dedicated workload domain/network; internal BUs → shared infrastructure with quotas and policy.
+- **Quotas + capacity management** (3.6) must align: **quotas are not capacity**; over-allocating quotas without monitoring causes contention.
+- Keep tenant structure **simple and mapped to ownership/cost**.
+
+---
+
+## 2. Self-Service and Governance
+
+### 2.1 Self-Service Design
+
+| Element | Design decision |
+|---|---|
+| **Catalogue items** | Templates/blueprints for VMs, multi-tier apps, databases, Kubernetes clusters, networks, security groups; versioned, source-controlled |
+| **Request experience** | Portal, API/CLI, IaC (Terraform-style) and CI/CD integration for developers |
+| **Standardisation** | Small number of **sized, hardened, patched** offerings (T-shirt sizes), golden images |
+| **Day-2 actions** | Resize, snapshot, power, extend lease, add disk, scale, decommission, with RBAC controls |
+| **Lifecycle** | **Leases** and expiry to reclaim resources; reminders and extension policies |
+| **Placement** | Policies for cluster/domain/region/storage tier selection (tags, constraints, affinity) |
+| **Cost transparency** | Showback/chargeback tied to projects/cost centres (VCF Operations cost/metering) |
+
+### 2.2 Governance Design
+
+| Control                                 | Purpose                                                                                                        |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Approval policies**                   | Require approval for large/expensive/regulated requests; auto-approve standard small requests                  |
+| **Quotas, limits, entitlements**        | Control who can request what and how much                                                                      |
+| **Lease and day-2 policies**            | Prevent sprawl; enforce expiry                                                                                 |
+| **Naming, tagging, metadata standards** | Ownership, environment, cost centre, compliance classification; **tags also drive NSX DFW groups**             |
+| **Security guardrails**                 | Auto-apply NSX security groups/policy, encryption storage policy, approved images, network zone by environment |
+| **Compliance policies**                 | Enforce regulatory placement (data residency, dedicated domains)                                               |
+| **Integration with ITSM**               | Request/approval/CMDB records, incident/change linkage                                                         |
+| **Audit and reporting**                 | Request history, who did what, cost and compliance reports                                                     |
+| **Policy as code**                      | Version-controlled policy and templates; peer review and promotion (dev → prod catalogue)                      |
+
+### 2.3 Key Takeaways
+- **Governance by default**: embed security, tagging, placement and quotas in the **template/policy**, not in manual review.
+- **Approval only where risk or cost warrants it**; excessive approvals defeat self-service.
+- **Leases and rightsizing** control **VM sprawl** and cost.
+- **Tags/metadata are the glue** between consumption, security (NSX groups), cost allocation and operations.
+- **Catalogue content is governed software**: version it, test it, promote it.
+
+---
+
+## 3. Infrastructure Component Automation
+
+### 3.1 What to Automate
+
+| Layer                      | Examples                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Compute (vSphere)**      | VM provisioning, sizing, placement, customisation (cloud-init/guest customisation), post-provisioning configuration |
+| **Storage (vSAN/SPBM)**    | Storage policy assignment by tier, disk add/resize                                                                  |
+| **Network (NSX)**          | Segment/T1 creation, IP allocation, load balancer, NAT, DFW groups and rules, tags                                  |
+| **Security**               | Apply encryption policy, agent installation, certificate and secrets integration                                    |
+| **Platform operations**    | Domain/cluster/host expansion via SDDC Manager workflows/APIs, lifecycle, certificate renewal                       |
+| **Operations integration** | Auto-register in monitoring (VCF Operations), backup policy, DR protection, CMDB                                    |
+| **Identity**               | Group-to-role mapping, onboarding/offboarding                                                                       |
+| **Tenant onboarding**      | Create org/project, quotas, network, catalogue, RBAC                                                                |
+
+### 3.2 Integration Design Decisions
+
+| Integration                 | Purpose                                                   | Guidance                                     |
+| --------------------------- | --------------------------------------------------------- | -------------------------------------------- |
+| **IPAM**                    | Allocate IPs/DNS records automatically                    | Avoid conflicts, support re-IP and migration |
+| **DNS / AD**                | Register names, join domains                              | Needed for consistent naming and access      |
+| **ITSM (e.g., ServiceNow)** | Approvals, CMDB, incidents                                | Governance and audit                         |
+| **CI/CD and IaC**           | Pipelines, Terraform/Ansible/API-driven provisioning      | Developer-aligned consumption                |
+| **Secrets / PAM**           | Credentials injection, rotation                           | Security                                     |
+| **Backup / DR**             | Auto-enrol workloads                                      | Recoverability (3.8)                         |
+| **Monitoring / logging**    | Auto-enable agents, dashboards, alerts                    | Manageability (3.6)                          |
+| **Extensibility**           | Event-driven workflows, scripts, webhooks, custom actions | Keep minimal and maintainable; document      |
+
+### 3.3 Automation Design Principles
+
+| Principle | Meaning |
+|---|---|
+| **Declarative / desired-state** | Define outcomes (templates, IaC), not manual steps |
+| **Idempotent and repeatable** | Same input = same result |
+| **API-first** | Everything achievable through APIs for pipelines and integrations |
+| **Source control and CI for templates** | Peer review, testing, versioning, promotion |
+| **Least-privilege automation accounts** | Service accounts with narrow scope |
+| **Error handling and rollback** | Failed provisioning cleans up resources; notifications |
+| **Avoid over-customisation** | Heavy bespoke workflows create **manageability debt** and upgrade risk |
+| **Operational ownership** | Define who maintains templates, workflows, integrations |
+
+### 3.4 Availability and Sizing of the Automation Platform
+- **VCF Automation** (and dependencies: identity broker, VCF Operations, IPAM/ITSM) become **critical dependencies** for provisioning, though **running workloads are unaffected** if it is down.
+- Choose **HA/clustered form** when self-service is business-critical (see 3.3/3.4); include in **backup/DR**.
+- Size by **tenants, projects, catalogue items, concurrent deployments, integrations** (use official sizing guidance).
+- Plan **certificates, FQDN/VIP, load balancer** for the platform.
+
+---
+
+## 4. Modern Applications: VKS / Container Workload Domains
+
+### 4.1 Platform Building Blocks (verify VCF 9.0 terminology)
+
+| Component                                    | Role                                                                                                                 |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **vSphere Supervisor**                       | Kubernetes control plane integrated in vSphere; enables namespaces and Kubernetes services on a cluster              |
+| **vSphere Namespace / Supervisor Namespace** | Tenant/team boundary with quota, RBAC, storage policies and networking for Kubernetes workloads                      |
+| **vSphere Kubernetes Service (VKS)**         | Provisions and manages **conformant Kubernetes clusters** (formerly Tanzu Kubernetes Grid service) on the Supervisor |
+| **vSphere Pods / VM Service**                | Run pods directly on ESXi (where used) and manage VMs declaratively through Kubernetes APIs                          |
+| **NSX (or VDS with load balancer)**          | Pod/cluster networking, ingress, load balancing, network policy, DFW integration                                     |
+| **vSAN / SPBM and CSI**                      | Persistent volumes mapped to storage policies                                                                        |
+| **Container registry**                       | Image storage/provenance (e.g., Harbor or enterprise registry)                                                       |
+| **Private AI / GPU services**                | Where AI workloads are in scope (GPU clusters, model/service integrations)                                           |
+| **VCF Automation + VCF Operations**          | Consumption/catalogue for Kubernetes clusters; observability and capacity                                            |
+
+### 4.2 Design Decisions
+
+| Decision | Options | Guidance / trade-off |
+|---|---|---|
+| **Domain placement** | **Dedicated container workload domain/cluster** vs Supervisor enabled on an existing workload domain cluster | Dedicated = isolation, independent scaling/lifecycle, clear performance/security boundary (higher footprint); shared = efficiency |
+| **Cluster design for Supervisor** | Minimum hosts, HA, vSAN storage policy, failure domains | Supervisor control plane VMs need HA and capacity; align with availability requirement |
+| **Tenancy model** | Namespace per team/app/environment; org/project mapping in VCF Automation | Quotas/limits per namespace; RBAC from enterprise IdP |
+| **Cluster offering** | Standard cluster classes/sizes (small/medium/large), K8s versions, node pools | Standardise to reduce operational sprawl; define upgrade cadence |
+| **Networking** | NSX-backed (overlay, T1 per namespace/cluster, ingress/LB, network policy) vs VDS-based (verify supported options) | NSX = richer security (DFW/micro-segmentation), tenancy, load balancing; VDS = simpler |
+| **Network security** | Namespace/cluster isolation, **Kubernetes network policy plus NSX DFW**, egress control | Zero-trust for containers |
+| **Storage** | Storage classes mapped to vSAN policies (tiers), RWX needs (vSAN File Services/NFS) | Match performance/resilience per app |
+| **Persistent data protection** | Backup of PVs/cluster state, app-aware backup, GitOps redeploy | Recoverability for stateful apps |
+| **Registry and supply chain** | Private registry, image scanning, signing, admission control | Security |
+| **Identity/RBAC** | OIDC/SSO to clusters, namespace roles, least privilege | Consistent identity |
+| **Observability** | Metrics/logs/traces integration (VCF Operations, logs, Kubernetes-native tools) | Ops visibility across layers |
+| **Lifecycle** | Kubernetes version upgrades (rolling), Supervisor upgrades via vSphere lifecycle | Define cadence, n-1/n-2 version policy, test in non-prod |
+| **Scale and capacity** | Node pool autoscaling, cluster limits, GPU capacity | Capacity planning (3.6) |
+| **Developer experience** | Self-service Kubernetes clusters/namespaces through **VCF Automation catalogue**, CLI/API, GitOps pipelines | Speed with guardrails |
+| **Platform team model** | Platform engineering team owns platform; app teams own workloads | Clear responsibility split |
+
+### 4.3 Containers vs VMs: Placement Guidance
+
+| Workload type | Typical target |
+|---|---|
+| **Cloud-native, stateless, microservices** | VKS clusters / Kubernetes |
+| **Legacy/monolithic, licensed per VM, stateful traditional** | VMs in standard workload domains |
+| **Mixed (VM + container dependencies)** | VM Service/declarative VMs next to containers, shared networking and policy |
+| **AI/ML with GPU** | GPU-enabled cluster/domain, VKS with GPU node pools (verify) |
+
+### 4.4 Key Takeaways
+- **VKS on the Supervisor** = Kubernetes as a native part of VCF; **namespaces** are the tenant/quota boundary.
+- A **dedicated container workload domain** is the answer for **strict isolation, independent scaling or distinct hardware (GPU)**; shared clusters for **efficiency** where isolation needs are modest.
+- **NSX provides tenancy, load balancing and micro-segmentation** for containers; combine **Kubernetes network policy with DFW**.
+- Treat the **platform (Supervisor/VKS) as a product**: standard cluster classes, upgrade cadence, ownership.
+- **Stateful workloads** need **storage policy mapping and PV data protection**.
+
+---
+
+## 5. Metering, Showback and Chargeback
+
+| Decision | Guidance |
+|---|---|
+| **Model** | **Showback** (visibility, no billing) vs **chargeback** (internal billing) vs service-provider billing |
+| **Cost basis** | Resource-based (vCPU/GB/storage) pricing, tiered service levels, include licensing/overheads |
+| **Granularity** | Per project/org/cost centre via tags/metadata |
+| **Tooling** | VCF Operations cost/metering and reporting; integrate with finance systems |
+| **Behavioural effect** | Transparency drives rightsizing and lease discipline |
+| **Link to capacity** | Utilisation and demand data feed capacity forecasts (3.6) |
+
+---
+
+## 6. Scenario Cheat Sheet
+
+| Scenario | Design decision |
+|---|---|
+| Developers need on-demand environments in hours, with guardrails | **VCF Automation** catalogue + templates, policy-based approvals, quotas, leases, IaC/API access |
+| Multiple business units must not see each other's resources | **Separate organisations** (or at least projects with strict RBAC), per-tenant NSX T1 and DFW policy, quotas |
+| Regulated tenant requiring hard isolation | **Dedicated org + dedicated workload domain**, dedicated storage policy/network, encryption, dedicated Edge if needed |
+| VM sprawl and rising cost | **Leases**, rightsizing, quotas, showback/chargeback, reclamation |
+| Need ITSM approval and CMDB updates | VCF Automation **ITSM integration**, approval policies, CMDB sync |
+| Automatic IP/DNS assignment on provisioning | **IPAM and DNS integration** |
+| New workloads must inherit security policy automatically | **Tags/metadata in templates → NSX dynamic groups → DFW policy**; storage encryption policy by tier |
+| Provisioning must remain available during maintenance | **HA deployment** of VCF Automation and dependencies; backup/DR for platform |
+| Cloud-native teams need Kubernetes clusters on demand | **VKS** on Supervisor, cluster classes via catalogue, namespaces with quotas |
+| Strict separation of Kubernetes platform from VM estate, GPU hardware | **Dedicated container workload domain** |
+| Limited hardware, modest isolation needs | **Supervisor on an existing workload domain cluster** with namespace quotas |
+| Stateful apps on Kubernetes | Storage classes mapped to vSAN policies, PV backup, app-aware protection |
+| Multiple VCF instances/regions for tenants | **Regions/placement policies** by residency/latency; consistent catalogue and governance |
+| Heavy custom scripting causes upgrade issues | Reduce customisation, favour **declarative templates and standard integrations**, document ownership |
+| Platform team wants consistent Kubernetes versions | **Standard cluster classes and version policy**, scheduled upgrades |
+| Show departments their consumption | **VCF Operations cost/showback reports** by project/tag |
+
+---
+
+## 7. Consumption Trade-offs (AMPRS Lens)
+
+| Choice | Improves | Costs |
+|---|---|---|
+| Self-service + automation | M (consistency), speed | Upfront design, skills, platform dependency (A) |
+| Multiple organisations | S (isolation) | Admin overhead (M) |
+| Dedicated domain per tenant | S, P (isolation) | Cost, footprint, management overhead |
+| Approval workflows | S, compliance | Slower delivery |
+| Leases and quotas | Cost, capacity control | Consumer friction |
+| Heavy customisation | Fit to requirements | Manageability debt, upgrade risk |
+| Dedicated container domain | S, P, lifecycle independence | Cost, footprint |
+| Standardised cluster/VM offerings | M | Less flexibility |
+
+---
+
+## 8. Exam Traps
+
+- **Quotas ≠ capacity**; quota over-allocation still needs capacity management.
+- **Tenant isolation level must match the requirement**: don't over-engineer (cost) or under-engineer (compliance).
+- **Tags/metadata drive security, cost and operations**: missing tagging breaks DFW groups and showback.
+- **VCF Automation is a management-plane dependency**: running VMs survive an outage, but **provisioning and day-2 actions stop**; design HA/backup accordingly.
+- **Governance belongs in policy and templates**, not manual tickets.
+- **Namespace = Kubernetes tenant boundary**; **organisation/project = VCF Automation tenancy**; map them deliberately.
+- **NSX DFW and Kubernetes network policy are complementary**, not substitutes.
+- **Heavy bespoke automation** is a long-term risk; keep integrations standard and owned.
+- **Stateful containers** require **persistent storage design and backup**, not just cluster HA.
+- **Approvals should be risk-based**: approving everything defeats self-service.
+
+---
+
+## 9. Quick Recall
+
+- **Strategy**: personas → tenancy model → catalogue + governance → automation/integrations → metering → day-2 ops.
+- **Tenancy**: provider → **organisation** (strongest boundary) → **project**; dedicated domain/network for strict isolation, shared with quotas for efficiency.
+- **Self-service**: versioned templates, T-shirt sizes, API/IaC, leases, risk-based approvals, tags/metadata everywhere.
+- **Automation**: declarative, idempotent, API-first; integrate IPAM, DNS, ITSM, CI/CD, backup, monitoring, identity; avoid over-customisation; HA for the platform.
+- **Modern apps**: **VKS on Supervisor**, namespaces with quotas, NSX networking + DFW, vSAN storage classes, registry/supply chain, standard cluster classes and upgrade cadence, **dedicated container domain** for isolation/GPU.
+- **Metering**: tag-driven showback/chargeback via VCF Operations.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/11-migration" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 11: Workload Migration Strategies with VMware HCX
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VMware Study Notes Hub
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/13-monitoring" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 13: Monitoring, Observability & Proactive Telemetry →
+  </a>
+</div>

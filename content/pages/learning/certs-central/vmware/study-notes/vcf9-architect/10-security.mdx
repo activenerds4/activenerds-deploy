@@ -1,0 +1,303 @@
+---
+title: "Section 10: Security Architecture & Zero-Trust Governance"
+description: "NSX Distributed Firewall micro-segmentation, vSAN encryption (KMS / Native Key Provider), certificate lifecycle, hardening."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF 9.0 Architect Exam Revision Notes"
+trackSlug: "/learning/certs-central/vmware/study-notes/vcf9-architect"
+moduleNumber: 10
+totalModules: 13
+layout: "article"
+---
+
+**Design for Security**
+
+→ Verify product names, supported identity providers, encryption options, certificate workflows and compliance features against the current VCF 9.0 documentation and exam guide. Values and feature scope below are typical design guidance.
+
+---
+
+## 0. Security Fundamentals
+
+| Concept | Meaning |
+|---|---|
+| **Security (S in AMPRS)** | Confidentiality, integrity, availability of data/services, plus accountability (audit) and compliance |
+| **Defence in depth** | Multiple layered controls (physical, host, network, workload, identity, data, management) so no single failure exposes the environment |
+| **Least privilege** | Grant only the access required for a role, for only as long as needed |
+| **Zero trust** | Never trust by location; verify identity and policy for every flow; **default-deny** |
+| **Separation of duties** | No single person controls all stages of a sensitive process (admin vs auditor vs security) |
+| **Shared responsibility** | Platform team secures infrastructure; app owners secure application layers |
+| **Secure by design** | Security requirements captured early (Objective 3.1), mapped to design decisions with documented implications |
+
+**Design flow:** security/compliance requirement → threat/risk assessment → control selection per layer → validate (testing, compliance scans) → monitor and audit.
+
+**Trade-offs:** stronger security often reduces **manageability** (more policy/key/cert operations) and can add **performance** overhead (encryption, inspection). Document these as implications.
+
+---
+
+## 1. Securing the Management Plane vs Workloads
+
+| Aspect | **Management components** | **Workloads** |
+|---|---|---|
+| **Assets** | SDDC Manager, vCenter, NSX Manager, VCF Operations/Automation, identity broker, ESXi hosts, backup systems | Tenant VMs, containers, data, application traffic |
+| **Primary threats** | Admin credential compromise, lateral movement into management, supply-chain/unpatched components, misconfiguration | East-west lateral movement, malware/ransomware, data theft, insider threats |
+| **Key controls** | Network isolation, strong admin identity (SSO/MFA), RBAC, hardening, certificate hygiene, logging/audit, patching | **NSX micro-segmentation**, workload encryption, application identity, endpoint/IDS/IPS, RBAC for tenants |
+| **Ownership** | Platform/infrastructure and security teams | Application owners with platform-provided guardrails |
+
+**Key takeaway:** protect the **management plane first**; compromise there exposes everything.
+
+---
+
+## 2. Identity Management
+
+### 2.1 Design Decisions
+
+| Decision | Options | Guidance / trade-off |
+|---|---|---|
+| **Identity source** | Local accounts vs enterprise directory (AD/LDAP) vs external **IdP (OIDC/SAML)** | Use **centralised enterprise identity**; keep minimal local/break-glass accounts |
+| **SSO** | **VCF Identity Broker** federating components to enterprise IdP (verify supported IdPs/protocols) | One identity, consistent policy, easier offboarding; IdP becomes dependency (availability/recovery) |
+| **MFA** | Enforce via IdP for admin and privileged access | Strongly recommended for management plane |
+| **Service accounts** | Dedicated, least-privilege, rotated credentials | Avoid shared admin accounts |
+| **Break-glass access** | Local emergency accounts, vaulted, monitored | Needed if IdP/directory unavailable (**recoverability** link) |
+| **Privileged access** | Just-in-time elevation, PAM integration, session recording where required | Reduces standing privilege |
+| **Credential management** | Centralised password rotation (SDDC Manager manages rotation of service/infra credentials) | Reduces stale credentials and manual effort |
+| **Directory availability** | Redundant directory/IdP in each site/AZ | Identity outage blocks admin access, so design for HA/DR |
+
+### 2.2 Key Takeaways
+- Prefer **federated SSO with MFA**; **avoid shared local admin accounts**.
+- **Identity infrastructure is a dependency**: include it in availability/DR design and keep break-glass access.
+- **Audit trails** require unique identities per person.
+
+---
+
+## 3. RBAC (Role-Based Access Control)
+
+| Decision | Guidance |
+|---|---|
+| **Role model** | Define roles by function (infrastructure admin, network admin, security admin, operator, read-only/auditor, tenant admin, developer); map to **directory groups**, not individuals |
+| **Scope** | Assign roles at the **narrowest scope** (domain, cluster, folder, project/tenant) |
+| **Component-level RBAC** | vCenter roles/permissions, NSX roles (enterprise admin, network admin, security admin, auditor), SDDC Manager roles (admin, operator, viewer), VCF Operations and Automation roles/tenancy |
+| **Separation of duties** | Separate network-policy authors from approvers; separate auditors from admins |
+| **Tenancy** | **VCF Automation** organisations/projects with quotas and policy boundaries per tenant |
+| **Review** | Periodic access recertification; remove stale access; log privileged actions |
+| **Custom roles** | Create where built-in roles are too broad; document and review |
+
+**Exam signals**
+- "Auditors need read-only visibility across components" → read-only/auditor roles via groups.
+- "Business units must not see each other's resources" → separate **tenants/projects** (and/or domains) with scoped RBAC.
+
+---
+
+## 4. Network Security: NSX Micro-Segmentation (Distributed Firewall)
+
+### 4.1 Concepts
+
+| Concept | Meaning |
+|---|---|
+| **Distributed Firewall (DFW)** | Stateful L4-L7 (with context profiles) firewall enforced **at each VM's vNIC** in the hypervisor, for east-west traffic, independent of network topology |
+| **Gateway Firewall** | Enforced on T0/T1 Edge for **north-south** traffic |
+| **Micro-segmentation** | Fine-grained, workload-level policy limiting lateral movement; default-deny with explicit allows |
+| **Groups / tags** | Dynamic membership (tags, VM name, OS, segment, IP sets) so policy follows the workload |
+| **Policy categories** | Emergency, Infrastructure, Environment, Application (evaluated in order) |
+| **Advanced** | Identity-based firewall (user identity), L7 App ID, FQDN filtering, IDS/IPS, malware prevention, TLS inspection (where licensed/available) |
+
+### 4.2 Design Decisions
+
+| Decision | Guidance / trade-off |
+|---|---|
+| **Default posture** | **Default-deny** (zero trust) for production; move from default-allow with a phased approach |
+| **Rollout approach** | Discover flows (**VCF Operations for networks**/flow monitoring), build allow-lists, apply in **monitor/log mode**, then enforce |
+| **Segmentation model** | Environment (prod/dev), application tier (web/app/db), compliance zone (PCI), tenant; combine with tag-based groups |
+| **Policy structure** | Infrastructure services (DNS, NTP, AD) → environment isolation → application-specific rules |
+| **Grouping** | **Tag/attribute-based dynamic groups** (scalable, automation-friendly) over static IP sets |
+| **Exclusion list** | Keep minimal; management VMs (vCenter, NSX Manager) typically excluded or specially handled to avoid lock-out |
+| **Management plane protection** | Separate management network/VLANs; gateway firewall and physical firewall controls to management; restrict admin access paths (bastion/jump host) |
+| **North-south** | Gateway firewall on T0/T1 plus perimeter firewall; IDS/IPS where required |
+| **Automation** | Policy as code, tags applied via **VCF Automation** blueprints so new workloads inherit security |
+| **Performance** | DFW is distributed (scales with hosts); IDS/IPS/L7 inspection add CPU overhead (**DPU offload** may help, verify support) |
+| **Multi-site** | **NSX Federation** or consistent policy via automation across sites/instances |
+| **Operations** | Rule hygiene, logging to SIEM, change control for policy |
+
+### 4.3 Key Takeaways
+- **DFW protects east-west traffic at the vNIC**, even between VMs on the same segment/host; traditional perimeter firewalls cannot.
+- **Tag-based, default-deny** policies are the exam-standard answer for **ransomware lateral movement** and **compliance zoning (e.g., PCI)**.
+- Build policy from **observed flows** to avoid outages.
+- DFW does not replace **gateway/perimeter** firewalls (north-south) or **encryption** (data at rest/in transit).
+
+---
+
+## 5. Encryption
+
+### 5.1 Options
+
+| Layer | Option | What it protects | Notes |
+|---|---|---|---|
+| **Data at rest (datastore)** | **vSAN Data-at-Rest Encryption** | All data on the vSAN datastore (cluster-wide) | Uses KMS; (ESA: encryption at the cluster level, verify specifics); protects against stolen/removed drives |
+| **Data at rest (per VM)** | **VM Encryption** (storage-policy-based) | Individual VM files and disks; also usable with non-vSAN datastores | Granular per-VM control; encrypted before it leaves the host |
+| **Data in transit (vSAN)** | **vSAN Data-in-Transit Encryption** | vSAN traffic between hosts | Some CPU overhead |
+| **Data in transit (vMotion)** | **Encrypted vMotion** | VM memory/state during migration | Set to opportunistic/required per policy |
+| **Data in transit (network)** | **TLS/IPsec** (NSX IPsec VPN, application TLS, TLS inspection) | Traffic across sites/untrusted networks | NSX IPsec for site-to-site; apps for end-to-end |
+| **Host/boot** | **TPM 2.0 / secure boot / host attestation (key persistence)** | Host integrity and encryption key persistence | Hardware requirement |
+| **Backups** | Encrypted backup targets/copies | Backup data and offsite copies | Key management for restore |
+| **Management traffic** | TLS everywhere (certificates), secure protocols only | Admin/API traffic | Disable legacy protocols |
+
+### 5.2 Key Management (KMS)
+
+| Decision | Guidance |
+|---|---|
+| **KMS type** | **Native Key Provider** (built into vCenter; simpler) vs **external KMS** (KMIP-compliant, enterprise key lifecycle) |
+| **When external** | Regulatory requirements for separation of key custody, HSM-backed keys, centralised enterprise key management |
+| **Availability** | KMS must be **highly available** and reachable at host boot/reboot; loss of KMS can prevent access to encrypted data/VMs |
+| **Backup of keys** | Back up Native Key Provider and key escrow; test recovery (**recoverability** link) |
+| **Key rotation** | Define rotation policy; shallow vs deep rekey impact on performance/time |
+| **Separation of duties** | Key custodians separate from infrastructure admins where required |
+| **Placement** | KMS outside the encrypted cluster dependency chain (avoid circular dependency: don't host the only KMS on the datastore it encrypts without a recovery path) |
+
+### 5.3 vSAN Encryption vs VM Encryption
+
+| | **vSAN Data-at-Rest Encryption** | **VM Encryption** |
+|---|---|---|
+| **Scope** | Entire vSAN datastore/cluster | Per-VM (policy-based) |
+| **Granularity** | Coarse | Fine |
+| **Datastore support** | vSAN only | Any supported datastore (vSAN, VMFS, NFS) |
+| **Dedupe/compression interaction** | Encryption applied **after** space-efficiency (preserves efficiency, in OSA) | Encrypted before storage: **reduces dedupe/compression benefit** |
+| **Operational model** | Enable at cluster level; simple | Policy per VM; more control, more management |
+| **Choose when** | Whole-cluster protection (stolen disk, compliance), preserve efficiency | Only some VMs need encryption, mixed datastores, per-tenant keys |
+
+**Exam signals**
+- "Protect against theft of drives, entire cluster must be encrypted, keep space efficiency" → **vSAN data-at-rest encryption**.
+- "Only regulated VMs on a shared datastore need encryption / per-tenant control" → **VM Encryption**.
+- "Protect storage traffic between hosts / across stretched sites" → **vSAN data-in-transit encryption** (and/or encrypted links).
+
+---
+
+## 6. Compliance
+
+| Decision | Guidance |
+|---|---|
+| **Identify obligations** | PCI-DSS, HIPAA, GDPR, SOC 2, ISO 27001, NIST, CIS, DISA STIG, local data-residency laws; capture as **requirements/constraints** |
+| **Scope reduction** | Isolate regulated workloads in **dedicated workload domains/clusters/segments** to limit audit scope |
+| **Data residency** | Separate instances per jurisdiction; keep backups/DR in-region |
+| **Configuration baselines** | Hardening guides, compliance benchmarks, desired-state images, **drift detection** (VCF Operations compliance) |
+| **Audit logging** | Centralised log collection (**VCF Operations for logs**/SIEM), retention per regulation, tamper protection, time sync (NTP) |
+| **Evidence** | Reports and dashboards, change records, access reviews |
+| **Patch/vulnerability management** | Timely lifecycle updates via VCF (Objective 3.6), vulnerability scanning |
+| **Segmentation proof** | NSX policy as evidence of isolation (e.g., PCI cardholder data environment) |
+| **Separation of duties** | Role separation for admins/auditors/key custodians |
+| **Third-party/supply chain** | Verified software sources, signed updates, vendor support contracts |
+
+**Key takeaways**
+- **Compliance drives requirements**; map each control to a design decision and validation method.
+- **Reducing scope** (dedicated domains/segments) often lowers cost and audit complexity.
+- **Logging with proper retention** is a frequent compliance requirement and affects **VCF Operations for logs sizing** (Objective 3.4).
+
+---
+
+## 7. Certificate Management
+
+| Decision | Options | Guidance / trade-off |
+|---|---|---|
+| **CA model** | **VMCA** (default) vs **enterprise/internal CA** (Microsoft CA, OpenSSL-based) vs **public/commercial CA** | Use **enterprise CA** for consistent trust and compliance; default self-signed/VMCA = lowest effort but untrusted outside |
+| **Integration** | SDDC Manager supports CA integration for certificate generation/replacement across VCF components | Reduces manual effort and error |
+| **Scope** | vCenter, NSX Manager, SDDC Manager, ESXi hosts, VCF Operations/Automation, identity broker, load balancer VIPs | Replace default certs on all management endpoints |
+| **Lifecycle** | Track expiry, renew before expiry, automate where possible | **Expired certificates cause outages** (service communication failures) |
+| **Key strength / algorithm** | Per policy (e.g., RSA 2048+ / SHA-256+) | Compliance requirement |
+| **SANs / FQDNs** | Correct DNS names and SANs; forward/reverse DNS consistent | Mismatch breaks trust and integration |
+| **Trust chain** | Distribute root/intermediate CA to all components and clients | Required for validation |
+| **Private key protection** | Secure CA and key storage, restricted access, backup | Compromise of CA = broad trust compromise |
+| **Operational process** | Documented renewal runbook, test in non-prod, change windows | Avoid surprise outages |
+
+**Exam signals**
+- "Browsers/clients warn about untrusted certs on VCF endpoints" → replace with **enterprise CA-signed** certificates, distribute the CA chain.
+- "Outage after upgrade due to expired cert" → implement **certificate monitoring and renewal process**.
+
+---
+
+## 8. Additional Hardening Controls
+
+| Area | Controls |
+|---|---|
+| **Hosts (ESXi)** | Lockdown mode, disable unneeded services (SSH/shell, normally off), secure boot, TPM attestation, host firewall, strong root/credential policy, **execution-only/signed VIB policy** |
+| **Management network** | Dedicated management network/VLANs, restricted access (jump host/bastion), firewall rules between admin and management zones, out-of-band network isolated |
+| **Patching** | Regular lifecycle updates; vulnerability scanning |
+| **Logging/monitoring** | Syslog to central SIEM, alerting on privileged actions and config changes |
+| **Time and DNS** | Reliable, secured NTP and DNS (integrity matters for certificates and logs) |
+| **Backups** | Encrypted, immutable, offsite, access restricted |
+| **VM/workload hygiene** | Golden images, minimal software, endpoint/EDR where applicable, disable unused devices |
+| **Kubernetes (VKS)** | Pod security policies/standards, namespace RBAC, network policy via NSX, image provenance |
+| **Physical** | Data centre access control, tamper protection |
+
+---
+
+## 9. Scenario Cheat Sheet
+
+| Scenario | Design decision |
+|---|---|
+| Ransomware lateral movement is a top concern | **NSX DFW micro-segmentation**, default-deny, tag-based groups, IDS/IPS, immutable backups |
+| PCI cardholder data must be isolated | Dedicated workload domain/cluster/segments, DFW policy, encryption, logging, RBAC separation, evidence reporting |
+| Whole-cluster encryption, preserve space efficiency | **vSAN data-at-rest encryption** with KMS |
+| Only some VMs need encryption, mixed storage | **VM Encryption** via storage policy, Native Key Provider or external KMS |
+| Regulation requires separate key custody | **External KMIP KMS/HSM**, key custodians separate from admins |
+| Enterprise SSO and MFA for admins | **VCF Identity Broker** federated with corporate IdP, MFA at IdP, break-glass local accounts |
+| Different departments must be isolated in self-service | **VCF Automation tenants/projects**, scoped RBAC, NSX policy per tenant |
+| Need audit evidence of admin actions | Unique identities, centralised logging with retention, role separation, SIEM integration |
+| Certificate warnings and expiry risk | Enterprise CA integration via SDDC Manager, monitoring/renewal process, trust chain distribution |
+| Management plane exposed to user networks | Dedicated management network, firewalling, jump host, restrict access paths, MFA |
+| Data must stay in-country | Instance/domain per jurisdiction, DR/backups in-region, check cloud/third-party services |
+| Security vs performance concerns on inspection | Scope IDS/IPS/L7 to sensitive zones, DPU offload where supported, size hosts accordingly |
+| Identity provider outage locks out admins | Redundant IdP/directory, break-glass accounts, documented recovery |
+
+---
+
+## 10. Security Trade-offs (AMPRS Lens)
+
+| Choice | Improves | Costs |
+|---|---|---|
+| Default-deny micro-segmentation | S | Policy effort and operations (M), risk of outages if poorly rolled out |
+| Encryption (rest/transit) | S, compliance | CPU/IO overhead (P), key management complexity (M), KMS dependency (A/R) |
+| Dedicated domains for regulated workloads | S, compliance scope | Cost, management overhead (M) |
+| External KMS/HSM | S (custody separation) | Cost, complexity, availability dependency |
+| IDS/IPS/L7 inspection | S | Performance overhead, tuning effort |
+| Federated SSO/MFA | S, M | IdP dependency; need break-glass |
+| Strict RBAC/separation of duties | S | Slower operations, more role management |
+| Frequent patching | S | Maintenance windows, change risk (M, A) |
+
+---
+
+## 11. Exam Traps
+
+- **DFW = east-west (vNIC level)**; **gateway firewall = north-south**. Know which the scenario needs.
+- **Encryption does not replace segmentation** (and vice versa); layered controls.
+- **KMS availability matters**: unreachable KMS can block host/VM access; design HA and key backup.
+- **vSAN encryption = datastore-wide; VM Encryption = per-VM**; VM Encryption reduces dedupe/compression efficiency.
+- **Management plane first**: isolate and harden before workloads.
+- **Local shared admin accounts** are an anti-pattern; keep only vaulted break-glass accounts.
+- **Expired certificates cause outages**; certificate lifecycle needs process and monitoring.
+- **Compliance is a requirement**, not an afterthought: capture it in 3.1 and trace to decisions.
+- **Security controls have performance and manageability costs**: document the implications.
+
+---
+
+## 12. Quick Recall
+
+- **Layers**: physical → host → network → workload → identity → data → management; **defence in depth, least privilege, zero trust**.
+- **Identity**: VCF Identity Broker + enterprise IdP + MFA; break-glass accounts; redundant identity services.
+- **RBAC**: group-based roles, narrow scope, separation of duties, tenant isolation via VCF Automation.
+- **NSX**: DFW (east-west, default-deny, tag-based, flow-driven rollout), gateway firewall (north-south), IDS/IPS, Federation for multi-site policy.
+- **Encryption**: vSAN DaR (cluster-wide), VM Encryption (per-VM), DiT for vSAN/vMotion, IPsec/TLS, TPM; **KMS** (Native Key Provider vs external KMIP) must be HA and backed up.
+- **Compliance**: map regulations to controls, isolate regulated scope, baselines/drift detection, central logging with retention.
+- **Certificates**: enterprise CA via SDDC Manager, full coverage, trust chain, expiry monitoring and renewal runbook.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/09-recoverability" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 09: Recoverability Architecture & Disaster Recovery
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VMware Study Notes Hub
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/11-migration" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 11: Workload Migration Strategies with VMware HCX →
+  </a>
+</div>

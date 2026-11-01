@@ -1,0 +1,464 @@
+---
+title: "Module 16: Identity Federation, SSO & Role-Based Access Control"
+description: "vCenter Single Sign-On (SSO), Active Directory / LDAP over SSL, OIDC federation (Entra ID, Okta), SDDC Manager role assignment."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF Administrator Study Guide"
+trackSlug: "/learning/certs-central/vmware/study-notes/vcf-administrator"
+moduleNumber: 16
+totalModules: 18
+layout: "article"
+---
+
+> **Instructor note:** VCF identity architecture changed between the 4.x/5.x and 9.x releases. In 4.x/5.x, Workspace ONE Access (WSA, formerly VMware Identity Manager / vIDM) provided identity for the Aria/vRealize products, and vCenter SSO was the core for the management stack. In VCF 9.x, the **VCF Identity Broker** replaces Workspace ONE Access as the identity layer across VCF components. **Always confirm which version your exam blueprint targets** and read the current exam guide and product docs for your release. This guide covers both so you can recognize either in a question.
+
+---
+
+## 1. Learning Objectives
+
+After this module you should be able to:
+
+- Explain the identity and access model in VCF (authentication vs. authorization).
+- Describe how vCenter SSO (Platform Services functions embedded in vCenter) works and how identity sources are added.
+- Compare AD over LDAP(S), Integrated Windows Authentication (IWA), OpenLDAP, and federated identity (OIDC/SAML).
+- Explain the role of Workspace ONE Access / VMware Identity Manager and the VCF Identity Broker.
+- Assign roles in SDDC Manager, vCenter, and NSX using least privilege.
+- Troubleshoot common SSO and identity-source failures.
+
+---
+
+## 2. Core Concepts
+
+| Term | Meaning |
+|---|---|
+| **Authentication (AuthN)** | Proving who you are (password, MFA, SAML/OIDC token). |
+| **Authorization (AuthZ)** | What you are allowed to do (roles, privileges, permissions). |
+| **Identity source (IdP / directory)** | Where user and group accounts live (AD, LDAP, local). |
+| **SSO** | One login grants access to multiple components without re-entering credentials. |
+| **RBAC** | Access granted via roles assigned to users/groups on specific scopes or objects. |
+| **Federation** | Delegating authentication to an external IdP via SAML 2.0 or OIDC. |
+
+**Key principle:** Authenticate against a central directory, authorize through **groups** mapped to roles. Avoid assigning roles to individual users.
+
+---
+
+## 3. vCenter Single Sign-On (SSO)
+
+### 3.1 Architecture
+- In modern VCF, each workload/management domain vCenter Server has **embedded** SSO. External Platform Services Controller (PSC) is **not supported** (removed in vSphere 7.0).
+- Default SSO domain is `vsphere.local` (set at deployment; cannot be renamed later).
+- Management domain vCenter and workload-domain vCenters can be placed in the same SSO domain using **Enhanced Linked Mode (ELM)** for shared identity, permissions, tags, and licenses. VCF 5.x supports ELM for workload domains, deployed via the SDDC Manager workflow. Verify the supported topology for your release.
+- SSO services: Security Token Service (STS), Directory Service (`vmdir`), Certificate Authority (VMCA), Lookup Service.
+
+### 3.2 Default SSO groups (in `vsphere.local`)
+
+| Group | Purpose |
+|---|---|
+| `Administrators` | Full SSO configuration rights (add identity sources, manage users) |
+| `CAAdmins` | Manage VMCA certificates |
+| `LicenseService.Administrators` | Manage licenses |
+| `SystemConfiguration.Administrators` / `BashShellAdministrators` | Appliance/system configuration and shell access |
+| `TrustedCertificateAdministrators` | Manage trusted certificates |
+| `ActAsUsers`, `ExternalIDPUsers`, etc. | Token delegation / federated user roles |
+
+Default local accounts: `administrator@vsphere.local` and the appliance `root` account.
+
+### 3.3 Supported identity sources
+
+| Identity source | Notes |
+|---|---|
+| **Active Directory over LDAP(S)** | Recommended for AD. Works without domain-joining vCenter. Use LDAPS. |
+| **Active Directory (Integrated Windows Authentication)** | vCenter joined to AD domain. **Deprecated** in vSphere 8.x and removed in later releases. Prefer AD over LDAP or federation. |
+| **OpenLDAP** | Non-Microsoft LDAP directories. |
+| **Local OS** | Local users on the vCenter appliance. Not recommended for production. |
+| **vsphere.local** | Built-in SSO domain, always present. |
+| **Identity Federation (OIDC/SAML)** | vCenter delegates to an external IdP such as Microsoft AD FS, Okta, or Microsoft Entra ID. Supports MFA and conditional access at the IdP. |
+
+### 3.4 Adding Active Directory over LDAP(S)
+
+Navigate: **vSphere Client → Administration → Single Sign On → Configuration → Identity Provider → Identity Sources → Add**
+
+Required values:
+
+| Field | Example |
+|---|---|
+| Identity source type | Active Directory over LDAP |
+| Name | `corp.example.com` |
+| Base DN for users | `OU=Users,DC=corp,DC=example,DC=com` |
+| Base DN for groups | `OU=Groups,DC=corp,DC=example,DC=com` |
+| Domain name / alias | `corp.example.com` / `CORP` |
+| Primary server URL | `ldaps://dc01.corp.example.com:636` |
+| Secondary server URL | `ldaps://dc02.corp.example.com:636` |
+| Certificate | Upload CA / DC certificate (required for LDAPS) |
+| Username / password | Dedicated **read-only service account** (e.g., `svc-vcenter-ldap@corp.example.com`) |
+
+**Ports to memorize**
+
+| Port | Protocol |
+|---|---|
+| 389 | LDAP (unencrypted) |
+| 636 | LDAPS |
+| 3268 / 3269 | Global Catalog LDAP / LDAPS |
+| 88 | Kerberos |
+| 53 | DNS |
+
+**After adding the source:**
+1. Optionally set it as the **Default identity source** so users can log in without typing the domain prefix.
+2. Add AD **groups** to vCenter SSO groups (e.g., add `VCF-Admins` to `Administrators`) if they need SSO administrative rights.
+3. Assign vCenter roles via **Global Permissions** or object-level **Permissions**.
+
+### 3.5 Identity Federation (summary)
+- vCenter acts as an OIDC relying party. An **external IdP** (AD FS, Okta, Entra ID) performs authentication.
+- Setup requires an application group/client in the IdP, a redirect URI pointing to vCenter, and the IdP metadata/discovery URL.
+- Group claims from the IdP are matched to vCenter groups. Users and groups are searched through the IdP's directory (via SCIM or LDAP, depending on the IdP).
+- **Only one identity provider** can be configured for federation per vCenter. Verify current limits for your release.
+- Benefit: MFA, conditional access, and a single place for lifecycle management.
+
+### 3.6 Time and DNS dependencies
+- Kerberos and token validation are sensitive to time skew (default **5 minutes** in AD). Keep NTP consistent across vCenter, ESXi, and domain controllers.
+- Forward and reverse DNS must resolve for vCenter, DCs, and SDDC Manager.
+
+---
+
+## 4. Workspace ONE Access / VMware Identity Manager / VCF Identity Broker
+
+### 4.1 What it is
+- **VMware Identity Manager (vIDM)** was renamed **Workspace ONE Access (WSA)**. In VCF 4.x/5.x, WSA was deployed through **vRealize Suite Lifecycle Manager (vRSLCM, later Aria Suite Lifecycle)** as the **global environment (`globalenvironment`)** and provided SSO for vRealize/Aria products (Operations, Automation, Log Insight/Operations for Logs).
+- WSA could be deployed as a **single node, a three-node cluster** (with a load balancer), and was frequently integrated with **AD (via LDAP or Kerberos/IWA)** for user/group sync and with **NSX ALB or NSX LB** for clustering.
+- **In VCF 9.x**, the **VCF Identity Broker** is the strategic replacement. It provides SSO across VCF components (for example vCenter, NSX, VCF Operations, VCF Automation) using OIDC/SAML and supports external IdPs plus directory sync. Workspace ONE Access is **not** used as the primary VCF identity solution there.
+
+### 4.2 WSA directory integration (4.x/5.x)
+
+| Concept | Detail |
+|---|---|
+| **Directory types** | Active Directory over LDAP, Active Directory (Integrated Windows Authentication), generic LDAP. |
+| **Connector** | Built-in connector in the WSA appliance syncs users and groups from the directory. |
+| **Sync** | Scheduled or on-demand. You choose which groups and users to sync, using Base DN and filters. |
+| **Attribute mapping** | Map `userPrincipalName`, `sAMAccountName`, `mail`, etc. |
+| **Local admin** | Default local `admin` user and `configadmin` for the appliance. Keep these as break-glass accounts. |
+| **Access policies** | Control authentication methods (password, Kerberos, certificate, MFA) per application. |
+
+### 4.3 Typical WSA integration flow with VCF
+1. Deploy WSA through vRSLCM (or the SDDC Manager workflow that triggers vRSLCM).
+2. Configure the directory (AD over LDAP) and sync target groups.
+3. Assign roles to synced groups in each consuming product (e.g., vRealize Operations roles).
+4. Optionally integrate with a **third-party IdP** for MFA.
+
+### 4.4 Exam-oriented comparison
+
+| Item | vCenter SSO | WSA / vIDM | VCF Identity Broker (9.x) |
+|---|---|---|---|
+| Primary purpose | Authenticate to vSphere/VCF infrastructure | SSO for Aria/vRealize apps and other SaaS/web apps | Unified SSO across VCF components |
+| Deployed by | vCenter (embedded) | vRSLCM / Aria Suite Lifecycle | VCF management components (confirm in release docs) |
+| Directory sources | AD LDAP(S), IWA, OpenLDAP, Local, Federation | AD LDAP/IWA, LDAP | External IdPs and directory sources |
+| Standards | LDAP, Kerberos, OIDC | SAML, OAuth2, OIDC, LDAP | SAML, OIDC |
+
+---
+
+## 5. SDDC Manager Authentication and Roles
+
+### 5.1 How SDDC Manager authenticates users
+- SDDC Manager uses the **management domain vCenter's SSO** as its identity provider.
+- Users and groups are **not created inside SDDC Manager**. You add an **identity source in vCenter** first, then **add that user or group to SDDC Manager** and assign a role.
+- In 5.x releases, SDDC Manager also supports **identity federation settings** (Administration → Single Sign-On) to integrate with external IdPs such as AD FS, Okta, and Entra ID. Check your release notes for supported IdPs.
+
+### 5.2 SDDC Manager roles
+
+| Role | Capabilities |
+|---|---|
+| **ADMIN** | Full access: all workflows, lifecycle management, user management, configuration changes. |
+| **OPERATOR** | Can perform most day-2 operations (e.g., view and run workflows) but **cannot** perform user management or administrative-only actions. |
+| **VIEWER** | **Read-only** access. Cannot create, change, or delete resources. Sensitive information such as credentials is hidden. |
+
+### 5.3 Assigning a role
+
+**SDDC Manager UI → Administration → Users and Groups → Add User or Group**
+
+1. Select the identity domain (e.g., `corp.example.com`).
+2. Search for the user or group.
+3. Assign **ADMIN**, **OPERATOR**, or **VIEWER**.
+
+→ **Best practice:** Assign roles to **groups**, not individuals.
+
+### 5.4 Local and service accounts
+
+| Account | Purpose |
+|---|---|
+| `admin@local` | Local break-glass administrator for the SDDC Manager API/UI. Works when SSO is unavailable. |
+| `vcf` | Appliance OS account for SSH. Use `su` to become root. Direct root SSH is disabled by default. |
+| `root` | OS superuser (via `su` from `vcf`). |
+| `backup` | Used for SFTP backup operations. |
+| Service accounts (`svc-*`) | Created automatically by SDDC Manager in vCenter, NSX, and ESXi. Used for automation and credential rotation. **Do not modify manually.** |
+
+### 5.5 Password and credential management
+- SDDC Manager's **Password Management** page can **rotate** or **update (remediate)** passwords for ESXi, vCenter, NSX Manager, NSX Edge, and the SDDC Manager local accounts.
+- **Rotate** = SDDC Manager generates a new password. **Update** = you supply a password. **Remediate** = fix a mismatch where the real password differs from what SDDC Manager has stored.
+- Default rotation policy for service accounts can be scheduled (commonly 30, 60, or 90 days).
+
+---
+
+## 6. vCenter Roles and Permissions
+
+### 6.1 Permission model
+
+A **permission** = **User or Group** + **Role** + **Object** + **Propagate flag**.
+
+```
+Permission:  [Principal]  +  [Role]  +  [Inventory object]  +  [Propagate to children?]
+```
+
+### 6.2 Key system roles
+
+| Role | Description |
+|---|---|
+| **No Access** | Explicitly denies everything on the object. Overrides other permissions on that object. |
+| **Read-only** | View inventory and state; no changes. |
+| **Administrator** | All privileges. |
+| **No Cryptography Administrator** | Administrator minus cryptographic operations (encrypt VM, manage KMS). |
+| **Virtual Machine Power User** | Manage VM configuration and power operations. |
+| **Virtual Machine User** | Power and console operations only. |
+| **Resource Pool Administrator** | Manage resource pools and assign VMs into them. |
+| **Datastore Consumer** | Allocate space on datastores. |
+| **Network Administrator / Network Consumer** | Manage or consume networks. |
+| **Content Library Administrator / Registered User** | Manage or use content libraries. |
+| **Trusted Infrastructure Administrator** | Manage vSphere Trust Authority. |
+
+**System roles are read-only.** To customize, **clone** a role and modify the clone.
+
+### 6.3 Precedence rules (heavily tested)
+
+1. **Permissions defined directly on a child object override propagated permissions from a parent.**
+2. **A permission assigned directly to a user overrides permissions the user inherits through group membership** on the same object.
+3. If a user belongs to **multiple groups** with different roles on the same object, the user receives the **union** of privileges.
+4. **No Access** on an object wins over other group-derived roles on that same object.
+5. **Global Permissions** apply across all vCenter instances in the ELM/SSO domain and across inventory trees, including content libraries and tags. Use them sparingly.
+
+### 6.4 Global vs. vCenter permissions
+
+| Type | Scope | Where configured |
+|---|---|---|
+| **Global Permissions** | All vCenters in the SSO domain, plus global objects (content libraries, tags) | Administration → Access Control → Global Permissions |
+| **vCenter Permissions** | Specific inventory objects in one vCenter | Right-click object → Add Permission |
+
+### 6.5 ESXi access
+- ESXi local `root` should be tightly controlled.
+- **Lockdown mode** (Normal / Strict) restricts direct host access; **Exception Users** are allowed to authenticate directly.
+- ESXi hosts can be joined to AD, but in VCF the common practice is to manage hosts via vCenter and SDDC Manager credentials.
+- SSH and ESXi Shell should be disabled unless needed.
+
+---
+
+## 7. NSX RBAC (brief, commonly paired)
+
+| NSX Role | Typical scope |
+|---|---|
+| **Enterprise Admin** | Full NSX access |
+| **Network Admin** | Network configuration (no security policy) |
+| **Security Admin** | Security configuration (no network) |
+| **Auditor** | Read-only |
+| **Network Operator / Security Operator** | Day-2 operational tasks |
+| **VPN Admin, LB Admin, GI Admin, Cloud Admin, Project Admin** | Specialized or multi-tenant scopes |
+
+NSX integrates with **VMware Identity Manager/WSA**, **LDAP/AD directly**, or **vCenter-integrated/federated SSO**, depending on release. Verify the supported method for your NSX version.
+
+---
+
+## 8. Design and Security Best Practices
+
+- Use **AD over LDAPS** (or federation) instead of plain LDAP or IWA.
+- Create a **dedicated, read-only service account** for directory binding with a non-expiring or managed password.
+- Use **role-based AD groups** such as `VCF-Admins`, `VCF-Operators`, `VCF-ReadOnly`.
+- Apply **least privilege**. Clone and trim roles rather than using Administrator broadly.
+- Keep **break-glass accounts** (`administrator@vsphere.local`, `admin@local`, WSA `admin`) with vaulted credentials.
+- Enable **MFA** through federation to an external IdP where possible.
+- Use **valid CA-signed certificates** so LDAPS and federation trust chains work.
+- Maintain **time sync (NTP)** and **DNS** consistency.
+- Audit regularly: review permissions, Global Permissions, and group membership.
+- Rotate credentials using **SDDC Manager Password Management**.
+
+---
+
+## 9. Troubleshooting Cheat Sheet
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Cannot add AD over LDAPS identity source | Untrusted certificate, wrong URL, or port 636 blocked | Upload the correct CA chain; verify firewall and DNS |
+| AD users can authenticate but cannot see inventory | No permission assigned | Assign role at the correct object or Global Permissions |
+| "Invalid credentials" for AD user | Wrong domain prefix, UPN vs. sAMAccountName, or default source not set | Log in as `user@domain`; set default identity source |
+| SSO breaks after AD password change for the service account | Bind account password expired or changed | Edit the identity source with the new password |
+| Logins fail intermittently | Time skew, DNS issues, or DC unreachable | Check NTP and DNS; add a secondary LDAP URL |
+| User in AD group not recognized in SDDC Manager | Identity source not added in vCenter first | Add the identity source to vCenter, then add the user or group in SDDC Manager |
+| SDDC Manager UI login fails but `admin@local` works | SSO or identity-source issue | Fix the vCenter identity source |
+| Federated login fails | Mismatched redirect URI, client secret, or clock skew | Reconfigure IdP application settings and recheck |
+
+Useful logs (vCenter appliance): `/var/log/vmware/sso/`, `/var/log/vmware/vmdird/`, `/var/log/vmware/vmware-sts-idmd/`.
+
+---
+
+## 10. Exam Tips
+
+1. **SDDC Manager has three roles: ADMIN, OPERATOR, VIEWER.** Memorize what each can and cannot do.
+2. **Identity source goes into vCenter first**, then the user or group is added in SDDC Manager.
+3. **Prefer groups over users** in every answer about assigning roles.
+4. **LDAPS (636) → LDAP (389).** IWA is deprecated; the best-practice answer is LDAPS or federation.
+5. **Permission precedence:** direct object → propagated; user-direct → group-derived; multiple groups = union; No Access overrides on the same object.
+6. **Global Permissions** span all vCenters in the SSO domain.
+7. **System roles cannot be edited.** Clone them.
+8. **External PSC is gone** (vSphere 7+). Embedded only.
+9. **`vsphere.local` cannot be renamed** after deployment.
+10. **WSA/vIDM = Aria-stack SSO** (4.x/5.x). **VCF Identity Broker = 9.x direction.** Read each question for version clues.
+11. **Rotate vs. Update vs. Remediate** passwords in SDDC Manager are distinct operations.
+12. **Don't modify `svc-*` service accounts manually.** SDDC Manager manages them.
+13. **Time and DNS** are the first things to check for "login randomly fails."
+14. Watch for **least privilege** wording. The correct answer is rarely Administrator.
+
+---
+
+## 11. Practice Questions
+
+### Question 1
+A VCF administrator has added an Active Directory identity source to the management domain vCenter. Members of the AD group `VCF-Ops-Team` can log in to the vSphere Client, but they cannot log in to SDDC Manager. What should the administrator do?
+
+- **A.** Reinstall the SDDC Manager appliance.
+- **B.** Add the `VCF-Ops-Team` group in SDDC Manager under Users and Groups and assign it a role.
+- **C.** Add `VCF-Ops-Team` to the `LicenseService.Administrators` SSO group.
+- **D.** Create local accounts in SDDC Manager for each member.
+
+<details>
+<summary>Answer and Explanation</summary>
+
+**Correct answer: B.**
+
+SDDC Manager relies on vCenter SSO for authentication, but **authorization is separate**. Even though the identity source exists, users and groups must be explicitly added in SDDC Manager (Administration → Users and Groups) and assigned **ADMIN, OPERATOR, or VIEWER**.
+
+- A is unnecessary and disruptive.
+- C grants license-service rights in vCenter, which has nothing to do with SDDC Manager access.
+- D violates the best practice of using directory groups and is not how SDDC Manager manages users.
+</details>
+
+---
+
+### Question 2
+A user named Priya is a member of two AD groups. Group `VM-ReadOnly` has the **Read-only** role on the `Prod` folder. Group `VM-PowerUsers` has the **Virtual Machine Power User** role on the same `Prod` folder. No permission is assigned directly to Priya. What are Priya's effective privileges on the `Prod` folder?
+
+- **A.** Read-only only, because the more restrictive role wins.
+- **B.** The union of Read-only and Virtual Machine Power User privileges.
+- **C.** No access, because conflicting roles cancel each other out.
+- **D.** Administrator, because multiple groups escalate privileges.
+
+<details>
+<summary>Answer and Explanation</summary>
+
+**Correct answer: B.**
+
+When a user inherits permissions from multiple groups on the **same object**, vCenter grants the **union** of the privileges. Restrictive-wins logic applies only when **No Access** is assigned, or when a permission is assigned **directly to the user** (a user-direct permission overrides group-derived permissions on that object).
+
+- A is a common misconception.
+- C is incorrect. Conflicts do not cancel.
+- D is incorrect. Union of two roles does not produce Administrator.
+</details>
+
+---
+
+### Question 3
+Security policy requires that vCenter authenticate AD users using an encrypted connection, without joining the vCenter appliance to the domain. Which identity source configuration meets this requirement?
+
+- **A.** Active Directory (Integrated Windows Authentication)
+- **B.** Active Directory over LDAP using `ldap://` on port 389
+- **C.** Active Directory over LDAP using `ldaps://` on port 636 with the CA certificate uploaded
+- **D.** Local OS identity source
+
+<details>
+<summary>Answer and Explanation</summary>
+
+**Correct answer: C.**
+
+**AD over LDAP with LDAPS (port 636)** encrypts directory traffic and **does not require the vCenter to be domain-joined**. Uploading the issuing CA certificate allows vCenter to trust the domain controllers.
+
+- A requires a domain join and is deprecated.
+- B is unencrypted.
+- D uses local accounts on the vCenter appliance, not AD users.
+
+*Bonus:* Federation to an external IdP (AD FS, Okta, Entra ID) is another modern option that also avoids a domain join and adds MFA support.
+</details>
+
+---
+
+## 12. Quick Review Checklist
+
+- [ ] I can explain the difference between authentication and authorization in VCF.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can list vCenter SSO identity source types and say which are preferred.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know LDAP/LDAPS/GC port numbers.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can add AD over LDAPS to vCenter step by step.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can describe WSA/vIDM's role in 4.x/5.x and the VCF Identity Broker in 9.x.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can name the three SDDC Manager roles and their limits.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know the order of operations: vCenter identity source, then SDDC Manager user/group.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can apply vCenter permission precedence rules correctly.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know the purpose of `admin@local`, `vcf`, `backup`, and service accounts.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can explain rotate vs. update vs. remediate for passwords.
+<details>
+<summary>Explanation</summary>
+
+</details>
+---
+
+## 13. Further Reading
+
+- Broadcom TechDocs: *VMware Cloud Foundation Administration Guide* (Identity and Access Management sections for your release)
+- Broadcom TechDocs: *vSphere Authentication* and *vSphere Security* guides
+- Broadcom TechDocs: *Workspace ONE Access* and *VCF Identity Broker* documentation
+- VCP-VCF Administrator Exam Guide (current version, available from Broadcom Education)
+- Hands-on Labs (HOL) for VCF: identity and lifecycle modules
+
+→ **Disclaimer:** Feature names, supported identity providers, and exam objectives change between releases. Validate details against the official documentation for your VCF version before the exam.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/learning/certs-central/vmware/study-notes/vcf-administrator/vcf-15-vcf-automation-multitenancy" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Module 15: VCF Automation, Cloud Templates & Multitenancy
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VMware Study Notes Hub
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes/vcf-administrator/vcf-17-security-certs-passwords" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 17: Security, Certificate Management & Password Rotation →
+  </a>
+</div>

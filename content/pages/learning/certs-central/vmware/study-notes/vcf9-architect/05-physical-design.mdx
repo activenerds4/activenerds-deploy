@@ -1,0 +1,256 @@
+---
+title: "Section 05: Physical Infrastructure Design"
+description: "ReadyNode hardware sizing, leaf-spine network fabric, 25GbE/100GbE NICs, MTU 9000 jumbo frames, VLAN and IP allocation."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF 9.0 Architect Exam Revision Notes"
+trackSlug: "/learning/certs-central/vmware/study-notes/vcf9-architect"
+moduleNumber: 5
+totalModules: 13
+layout: "article"
+---
+
+**Creating VCF 9.0 Physical Designs**
+
+→ Verify all numbers (minimum hosts, MTU, VLAN requirements, sizing, appliance footprints) against the current VCF 9.0 Planning and Preparation Workbook, VMware Compatibility Guide and exam guide. The values below are typical design guidance, not authoritative limits. Legacy "Aria" names are mapped to VCF 9.0 names where used.
+
+**Naming map:** Aria Automation → **VCF Automation**; Aria Operations → **VCF Operations** (includes fleet management); Cloud Builder → **VCF Installer**.
+
+---
+
+## 0. Physical Design: What It Is
+
+- **Specific, implementable** realisation of the logical design: exact products/versions, host specs, counts, network devices, VLAN IDs, subnets, IPs, MTU, storage devices, sizing.
+- Audience: **implementers/engineers**. Must be **buildable and supportable**.
+- Every physical choice traces to a **logical decision**, which traces to a **requirement**.
+- Inputs: logical design, **VCF Planning and Preparation Workbook**, **VMware Compatibility Guide**, VCF BOM (bill of materials) for the chosen release.
+
+| Level | Example |
+|---|---|
+| Logical | "Management domain cluster with HA and resilient storage" |
+| **Physical** | "4× vSAN ESA ReadyNodes, 2× 25 GbE, vSAN FTT=1 RAID-5, VLAN 1611 for vSAN, MTU 9000" |
+
+---
+
+## 1. Hardware Prerequisites (All Domains)
+
+| Area | Physical requirement / decision | Notes |
+|---|---|---|
+| **Compatibility** | Servers, NICs, storage devices, firmware and drivers on the **VMware Compatibility Guide** for the target ESXi version | Unsupported hardware = unsupported VCF; treat as a **constraint** |
+| **vSAN ReadyNodes** | Use **vSAN ReadyNodes** (or certified components) for the chosen vSAN architecture | **ESA** needs ESA-certified NVMe-based ReadyNodes; **OSA** supports hybrid/all-flash |
+| **Homogeneous hosts per cluster** | Consistent CPU generation, memory, NICs, storage config | Simplifies HA, DRS, EVC, vSAN |
+| **CPU** | Core count/clock for workload; socket licensing implications | Check VCF licensing (per core) and EVC baseline if mixed generations |
+| **Memory** | Capacity for workloads + management + HA headroom | Avoid over-commit for critical workloads |
+| **Boot device** | Dedicated, supported boot media (e.g., M.2/BOSS or SSD) | Not shared with vSAN capacity devices |
+| **TPM / secure boot (if required)** | TPM 2.0, UEFI secure boot | Security/attestation requirement |
+| **Firmware / driver baseline** | Consistent, validated firmware set (e.g., via vendor tooling) | Lifecycle management expects consistent baselines |
+| **Out-of-band management** | iDRAC/iLO/BMC on dedicated network | Remote operations and recovery |
+| **Power and cooling** | Redundant PSUs on separate A/B feeds; rack capacity | Availability (**A**) |
+| **GPU / accelerators** | Certified GPU hosts, profile planning | Only for AI/VDI workloads; separate cluster |
+| **Core infrastructure** | DNS (forward/reverse), NTP, DHCP (TEP if used), CA, backup target | Must be reachable before bring-up |
+
+---
+
+## 2. VCF Fleet Topology (Physical)
+
+| Topology                          | Physical implications                                                                                                                                                                                                                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Consolidated, single instance** | Minimum hosts (often 4 for vSAN with HA headroom); single rack possible; workload and management share hardware                                                                                                                                                                       |
+| **Standard, single instance**     | Separate hosts: management domain cluster + workload domain cluster(s); more racks/ToRs; separate failure domains by rack                                                                                                                                                             |
+| **Multi-instance fleet**          | Hardware, network and core services **per site/instance**; inter-site WAN links sized for management traffic, replication, VCF Operations; DNS/NTP/CA available at each site                                                                                                          |
+| **Stretched cluster (vSAN)**      | Hosts split evenly across two sites + **witness host/appliance at a third location**; inter-site latency typically low (metro, check current RTT limit); bandwidth sized for vSAN write traffic; witness link requirements; L2/L3 design for management/vMotion/vSAN and NSX Edge/TEP |
+| **DR instances**                  | Matching or scaled-down capacity at recovery site; replication links sized for RPO; recovery-site core services                                                                                                                                                                       |
+
+**Exam signals**
+- "Two data centres 5 km apart, RPO=0" → stretched cluster hardware split evenly + third-site witness; check RTT and bandwidth.
+- "Branch office, no space" → consolidated minimum-host design.
+- "Per-region data residency" → separate physical instance per region with local core services.
+
+---
+
+## 3. Network Infrastructure: ToR, Spine-Leaf, VLANs, MTU
+
+### 3.1 Switching Topology
+
+| Decision | Recommendation | Rationale |
+|---|---|---|
+| **Fabric** | **Spine-leaf** (2+ spines, leaf pairs per rack) | Predictable east-west latency, scale-out |
+| **ToR** | **Two ToR switches per rack** (redundant), each host dual-homed | Removes single points of failure |
+| **Routing boundary** | **L3 at the ToR/leaf** (routed uplinks, per-rack subnets) | Smaller L2 failure domains; needs VLAN/subnet plan per rack, DHCP relay for TEPs |
+| **Oversubscription** | Low ratio (e.g., ≤3:1 typical; lower for vSAN ESA/high-throughput) | Performance (**P**) |
+| **Link speed** | 25 GbE minimum common; 100 GbE for ESA/high-density/Edge | ESA NVMe can saturate 10 GbE |
+| **Redundancy** | Dual switches, dual NICs, separate cabling paths; MLAG/vPC (if used) or independent uplinks | Availability (**A**) |
+| **Edge connectivity** | Edge uplinks to ToR/leaf; BGP peers | North-south design |
+
+### 3.2 VLANs and Subnets (Typical Management and Infrastructure Networks)
+
+| Network | Purpose | Notes |
+|---|---|---|
+| **Management** | ESXi, vCenter, NSX Manager, SDDC Manager, appliances | Routable, DNS-registered |
+| **vMotion** | VM migration | Dedicated VLAN, MTU 9000 recommended |
+| **vSAN** | Storage traffic | Dedicated VLAN, MTU 9000 recommended, isolated |
+| **Host TEP (NSX)** | Geneve tunnel endpoints on hosts | Routable between racks if L3 fabric; **MTU ≥ 1600 (9000 common)**; DHCP or static IP pool |
+| **Edge TEP** | Tunnel endpoints on Edge nodes | Same MTU requirement |
+| **Edge uplinks** | North-south VLANs to ToR for BGP | Typically 2 VLANs (one per ToR) for redundancy |
+| **Replication / backup / NFS (if used)** | Data protection and storage | Separate VLAN/QoS |
+| **Out-of-band mgmt** | BMC/iDRAC/iLO | Separate management network |
+
+### 3.3 MTU
+
+| Network | Typical MTU | Rule |
+|---|---|---|
+| Management | 1500 | Standard |
+| vMotion / vSAN | 9000 recommended | Consistent end to end |
+| NSX overlay (Host/Edge TEP) | ≥ 1600 required, 9000 common | Must be end to end across **all** switches/routers on the TEP path |
+| Edge uplinks | 1500 or 9000 per design | Consistent with upstream peers |
+
+**Key takeaways**
+- **MTU must match across every hop** (hosts, vSwitch/VDS, ToR, spine, router). Mismatch = silent packet drops and hard-to-diagnose failures.
+- Overlay adds Geneve encapsulation overhead; **underlay MTU must exceed the overlay MTU**.
+- **L3 fabric needs per-rack TEP subnets** and DHCP relay/IP pools; stretched L2 does not.
+- Document **VLAN IDs, subnets, gateways, IP pools** in the Planning and Preparation Workbook.
+
+---
+
+## 4. Management Domain: Physical Hardware
+
+| Decision | Physical design guidance |
+|---|---|
+| **Host count** | Minimum per VCF guidance (commonly 4 hosts for vSAN-based management domain to allow FTT and maintenance headroom); more for HA/N+2 or large fleets |
+| **Host spec** | Sized for: vCenter, NSX Manager (3-node cluster), SDDC Manager, VCF Operations (and fleet components), VCF Automation, logs/networks collectors, supporting appliances, plus **growth** and **HA headroom** |
+| **Storage** | Principal storage: vSAN (ESA or OSA per hardware); capacity includes appliances, logs, backups staging, FTT overhead, **slack space (~25-30%)** |
+| **Network** | Dual ≥25 GbE NICs per host (vSAN ESA often prefers higher); redundant ToR connectivity |
+| **Rack placement** | Spread hosts across racks/power feeds where possible (rack-level fault tolerance) |
+| **NSX Manager nodes** | 3 nodes on separate hosts (anti-affinity) |
+| **Boot / firmware** | Dedicated boot device; consistent firmware |
+| **Backup target** | Reachable backup repository (SFTP/NFS) for SDDC Manager, vCenter, NSX |
+| **Out-of-band** | BMC access for recovery |
+
+**Exam signals**
+- "Management domain must tolerate host failure during maintenance" → at least **N+1 beyond vSAN minimum** (extra host) and FTT chosen accordingly.
+- "Fleet will grow to many instances/domains" → size management domain for **future** components (more vCenters, NSX managers, VCF Operations load).
+
+---
+
+## 5. Workload Domain: Host Configuration
+
+| Decision | Guidance |
+|---|---|
+| **Cluster size** | Minimum for chosen vSAN policy (e.g., FTT=1 RAID-1: 3 hosts; RAID-5: 4; FTT=2 RAID-6: 6 — verify) + **HA/maintenance headroom** (N+1/N+2) |
+| **Host profile** | Standardised per workload class: general compute, memory-heavy, storage-heavy, GPU, Kubernetes |
+| **CPU/memory ratios** | Target vCPU:pCPU and memory over-commit by workload criticality |
+| **vSAN design** | **ESA** (NVMe, higher performance/efficiency) vs **OSA** (disk groups; hybrid/all-flash); device count/capacity; storage policy (FTT, RAID level), **dedupe/compression/encryption** options |
+| **Supplemental storage** | FC/iSCSI/NFS arrays: HBA/NIC, zoning/VLAN, multipathing (where supported) |
+| **Network adapters** | ≥2 × 25 GbE (or 100 GbE); separate or converged traffic with NIOC/QoS |
+| **NIC allocation** | Typical: 2 NICs carrying mgmt, vMotion, vSAN, TEP via VDS with teaming and NIOC; 4 NICs if separation needed (e.g., storage separate) |
+| **Failure domains** | Rack-aware: spread cluster hosts across racks; vSAN fault domains |
+| **GPU / Kubernetes** | GPU-certified hosts in a separate cluster; Supervisor/VKS requirements |
+| **Stretched cluster** | Even host split + witness; site affinity policies |
+
+**Exam signals**
+- "Predictable performance for databases" → fewer VMs/host, lower over-commit, ESA/NVMe, sufficient network speed.
+- "Survive rack failure" → vSAN fault domains across racks, hosts spread across racks, adequate host count.
+- "Existing SAN must remain" → HBA/NIC + zoning/multipathing in host spec; supplemental storage.
+
+---
+
+## 6. Physical Networking for NSX
+
+| Component                                  | Physical design guidance                                                                                                                  |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Host uplinks / VDS**                     | VDS with teaming (load-based teaming or LACP per design); NIOC shares/limits                                                              |
+| **TEP networks**                           | One or two TEPs per host (per uplink); subnet per rack in L3 designs                                                                      |
+| **Edge nodes**                             | **VM Edge** (flexible, shared hosts) vs **bare-metal Edge** (dedicated hardware, max throughput); size S/M/L/XL for VM; NIC speed matters |
+| **Edge cluster hosts**                     | Dedicated Edge cluster for performance/isolation; separate ToR uplinks for each Edge to separate ToRs                                     |
+| **BGP peering**                            | T0 uplinks peer with both ToRs (BGP, BFD for fast failover), ECMP across uplinks                                                          |
+| **Physical firewalls / external services** | North-south firewall, load balancers, external DNS/NTP/AD reachable                                                                       |
+| **Multi-site**                             | NSX Federation needs inter-site latency/bandwidth within supported limits; RTEP network for Federation edge connectivity                  |
+
+**Exam signals**
+- "Edge throughput of 40 Gbps+" → bare-metal Edge with high-speed NICs.
+- "Fast north-south failover" → BGP + BFD, dual ToR peers.
+
+---
+
+## 7. Automation: Physical Infrastructure Sizing (VCF Automation)
+
+| Decision | Guidance |
+|---|---|
+| **Placement** | Management domain (typically) |
+| **Deployment form** | **Single-node** (smaller footprint) vs **HA cluster** (multiple nodes, higher footprint) |
+| **Appliance size** | Based on number of tenants/projects, catalogue items, concurrent deployments, endpoints, and workflow load (use official sizing guide) |
+| **Compute headroom** | Reserve CPU/memory in management domain; consider reservations for critical appliances |
+| **Storage** | Capacity on management vSAN; account for growth in content/deployments and backups |
+| **Network** | Management VLAN/subnet, load balancer VIP for HA, FQDNs, certificates |
+| **Integrations** | Connectivity to identity broker/IdP, ITSM, IPAM, DNS, NSX/vCenter endpoints |
+| **Availability** | HA form + anti-affinity across hosts; backup scope |
+
+---
+
+## 8. Operations: Physical Infrastructure Sizing (VCF Operations)
+
+| Decision                                             | Guidance                                                                                                                               |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Placement**                                        | Management domain; **remote collectors** at remote sites/instances                                                                     |
+| **Deployment form**                                  | Single-node vs **HA cluster** (primary, replica, data nodes)                                                                           |
+| **Node size**                                        | Driven by **number of monitored objects and metrics**, retention period, number of adapters/instances (use official sizing calculator) |
+| **Storage**                                          | Data retention and metric volume drive disk size; account for growth as fleet expands                                                  |
+| **Logs (VCF Operations for logs)**                   | Size for **ingestion rate (GB/day), retention period, compliance requirement**, cluster size for HA                                    |
+| **Network visibility (VCF Operations for networks)** | Platform + collector nodes sized for flow volume; collectors per site/domain                                                           |
+| **Collectors**                                       | Remote collectors reduce WAN traffic and provide local resilience                                                                      |
+| **Network**                                          | Reachability to all vCenters, NSX Managers, hosts, ESXi syslog, switches (for visibility), bandwidth for collection                    |
+| **Fleet management**                                 | Sizing for lifecycle management of multiple instances; maintenance window planning                                                     |
+| **Availability / backup**                            | HA nodes with anti-affinity; backup configuration and retention                                                                        |
+
+**Exam signals**
+- "Compliance requires 12 months of logs" → increase log storage and retention sizing accordingly.
+- "Operations must monitor 5 remote sites over limited WAN" → remote collectors at each site.
+- "Monitoring must survive a host failure" → HA cluster with anti-affinity.
+
+---
+
+## 9. Scenario Cheat Sheet
+
+| Scenario | Physical design response |
+|---|---|
+| Small branch, 4 hosts | Consolidated, 4 ReadyNodes, dual ToR, 25 GbE, small-form management appliances |
+| Production site with vSAN ESA | ESA-certified NVMe ReadyNodes, ≥25 GbE (100 GbE for high I/O), MTU 9000, dual ToR |
+| Network team provides only MTU 1500 end to end | Overlay (≥1600) not supported → **must raise underlay MTU** or change design; log as risk until resolved |
+| Need rack-failure tolerance | Spread hosts across racks, vSAN fault domains, dual power feeds, enough hosts |
+| Two metro sites, RPO=0 | Stretched cluster: equal hosts per site, witness at third site, validated latency/bandwidth, redundant inter-site links |
+| Heavy north-south traffic | Bare-metal Edge, 25/100 GbE NICs, ECMP, BGP with BFD, dual ToR |
+| Hosts from mixed CPU generations | Separate clusters, or use EVC baseline (performance trade-off) |
+| L3 spine-leaf fabric with per-rack subnets | Per-rack TEP subnets, DHCP relay or IP pools, routed management/vMotion/vSAN planning |
+| Existing SAN retained | Add HBAs/NICs, zoning, multipathing; supplemental storage design |
+| Large logging requirement | Scale VCF Operations for logs nodes and storage to ingestion/retention |
+| Multi-site monitoring over WAN | Remote collectors per site, local core services |
+| Management domain growth planned | Over-provision hosts/storage in management domain now (capacity headroom) |
+
+---
+
+## 10. Quick Recall
+
+- **Physical = exact and buildable**: compatibility-guide hardware, ReadyNodes, sizes, VLAN IDs, IPs, MTU.
+- **Spine-leaf, dual ToR, dual NICs, L3 at leaf**; redundant power (A/B feeds).
+- **MTU**: overlay ≥1600 (9000 common); vSAN/vMotion 9000; **must match end to end**.
+- **Management domain**: min hosts + HA headroom + growth; NSX Manager ×3; sized for all fleet components.
+- **Workload domains**: standardised host profiles; vSAN ESA vs OSA; failure domains; N+1 or N+2.
+- **NSX physical**: TEPs per rack (L3), BGP+BFD to dual ToR, Edge VM vs bare metal, dedicated Edge cluster for performance.
+- **VCF Automation and VCF Operations**: size by tenants/workload and object/metric/log volume; HA form if critical; remote collectors for remote sites; plan storage growth and retention.
+- **Stretched cluster**: equal hosts per site + witness at third site; latency and bandwidth validated.
+- **Always** trace physical choices to logical decisions and requirements, and validate against the compatibility guide and Planning and Preparation Workbook.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/04-logical-design" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 04: Logical Design Specifications
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VMware Study Notes Hub
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes/vcf9-architect/06-availability" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 06: Availability Architecture & High Availability (HA) →
+  </a>
+</div>

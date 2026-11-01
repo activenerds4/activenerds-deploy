@@ -1,0 +1,799 @@
+---
+title: "Module 05: vCenter Server & ESXi Configuration in VCF"
+description: "vSphere Distributed Switch (VDS) profiles, teaming policies, Enhanced Linked Mode, NTP, DNS, and host commissioning."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF Administrator Study Guide"
+trackSlug: "/learning/certs-central/vmware/study-notes/vcf-administrator"
+moduleNumber: 5
+totalModules: 18
+layout: "article"
+---
+
+## vCenter Server and ESXi Configuration for VCF Workloads
+
+
+
+<Callout variant="info" title="VCF 9.0 Release Note">
+- Explain how vCenter Server and ESXi form the compute layer that VCF domains are built on.
+</Callout>
+
+
+- Configure and reason about **cluster-level settings**: EVC, vSphere Cluster Services (vCLS), lifecycle images, and host configuration consistency.
+- Configure **vSphere DRS**: automation level, migration threshold, rules, resource pools.
+- Configure **vSphere HA**: host/VM monitoring, admission control, isolation response, heartbeats, failure responses.
+- Describe **license assignment** in VCF 5.x and VCF 9.0.
+- Recognize which changes must be made through VCF tooling and which can be made directly in vCenter.
+
+---
+
+## 2. Where vCenter and ESXi Fit in VCF
+
+| Layer | Role in VCF |
+|---|---|
+| **ESXi** | Hypervisor on every host; provides compute, and vSAN storage when used |
+| **vCenter Server** | One per domain (management domain and each VI workload domain); manages clusters, hosts, VMs, networking (VDS), and storage policies |
+| **VCF management plane** | SDDC Manager (VCF 5.x) or VCF Operations / VCF Installer (VCF 9) orchestrates lifecycle, domain creation, and licensing |
+| **NSX** | Software-defined networking and security layered on the same hosts |
+
+**Key principle:** VCF *builds and owns* the domain topology. Day-2 workload configuration (DRS, HA, rules, resource pools, VM settings) is done in **vCenter**. Structural changes (adding hosts, clusters, domains, and lifecycle/upgrades) should go through the **VCF management tooling** so its inventory stays consistent.
+
+→ **Do not** make out-of-band changes to VCF-managed components (for example, renaming or moving management VMs, changing management-domain network design, or manually upgrading components) outside supported workflows. This causes inventory drift and breaks lifecycle operations.
+
+---
+
+## 3. Cluster Settings
+
+A **cluster** is the unit where DRS, HA, EVC, vSAN, and lifecycle images are configured. In VCF, each workload domain contains one or more clusters.
+
+### 3.1 Core cluster services
+
+| Service | Purpose | Notes |
+|---|---|---|
+| **vSphere DRS** | Load balancing and initial placement | Section 4 |
+| **vSphere HA** | VM restart after host failure | Section 4 |
+| **vSAN** | Hyperconverged storage (when used as principal storage) | Cluster-level toggle and policy-driven |
+| **EVC** | Presents a baseline CPU feature set across hosts | See 3.2 |
+| **vSphere Cluster Services (vCLS)** | Lightweight agent VMs that keep DRS and HA functioning even if vCenter is unavailable | See 3.3 |
+| **Lifecycle Manager (vLCM) images** | Desired-state image (ESXi base, vendor add-on, firmware, components) for the cluster | Cluster uses a single image; drift is reported |
+
+### 3.2 Enhanced vMotion Compatibility (EVC)
+
+- Sets a **CPU baseline** so VMs can vMotion between hosts with different CPU generations.
+- Needed when a cluster contains **mixed CPU generations**, or when you plan to add newer hardware.
+- Enabling EVC to a *higher* baseline is generally non-disruptive; **lowering** the baseline requires powering off or migrating affected VMs because running VMs hold the current feature set.
+- Per-VM EVC can also be set for mobility across clusters.
+- **Exam angle:** EVC is about **CPU compatibility for vMotion**, not about resource balancing.
+
+### 3.3 vCLS
+
+- A small set of **system-managed agent VMs** (up to three per cluster) deployed automatically.
+- Provide the control-plane functions for DRS so that cluster services continue if vCenter is down.
+- **Do not power off, delete, or edit** these VMs manually; vCenter manages their lifecycle.
+- If vCLS VMs are unhealthy, DRS may be impaired (vCenter will flag the cluster).
+- Datastore placement for vCLS can be controlled in cluster settings (for example, keeping them off specific datastores).
+
+### 3.4 Host configuration consistency
+
+- **Cluster Quickstart** guides initial cluster creation (add hosts, configure networking, enable services). It is a *day-0/early* tool and is useful for new clusters; know that it exists.
+- **Desired-state configuration:** in modern vSphere, host configuration can be managed at the **cluster level** (configuration profiles) rather than per-host profiles, so settings (NTP, DNS, syslog, services, firewall) are applied consistently and drift is detected.
+- Combine this with vLCM images so **both software and configuration** are declarative.
+
+### 3.5 Baseline ESXi host settings to verify
+
+| Setting | Why it matters |
+|---|---|
+| **NTP** (consistent across all hosts, vCenter, and management components) | Time drift breaks certificates, SSO, and many VCF operations |
+| **DNS and FQDN** (forward and reverse) | VCF components rely on FQDN resolution |
+| **Syslog** | Centralized logging/forensics |
+| **SSH and ESXi Shell** (disabled unless needed) | Security hardening |
+| **Lockdown mode** (normal/strict) | Restricts direct host access |
+| **Certificates** | Managed per VCF/vSphere certificate workflows; do not replace ad hoc |
+| **Management/vMotion/vSAN VMkernel** with correct MTU | Mismatched MTU is a classic cause of vSAN and vMotion problems |
+| **Standard coredump / scratch** location | Diagnostics and logging persistence |
+
+### 3.6 Maintenance mode and vSAN
+
+- Entering maintenance mode on a vSAN host asks you to pick a **data migration option**: *Ensure accessibility*, *Full data migration*, or *No data migration*.
+- DRS (fully automated) will evacuate VMs when a host enters maintenance mode; with manual DRS you must approve or migrate.
+- In VCF, lifecycle operations place hosts in maintenance mode automatically; know the vSAN implications for risk.
+
+---
+
+## 4. DRS and HA Configuration
+
+### 4.1 vSphere DRS
+
+**Purpose:** place VMs at power-on and balance cluster load by recommending or performing vMotion.
+
+#### Automation levels
+
+| Level | Behavior |
+|---|---|
+| **Manual** | Recommendations only; admin applies |
+| **Partially automated** | Automatic initial placement; migration recommendations require approval |
+| **Fully automated** | Automatic placement *and* migrations |
+
+#### Other key DRS settings
+
+- **Migration threshold** (aggressiveness): more aggressive means more migrations for smaller improvement. The default (middle) is appropriate for most workloads.
+- **VM DRS score**: a per-VM measure of how well the VM is running (0-100%). The cluster-level view helps judge whether imbalance is actually hurting VMs.
+- **Per-VM overrides**: set a VM to manual or disabled when you do not want it moved (for example, latency-sensitive or licensed-by-host workloads).
+- **Predictive DRS** (when integrated with VCF Operations): uses forecasted demand.
+- **Scalable shares** (resource pools): keeps resource-pool shares behaving proportionally when pools contain very different VM counts.
+
+#### Rules and groups
+
+| Rule | Effect |
+|---|---|
+| **VM-VM affinity** | Keep listed VMs on the same host |
+| **VM-VM anti-affinity** | Keep listed VMs on different hosts (for example, HA pairs of a clustered app) |
+| **VM-Host rules** (VM group to Host group) | **Must / Should** run on or **must not / should not** run on a host group |
+
+- **"Must" rules are hard constraints** and are enforced by DRS **and by HA**; "should" rules are soft (preferences).
+- Use **VM-Host "should" rules** for licensing/affinity needs where a failure should still allow restart elsewhere.
+- Overusing "must" rules can reduce HA failover options.
+
+#### Resource pools
+
+- Provide a hierarchy for **shares, reservations, and limits**.
+- Don't use resource pools as folders; improper shares across sibling VMs and pools lead to surprising allocation.
+- **Consolidated VCF architecture:** workloads live in the management domain, separated into resource pools so management VMs retain priority.
+
+### 4.2 vSphere HA
+
+**Purpose:** restart VMs on surviving hosts when a host fails, and respond to isolation and storage failures.
+
+#### Core settings
+
+| Setting | Details |
+|---|---|
+| **Host Monitoring** | Enables host heartbeats and failure detection |
+| **Host failure response** | Restart VMs (default) with configurable restart priority |
+| **Host isolation response** | *Disabled*, *Power off and restart*, or *Shut down and restart*. Used when a host is alive but cannot reach the management network or isolation addresses |
+| **VM Monitoring** | Restarts a VM if VMware Tools heartbeats (and optionally application heartbeats) stop; sensitivity adjustable |
+| **Datastore heartbeating** | Secondary channel to distinguish *failed* from *partitioned/isolated* hosts (not used for vSAN datastores) |
+| **PDL / APD responses** | Configurable VM component protection when storage is permanently lost (PDL) or all paths down (APD) |
+| **Proactive HA** | Responds to hardware health degradation (via vendor provider) by evacuating VMs from a degraded host |
+| **Restart priority and dependencies** | Order VM restart (for example, infrastructure VMs before applications) |
+
+#### Admission control
+
+Admission control **reserves capacity** so that HA can restart VMs after failures. It is a *reservation-based* guard, not a performance guarantee.
+
+| Policy | How it works | Best for |
+|---|---|---|
+| **Cluster resource percentage** | Reserves a percentage of cluster CPU and memory | Default and most flexible; heterogeneous clusters |
+| **Slot policy** | Calculates "slots" from the largest reservations; reserves slots for failures | Uniform workloads (can be wasteful with a single large reservation) |
+| **Dedicated failover hosts** | Specified hosts stay idle as spares | Strict failover guarantees |
+
+- You set **Host failures cluster tolerates (FTT)**; the percentage policy can be derived automatically from this number.
+- A cluster with N hosts tolerating 1 failure needs roughly **1/N** of resources held back (for example, about 25% for a 4-host cluster, 12.5% for 8 hosts).
+- **Exam angle:** for a **4-host management domain**, a single host failure tolerance is a standard design.
+
+#### HA with vSAN
+
+- HA uses the **vSAN network** for heartbeats when vSAN is enabled.
+- Set **isolation addresses** appropriately (and disable default gateway use if the gateway is not on the vSAN network) so isolation detection works correctly.
+- Heartbeat datastores are not used with vSAN-only storage.
+
+#### DRS and HA together
+
+- HA **restarts** VMs after failures; DRS **balances** afterward.
+- Both honor "must" VM-Host rules; HA may violate "should" rules when necessary to restart VMs.
+- When a cluster has **insufficient reserved capacity**, HA may fail to restart some VMs. Review admission control and restart priorities.
+
+### 4.3 Operational troubleshooting cheat sheet
+
+| Symptom | Likely cause |
+|---|---|
+| VMs not migrating under load | DRS disabled/manual, per-VM override, "must" rules, vMotion network issue, or EVC/CPU mismatch |
+| HA fails to restart VMs | Admission control too permissive or hosts lack capacity; restart priority/dependency issues |
+| Host marked isolated unexpectedly | Wrong isolation address or management/vSAN network issue |
+| vMotion fails between hosts | CPU feature mismatch (no EVC), MTU mismatch, VMkernel misconfigured |
+| DRS not functioning | vCLS VMs unhealthy or cluster services problem |
+
+---
+
+## 5. License Assignment
+
+### 5.1 VCF 9.0 licensing model
+
+- Licensing is **subscription-based** and managed centrally through **VCF Operations**; **vCenter 9.0 is no longer a standalone licensing authority**.
+- The **VCF Business Services Console** (vcf.broadcom.com) is where entitlements and private license files are managed.
+- **Connected model:** VCF Operations communicates with Broadcom to obtain and refresh license information.
+- **Disconnected / air-gapped model:** you exchange files manually, using a registration request, a license entitlement (license) file imported into VCF Operations, and a **license usage file** uploaded back to the portal periodically (the interval is on the order of 180 days; verify the current requirement in the docs).
+- **Assignment:** assign the **primary (VCF) license to a vCenter instance** in VCF Operations. **ESXi hosts managed by that vCenter, and associated components, are then licensed automatically.**
+- Features such as **auto-pooling** aggregate licenses so you do not merge them by hand.
+- A **standalone ESXi host** (not managed by an assigned vCenter) is licensed with its own **private license file**; license files differ for ESX hosts and for VCF Operations instances.
+- If licensing is missing, vCenter remains in **evaluation mode** and shows no licenses in its legacy license view. There is no field to type a key.
+
+**Typical workflow (disconnected):**
+
+1. Deploy/connect VCF Operations and integrate it with vCenter.
+2. Create/download the entitlement (license file) from the VCF Business Services Console.
+3. Import the license file into VCF Operations.
+4. Assign the licenses to the vCenter instance(s) in **License Management**.
+5. Verify that vCenter and ESXi hosts show as licensed; plan periodic usage reporting.
+
+### 5.2 VCF 5.x licensing model (legacy, still seen in older material)
+
+- Classic **license keys** are entered in vCenter (**Administration → Licensing**) and assigned to **assets**: ESXi hosts, vCenter Server, vSAN clusters, and NSX.
+- Keys can be assigned to a **cluster's hosts** or per host; vSAN uses its own cluster-level key.
+- **Evaluation mode** is 60 days; hosts disconnect from vCenter or VMs cannot power on after expiry (behavior to remember: powered-on VMs keep running, but you cannot power on new VMs or add hosts).
+- Keys are consumed in capacity units (for example, per-core) rather than per CPU socket.
+- In VCF 5.x, the keys are provided in the **bring-up workbook/JSON** and managed through **SDDC Manager** license management.
+
+### 5.3 Licensing tips
+
+- A license "assignment" is **not** a purchase; check entitlement counts versus core usage.
+- Hosts in a cluster should be **licensed consistently**; an unlicensed host cannot join or use licensed features.
+- Plan **disconnected reporting** deadlines to avoid compliance issues.
+
+---
+
+## 6. Exam Tips
+
+1. **Know the license model for the exam's version.** VCF 9 = subscription, **license files**, **VCF Operations**, assigned to **vCenter**; hosts inherit. VCF 5.x = keys in vCenter/SDDC Manager.
+2. **EVC = CPU compatibility; DRS = balance; HA = recovery.** Do not mix them up.
+3. **vCLS VMs are system managed.** Never delete or modify them.
+4. **DRS "must" rules are strict** and honored by HA; **"should" rules are soft.**
+5. **Admission control reserves capacity, not performance.** Percentage-based is the flexible default.
+6. **Isolation response** only matters when a host is *isolated* but still running; it is not the same as a *failed* host.
+7. **HA with vSAN uses the vSAN network** for heartbeats; datastore heartbeating does not apply to vSAN datastores.
+8. **Fully automated DRS** is what enables hands-off maintenance mode evacuations.
+9. **Domain structure belongs to VCF tooling.** Don't make unsupported structural changes directly in vCenter.
+10. **Consistent NTP/DNS** underpins nearly every troubleshooting scenario.
+11. **Read the scenario for the symptom:** "VMs won't vMotion between hosts of different generations" is **EVC**; "VM keeps landing on the wrong host group" is a **VM-Host rule**; "HA won't restart VMs after a failure" points to **admission control/capacity**.
+
+---
+
+## 7. Practice Questions
+
+### Question 1
+
+A VCF administrator adds newer-generation hosts to an existing cluster. vMotion of running VMs from the old hosts to the new hosts fails with a CPU compatibility error. What should the administrator configure at the cluster level to allow migration while keeping the mixed hardware?
+
+- **A.** Set DRS migration threshold to the most aggressive setting
+- **B.** Enable Enhanced vMotion Compatibility (EVC) with a baseline supported by the oldest hosts
+- **C.** Increase the vSphere HA admission control percentage
+- **D.** Power off the vCLS agent VMs
+
+<details>
+<summary>Answer and explanation</summary>
+
+**Correct: B.**
+EVC masks CPU features to a common baseline so VMs can migrate across hosts with different CPU generations. The baseline must be supported by the **oldest** CPU in the cluster.
+- **A** changes how aggressively DRS migrates; it does not fix CPU incompatibility.
+- **C** affects capacity reservation for HA, not vMotion compatibility.
+- **D** is unsupported and would impair DRS.
+
+</details>
+
+### Question 2
+
+A 4-host cluster runs critical workloads with vSphere HA enabled. The administrator wants HA to reserve enough capacity to restart VMs after **one host failure**, while remaining flexible for VMs with different CPU and memory sizes. Which admission control configuration is most appropriate?
+
+- **A.** Dedicated failover hosts with all four hosts selected
+- **B.** Slot policy with the largest-reservation VM defining slot size
+- **C.** Cluster resource percentage tolerating one host failure
+- **D.** Disable admission control and rely on DRS
+
+<details>
+<summary>Answer and explanation</summary>
+
+**Correct: C.**
+The **cluster resource percentage** policy reserves a proportion of CPU and memory (roughly 25% for a 4-host cluster tolerating one failure) and adapts well to heterogeneous VM sizes.
+- **A** is invalid; dedicated failover hosts are idle spares, and selecting all hosts would leave no capacity for running VMs.
+- **B** can be overly conservative when one VM has a large reservation.
+- **D** is wrong: DRS balances load but does not guarantee restart capacity after a failure.
+
+</details>
+
+### Question 3
+
+An administrator upgrades to **VCF 9.0** and finds that vCenter shows **no licenses** and remains in evaluation mode. There is no field to enter a license key. What is the correct way to license the vCenter and its ESXi hosts?
+
+- **A.** Type a 25-character key into the ESXi host client on each host
+- **B.** Import a license file into **VCF Operations** and assign the license to the vCenter instance; the managed hosts are then licensed automatically
+- **C.** Re-run Cloud Builder with a new workbook
+- **D.** Assign a license key to each cluster using the vSphere Lifecycle Manager
+
+<details>
+<summary>Answer and explanation</summary>
+
+**Correct: B.**
+In VCF 9.0, licensing is subscription-based and driven by **license files** managed through **VCF Operations** (with entitlements from the VCF Business Services Console). Assigning the primary license to the vCenter licenses the hosts it manages.
+- **A** describes the retired key-based model.
+- **C** is incorrect: Cloud Builder is VCF 5.x bring-up tooling and is not a licensing mechanism.
+- **D** is incorrect: vLCM manages images and updates, not licenses.
+
+</details>
+
+---
+
+## 8. Quick Review Checklist
+
+- [ ] I can explain what **EVC**, **vCLS**, and **lifecycle images** do at the cluster level.
+<details>
+<summary>Explanation</summary>
+At the cluster level, **EVC**, **vCLS**, and **Lifecycle Images** manage three critical aspects of vSphere operations: **CPU compatibility for VM migrations**, **control plane availability for cluster features**, and **standardized software management across hosts**.
+
+---
+
+### 1. Enhanced vMotion Compatibility (EVC)
+
+**EVC** masks CPU feature set differences across physical hosts in a cluster, creating a uniform baseline of CPU capabilities.
+
+* **Primary Purpose:** Allows Live vMotion (and vSphere DRS) to migrate running VMs between hosts that have different generations of physical CPUs (e.g., mixing older Intel Xeon processors with newer ones) without powering down the VM.
+* **How It Works:** EVC baseline modes expose only a common set of CPU instructions (like AVX2 or SSE4.2) to the virtual machines. It hides newer CPU features on advanced hosts so VMs don’t attempt to execute instructions unavailable on older nodes.
+* **Scope:** Configured per-cluster (or per-VM in modern vSphere) for either Intel-to-Intel or AMD-to-AMD processor families.
+
+---
+
+### 2. vSphere Cluster Services (vCLS)
+
+**vCLS** is a decoupled control plane mechanism that runs tiny, lightweight System VMs (vCLS VMs) directly on cluster hosts.
+
+* **Primary Purpose:** Ensures that core distributed cluster services—specifically **vSphere DRS (Distributed Resource Scheduler)** and **HA (High Availability)**—continue functioning even if the managing vCenter Server becomes unreachable or goes offline.
+* **How It Works:** vSphere deploys up to 3 tiny vCLS Agent VMs per cluster. These VMs handle resource usage monitoring and placement calculations locally.
+* **Key Characteristic:** They are self-managed system VMs. They should not be deleted, modified, or migrated manually by administrators.
+
+---
+
+### 3. Lifecycle Images (vSphere Lifecycle Manager / vLCM)
+
+**Lifecycle Images** define a single, declarative software state applied uniformly to every physical ESXi host in a cluster.
+
+* **Primary Purpose:** Replaces legacy patch-by-patch updates (vSphere Update Manager) with a single, standardized ESXi software image across all hosts in the cluster.
+* **What an Image Contains:**
+1. **Base ESXi Version:** The core hypervisor build (e.g., ESXi 8.0 Update 2).
+2. **Vendor Add-On:** OEM-specific customizations (e.g., Dell, HPE, or Lenovo driver packages).
+3. **Firmware and Driver Add-Ons:** Integrates hardware vendor tools (like Hardware Support Managers) to synchronize physical server firmware directly with hypervisor drivers.
+4. **Component Drivers:** Specific PCIe, storage, or network card drivers (VIBs).
+
+
+* **VCF Integration:** In VCF, SDDC Manager uses vLCM Images to enforce strict Bill of Materials (BOM) compliance across the entire Management Domain and Workload Domains.
+
+---
+
+### Quick Comparison Matrix
+
+| Feature | Primary Focus | Problem It Solves |
+| --- | --- | --- |
+| **EVC** | CPU Instruction Set Normalization | Prevents vMotion failures across mixed CPU generations |
+| **vCLS** | Distributed Control Plane Availability | Keeps DRS/HA running if vCenter Server goes down |
+| **Lifecycle Images** | Declarative Host Software Consistency | Eliminates host configuration drift and simplifies patching |
+</details>
+- [ ] I can set DRS **automation level**, **migration threshold**, and **VM-Host rules**, and explain "must" vs "should".
+<details>
+<summary>Explanation</summary>
+To configure vSphere DRS settings, navigate in the vSphere Client to your **Cluster** `→` **Configure** tab `→` **vSphere Cluster Services** `→` **vSphere DRS**, and click **Edit**.
+
+---
+
+### 1. DRS Automation Level
+
+The automation level controls how much authority DRS has to automatically move VMs across physical hosts using Live vMotion.
+
+* **Manual:** DRS displays migration recommendations and initial placement recommendations, but executes **nothing** automatically. An administrator must manually apply them.
+* **Partially Automated:** DRS automatically handles **initial placement** when a VM is powered on (placing it on the best host). However, load-balancing vMotion recommendations generated during runtime must be manually approved by an admin.
+* **Fully Automated:** DRS automatically handles both initial placement at power-on and continuous load-balancing vMotions across hosts without administrator intervention.
+
+---
+
+### 2. Migration Threshold
+
+When DRS runs in **Fully Automated** mode, the Migration Threshold slider determines how aggressive DRS is in generating and executing vMotions to balance CPU and RAM usage across hosts.
+
+* **Priority 1 (Conservative - Far Left):** DRS only executes vMotions to satisfy **mandatory constraints** (such as anti-affinity rules or placing a host into Maintenance Mode). It will not move VMs merely to balance cluster load.
+* **Priority 2 & 3 (Moderate):** DRS executes migrations that promise significant or moderate improvements to the cluster's load distribution.
+* **Priority 4 & 5 (Aggressive - Far Right):** DRS executes migrations for even minor improvements in cluster balance.
+
+---
+
+### 3. Setting VM-Host Rules & "Must" vs. "Should"
+
+VM-Host Affinity Rules bind specific groups of Virtual Machines to specific groups of physical ESXi hosts.
+
+#### How to Set VM-Host Rules:
+
+1. **Create VM and Host Groups:** Prerequisite.
+Under **Cluster** `→` **Configure** `→` **VM/Host Groups**, click **Add**. Create a **VM Group** containing your target VMs, and a **Host Group** containing your target ESXi hosts.
+
+*How to verify:* Confirm both groups appear in the VM/Host Groups list with the correct member assets listed inside them.
+
+
+2. **Create the VM-Host Rule:** Rule Setup.
+Go to **VM/Host Rules** `→` **Add**. Name the rule, set the Type to **Virtual Machines to Hosts**, select your **VM Group**, choose the rule enforcement type, and select your **Host Group**.
+
+*How to verify:* Check the **VM/Host Rules** table to confirm the rule status displays as **Enabled**.
+
+
+---
+
+#### Rule Enforcement: "Must" vs. "Should"
+
+| Rule Type | Enforcement Level | Behavior During Normal Operations | Behavior During Host Failures / Maintenance |
+| --- | --- | --- | --- |
+| **"Must" Rule** (*Hard Rule*) | **Mandatory Constraint** | VMs **must** run on the specified host group. They will never be moved outside the group under any circumstances. | If all hosts in the designated Host Group fail or enter maintenance mode, the VMs **will not power on** or failover to other cluster hosts. **vSphere HA will violate availability to uphold the rule.** |
+| **"Should" Rule** (*Soft Rule*) | **Preferential Constraint** | DRS will actively try to keep VMs running on the designated host group whenever capacity exists. | If all hosts in the Host Group fail or become overloaded, DRS and vSphere HA **will violate the rule** and power on/migrate the VMs to any other host in the cluster to keep them running. |
+
+* **Use "Must" Rules for:** Strict licensing boundaries (e.g., Oracle/SQL socket-based licensing tied to specific physical hosts) or regulatory compliance isolation.
+* **Use "Should" Rules for:** General operational preferences, such as keeping local application tiers close to specific physical networking switches without risking application downtime during an outage.
+</details>
+- [ ] I can configure HA **host monitoring**, **isolation response**, **VM monitoring**, and **admission control**.
+<details>
+<summary>Explanation</summary>
+To configure vSphere High Availability (HA) settings, navigate to your **Cluster** `→` **Configure** tab `→` **vSphere Availability** (or **vSphere HA**), and click **Edit**.
+
+---
+
+### 1. Host Monitoring
+
+Host Monitoring enables physical ESXi hosts in the cluster to exchange heartbeat signals over the management network (and datastores) to detect host crashes.
+
+* **How to Configure:** Under the **Failures and Responses** section, locate **Host Monitoring** and toggle it to **Enabled**.
+* **Operational Impact:** Must remain **Enabled** during normal production. Disable it *only* during planned network maintenance or when reconfiguring management network switches to prevent false host isolation failover triggers.
+
+---
+
+### 2. Isolation Response
+
+Determines what action vSphere HA takes when a host loses management network heartbeats from the rest of the cluster but remains powered on and running local VMs (a "network isolation" state).
+
+* **How to Configure:** Under **Failures and Responses** `→` **Host Isolation**, select the desired **Response**:
+* **Disabled / Do Nothing:** The host leaves the isolated VMs running. *(Least aggressive, but risks split-brain if isolated VMs lose storage access)*.
+* **Power off and restart VMs:** Immediately hard powers off all running VMs on the isolated host so other hosts in the cluster can restart them. *(Fastest failover, but risks data loss if uncommitted writes exist)*.
+* **Shutdown and restart VMs (Recommended):** Attempts a graceful guest OS shutdown on the isolated host (waiting up to a configured timeout) before powering off and restarting the VMs on healthy hosts.
+
+
+
+---
+
+### 3. VM Monitoring
+
+Extends HA beyond host crash detection down to individual VM guest OS crashes and application heartbeats using VMware Tools.
+
+* **How to Configure:** Under **Failures and Responses** `→` **VM Monitoring**, select your enforcement level:
+* **Disabled:** HA only responds to host-level failures.
+* **VM Monitoring Only:** Monitors guest OS heartbeats and I/O activity via VMware Tools. If a guest OS crashes or stops responding for a set window (e.g., 120 seconds), HA reboots the VM locally.
+* **VM and Application Monitoring:** Monitors both guest OS heartbeats and specific application-level agents running inside the VM using the VMware Tools Application Monitoring API.
+
+
+* **Sensitivity Settings:** Adjust the slider between **Low**, **Medium**, and **High** to control the failure interval threshold and maximum number of automated resets per VM.
+
+---
+
+### 4. Admission Control
+
+Admission Control enforces a resource buffer (reserve headroom) across the cluster to guarantee that sufficient CPU and RAM exist to restart VMs if one or more physical hosts fail.
+
+* **How to Configure:** Expand the **Admission Control** section and set your baseline:
+
+#### Key Admission Control Policies:
+
+1. **Cluster Resource Percentage (Recommended):** Reserves a specific percentage of overall cluster CPU and RAM for HA failovers.
+* *Formula:* If you have an 8-host cluster and want to tolerate `1` host failure (`N+1`), set CPU and Memory reserves to `\frac{1}{8} = 12.5%`.
+
+
+2. **Slot Policy (Legacy / Uniform VMs):** Calculates capacity based on fixed "slots" (the largest VM's CPU and Memory reservation). Less flexible for mixed workload sizing.
+3. **Dedicated Failover Hosts:** Designates specific physical host(s) strictly as standby nodes. These hosts remain idle until a failover occurs.
+
+#### Performance Degradation Threshold:
+
+* Sets the maximum acceptable performance loss during a failover. Setting this to **0%** prevents powered-on VMs from suffering any CPU/RAM degradation, but prevents powering on new VMs if capacity dips below the HA reserve threshold.
+
+---
+
+### Summary Checklist
+
+| HA Feature | Menu Location | Recommended Production Setting |
+| --- | --- | --- |
+| **Host Monitoring** | Failures and Responses | **Enabled** |
+| **Isolation Response** | Failures and Responses `→` Host Isolation | **Shutdown and restart VMs** |
+| **VM Monitoring** | Failures and Responses `→` VM Monitoring | **VM Monitoring Only** (Medium Sensitivity) |
+| **Admission Control** | Admission Control | **Cluster Resource Percentage** (e.g., `N+1` host ratio) |
+</details>
+- [ ] I can compare the three **admission control policies** and compute the approximate percentage reserved for N hosts.
+<details>
+<summary>Explanation</summary>
+### Comparison of the Three Admission Control Policies
+
+vSphere HA uses Admission Control to reserve compute resources so that virtual machines can be restarted if physical hosts fail.
+
+| Policy | Primary Mechanism | Pros | Cons | Best Use Case |
+| --- | --- | --- | --- | --- |
+| **Cluster Resource Percentage** *(Recommended)* | Reserves a dynamic percentage of total cluster CPU and RAM for HA failovers. | Adjusts automatically as hosts are added or removed; handles mixed VM sizes seamlessly without wasting capacity. | Requires calculating or updating percentages when expanding or shrinking the cluster size. | Enterprise production environments and mixed-workload clusters (VCF standard). |
+| **Slot Policy** *(Legacy)* | Calculates capacity based on fixed "slots" defined by the largest VM's CPU and RAM reservations in the cluster. | Simple, predictable slot counting when all VMs are uniformly sized. | A single oversized VM forces huge slot sizes across the whole cluster, skewing capacity and wasting resources. | Legacy environments with identical, uniformly sized virtual machines. |
+| **Dedicated Failover Hosts** | Designates one or more specific physical hosts strictly as standby nodes. | Completely isolates failover capacity; zero impact on active nodes during normal operation. | Dedicated hosts sit idle under normal conditions, wasting hardware investments and compute capacity. | Strict compliance environments requiring physical segregation for failover resources. |
+
+---
+
+### How to Compute the Percentage Reserved for `N` Host Failures
+
+When using the recommended **Cluster Resource Percentage** policy, the reserved percentage formula depends on your total number of active hosts in the cluster (`H`) and the number of host failures you wish to tolerate (`N`).
+
+#### Formula:
+
+
+
+→ **Formula:** `Reserved Percentage (%) = ( (N / H) ) × 100`
+
+
+
+* **`N`** = Number of host failures to tolerate (`1` for `N+1`, `2` for `N+2`).
+* **`H`** = Total number of physical ESXi hosts currently in the cluster.
+
+---
+
+### Quick Reference Calculations
+
+* **3-Host Cluster (`N=1` failure):**
+
+
+
+→ **Formula:** `( (1 / 3) ) × 100 = 33.3%`
+
+
+
+
+
+*(Reserves `33.3%` CPU and `33.3%` Memory capacity).*
+* **4-Host Cluster (`N=1` failure):**
+
+
+
+→ **Formula:** `( (1 / 4) ) × 100 = 25%`
+
+
+
+
+* **8-Host Cluster (`N=1` failure):**
+
+
+
+→ **Formula:** `( (1 / 8) ) × 100 = 12.5%`
+
+
+
+
+* **8-Host Cluster (`N=2` failures):**
+
+
+
+→ **Formula:** `( (2 / 8) ) × 100 = 25%`
+
+
+
+
+* **16-Host Cluster (`N=1` failure):**
+
+
+
+→ **Formula:** `( (1 / 16) ) × 100 = 6.25%`
+
+
+
+
+
+---
+
+### Configuring the Percentage in vSphere Client
+
+1. Go to **Cluster** `→` **Configure** `→` **vSphere Availability** (vSphere HA) `→` **Edit**.
+2. Expand **Admission Control**.
+3. Set **Define failover capacity by** to **Cluster resource percentage**.
+4. Set **Override failover capacity** for CPU and Memory to your calculated percentage (or check **Override dedicated failover capacity** to let vSphere calculate it automatically based on `N` host failures).
+5. *Verification:* Click **OK**, then check the **Summary** tab of the cluster under **vSphere HA Advanced Runtime Info** to verify that **Targeted CPU/Memory Failover Capacity** matches your calculated reserve percentage.
+</details>
+- [ ] I know the **VCF 9 license flow**: VCF Operations, license file, assign to vCenter, hosts inherit.
+<details>
+<summary>Explanation</summary>
+In **VMware Cloud Foundation (VCF) 9**, Broadcom officially retired traditional 25-character license keys applied directly to individual ESXi hosts or vCenter instances. Instead, VCF 9 moves to a centralized, **subscription-based capacity model** managed top-down.
+
+The end-to-end **VCF 9 License Flow** operates through a top-down inheritance model:
+
+```text
+  Broadcom Support Portal
+           │
+           │ (1. Download VCF License File / Activation Code)
+           ▼
+    VCF Operations
+ (Central Licensing Engine)
+           │
+           │ (2. Assign License Capacity to Instance)
+           ▼
+     vCenter Server
+ (Management / Workload Domain)
+           │
+           │ (3. Automatic Host Inheritance)
+           ▼
+     ESXi Hosts
+(Licensed automatically based on CPU Cores & vSAN TiBs)
+
+```
+
+---
+
+### The 4-Step License Workflow
+
+1. **Generate the License File / Activation Code in Broadcom Portal:** Step 1.
+Log into the **Broadcom Support Portal** (or `vcf.broadcom.com`). You purchase capacity based on **VCF Core subscriptions** and **vSAN TiB capacity**. From the portal, you either generate a **Registration/Activation Code** (for connected deployments) or download a signed, encrypted **VCF License File** (`.lic` format).
+
+*How to verify:* Confirm you have downloaded the `.lic` file or saved the activation string from your Broadcom portal entitlements.
+
+
+2. **Ingest the License File into VCF Operations:** Step 2.
+Open **VCF Operations** (which acts as the centralized fleet-wide licensing engine for VCF 9). Navigate to the **Licensing / Business Services** section and register your VCF instance by uploading the license file or pasting the activation code.
+
+*How to verify:* VCF Operations decodes the license file and displays your total available pool of CPU Cores, vSAN TiBs, and add-ons (e.g., Private AI Foundation).
+
+
+3. **Assign License Entitlements to Target vCenter Servers:** Step 3.
+From the central VCF Operations console, allocate capacity from your main license pool to specific **vCenter Server** instances representing your Management Domain or VI Workload Domains.
+
+*How to verify:* The target vCenter transitions out of its 90-day evaluation mode, and its licensing status reflects the allocated subscription core capacity.
+
+
+4. **Automatic Host & Cluster Inheritance:** Step 4.
+Once a vCenter Server receives its licensing assignment from VCF Operations, **all physical ESXi hosts managed by that vCenter automatically inherit the license capacity**. You no longer manually select host-by-host or apply keys in vSphere Lifecycle Manager.
+
+*How to verify:* In vCenter, navigate to **Hosts and Clusters**, select a host `→` **Configure** `→` **Licensing**. The host will show as licensed via its parent vCenter entitlement without requiring an individual host key.
+
+
+---
+
+### Key Takeaways for VCF 9 Licensing
+
+1. **No Individual Host Keys:** You never log into an ESXi host or vSphere Client to enter a 25-digit license string for hypervisors.
+2. **VCF Operations is Mandatory:** VCF Operations acts as the local source of truth that tracks consumption and communicates with vCenter instances.
+3. **90-Day Evaluation Period:** VCF 9 extends the default evaluation mode to **90 days** (up from 60 days in VCF 4/5) to give you ample time to complete bring-up and register VCF Operations.
+4. **License Usage Reporting:** VCF Operations generates a telemetry report (License Usage File) detailing core count usage to validate subscription compliance with Broadcom.
+</details>
+- [ ] I know the **VCF 5.x key-based flow** and why it differs.
+<details>
+<summary>Explanation</summary>
+In **VMware Cloud Foundation (VCF) 5.x**, licensing follows a traditional **per-key, object-based licensing model**. Instead of centralizing capacity allocation inside VCF Operations via subscription files, VCF 5.x relies on standard **25-character perpetual or subscription license keys** imported into SDDC Manager's Licensing database and manually or automatically applied to individual assets.
+
+---
+
+### The VCF 5.x Key-Based Workflow
+
+```text
+       Broadcom MyVMware / Customer Connect
+                        │
+                        │ (1. Copy 25-Character License Keys)
+                        ▼
+                   SDDC Manager
+           (Settings ➔ Licensing Menu)
+                        │
+                        │ (2. Assign Keys to Inventory)
+          ┌─────────────┴─────────────┐
+          ▼                           ▼
+    vCenter Server               ESXi Hosts
+(Per-Instance Key)         (Per-CPU/Core Keys)
+
+```
+
+1. **Key Generation:** You log into the Broadcom portal and obtain individual 25-character alphanumeric keys for each stack component:
+* **SDDC Manager / VCF Solution Key**
+* **vCenter Server Keys** (Per-instance)
+* **ESXi Host Keys** (Per-CPU socket/core)
+* **vSAN Keys** (Per-TB or per-CPU)
+* **NSX Manager Keys** (Per-CPU or per-VM)
+
+
+2. **Importing into SDDC Manager:** You navigate to **SDDC Manager UI `→` Settings `→` Licensing** and manually add each 25-character key string into the SDDC Manager license key management repository.
+3. **Assignment during Workload Domain Workflows:** When deploying a new VI Workload Domain or expanding a cluster, SDDC Manager prompts you to select specific keys from its repository to attach to the new vCenter, NSX Manager cluster, and ESXi hosts.
+4. **Direct Component Licensing:** SDDC Manager pushes these individual keys via API directly to each target component's licensing engine (e.g., calling vCenter's `LicenseManager` API to apply the vCenter key and pushing host keys directly into vSphere).
+
+---
+
+### Why the VCF 5.x Model Differs from VCF 9
+
+| Feature | VCF 5.x (Key-Based Flow) | VCF 9.x (Subscription Flow) |
+| --- | --- | --- |
+| **Licensing Mechanism** | Individual 25-character alphanumeric keys per component | Signed encrypted License File (`.lic`) or Activation Code |
+| **Central Authority** | SDDC Manager (Licensing Repository) | **VCF Operations** (Central Fleet Licensing Engine) |
+| **Host Assignment** | Keys applied directly to each ESXi host / cluster | **Top-down inheritance** (Hosts inherit from parent vCenter) |
+| **Management Unit** | Mixed (Per-CPU, Per-Instance, Per-Core, Per-TB) | Unified VCF Core + vSAN TiB subscription pool |
+| **Component Keys Needed** | Separate keys for vCenter, ESXi, NSX, vSAN, and Aria | Single unified VCF solution entitlement file |
+
+---
+
+### Why VMware Redesigned This in VCF 9
+
+* **Eliminated Key Sprawl:** Large VCF 5.x environments required tracking dozens of separate 25-character keys across multiple Workload Domains and management components, leading to frequent key expiration or compliance mismatch issues.
+* **Streamlined Scaling:** In VCF 5.x, adding new hosts to a cluster required selecting or assigning available host key capacity. In VCF 9, new hosts automatically inherit license coverage the moment they join a licensed vCenter.
+</details>
+- [ ] I can tell which changes belong in vCenter and which belong in VCF tooling.
+<details>
+<summary>Explanation</summary>
+To determine whether a configuration change belongs in **vCenter Server** or **VCF Tooling** (SDDC Manager / VCF Operations), apply a simple rule of thumb: **Who owns the state lifecycle?**
+
+If an object or setting is managed declaratively as part of VCF's automated inventory, lifecycle, or fabric architecture, modifying it in vCenter creates a "drift" or out-of-band state desynchronization. If it pertains to application workload execution or day-to-day vSphere administrative operations, it belongs in vCenter.
+
+---
+
+### The Golden Rule: Top-Down vs. Bottom-Up
+
+```text
+       ┌─────────────────────────────────────────┐
+       │   VCF Tooling (SDDC Mgr / VCF Ops)      │
+       │   • Fabric Architecture & Boundaries    │
+       │   • Hardware & Lifecycle Management     │
+       └────────────────────┬────────────────────┘
+                            │ Push / Orchestrate
+                            ▼
+       ┌─────────────────────────────────────────┐
+       │             vCenter Server              │
+       │   • Workload Execution & Performance    │
+       │   • Standard vSphere Operations         │
+       └─────────────────────────────────────────┘
+
+```
+
+---
+
+### 1. Changes That Belong in VCF Tooling (SDDC Manager / VCF Ops)
+
+Perform these actions **only** through VCF tooling. Making these changes directly in vCenter bypasses SDDC Manager’s database (`psql`) and will cause workflow failures, BOM compliance errors, or stuck tasks.
+
+* **Cluster & Host Topology:** Adding/removing ESXi hosts, expanding/contracting clusters, or creating/deleting Workload Domains.
+* **Full-Stack Lifecycle Management (LCM):** Patching or upgrading ESXi, vCenter, NSX, or vSAN.
+* **Network Infrastructure Fabric:** Creating or modifying VCF Network Pools, NSX TEP IP allocations, or uplink profiles assigned during domain deployment.
+* **Security Credentials & Certificates:** Rotating management component passwords (vCenter root/admin, NSX, ESXi) or replacing TLS certificates across the VCF stack.
+* **Licensing (VCF 9):** Importing subscription license files/activation codes and assigning core/TiB entitlements to vCenter instances.
+
+---
+
+### 2. Changes That Belong in vCenter Server
+
+These actions represent standard day-to-day vSphere operations and do not interfere with SDDC Manager's orchestration engine.
+
+* **Workload Management:** Creating virtual machines, adjusting VM resource allocations (vCPU/RAM), or managing VM templates/content libraries.
+* **Cluster Performance Tuning:** Configuring vSphere DRS rules (Affinity/Anti-Affinity), DRS automation levels, or EVC (Enhanced vMotion Compatibility) baselines.
+* **Availability & Resiliency Settings:** Adjusting vSphere HA admission control policies, VM monitoring sensitivity, or datastore heartbeating preferences.
+* **Storage Operational Management:** Creating vSphere Storage DRS (SDRS) datastore clusters, setting up VM Storage Policies (SPBM) for workloads, or mounting non-primary secondary datastores (e.g., secondary NFS/iSCSI for backup data).
+* **vSphere Native Permissions:** Assigning granular vSphere Role-Based Access Control (RBAC) to end users or application teams.
+
+---
+
+### Diagnostic Checklist: Where Does My Change Belong?
+
+Before making a change, run through these three decision checks:
+
+| Question | If YES `→` Use | If NO `→` Use |
+| --- | --- | --- |
+| Does this action add, remove, or modify physical host/domain infrastructure? | **VCF Tooling** | Check next question |
+| Is this action part of a structured SDDC Manager workflow wizard? | **VCF Tooling** | Check next question |
+| Does this setting govern how workloads run on top of an existing cluster? | **vCenter** | Re-evaluate requirement |
+
+---
+
+### How to Verify If Out-of-Band Drift Occurred
+
+If a change was mistakenly made in vCenter that SDDC Manager expected to control:
+
+1. In SDDC Manager, run a **Pre-Check** prior to any workflow or update.
+2. *Verification:* The pre-check will fail with an inventory or password desynchronization error (e.g., `vCenter password desynchronized` or `Host state inconsistent in inventory`), confirming an out-of-band change occurred.
+</details>
+---
+
+*Study Guide 05 of the VCP-VCF Administrator series. Verify version-specific behavior, defaults, and UI paths against the current official VMware by Broadcom documentation and exam guide before your exam date.*
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/learning/certs-central/vmware/study-notes/vcf-administrator/vcf-04-sddc-manager-operations" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Module 04: SDDC Manager Day-2 Operations & Administration
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VMware Study Notes Hub
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes/vcf-administrator/vcf-06-vsan-esa-osa-architecture" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 06: vSAN Express Storage Architecture (ESA) vs OSA →
+  </a>
+</div>

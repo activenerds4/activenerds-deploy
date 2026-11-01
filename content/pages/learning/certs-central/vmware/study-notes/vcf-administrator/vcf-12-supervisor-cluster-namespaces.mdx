@@ -1,0 +1,433 @@
+---
+title: "Module 12: Supervisor Clusters & vSphere Namespaces in VCF"
+description: "Enabling Workload Management on workload domains, vSphere Namespace permissions, storage quotas, VM classes, and Harbor integration."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF Administrator Study Guide"
+trackSlug: "/learning/certs-central/vmware/study-notes/vcf-administrator"
+moduleNumber: 12
+totalModules: 18
+layout: "article"
+---
+
+> **Instructor's note:** Product names and menus shifted between VCF 5.x and VCF 9.x (for example, "Tanzu Kubernetes Grid Service" became **vSphere Kubernetes Service (VKS)**, and VCF 9 adds VPC-based networking). Always confirm against the exam guide and release notes for the exact version your exam targets. Concepts below are version-stable unless flagged.
+
+---
+
+## 1. Learning Objectives
+
+After this module you should be able to:
+
+- Explain what a **Supervisor** is and what it adds to a vSphere cluster.
+- List the prerequisites for enabling **Workload Management** in a VCF workload domain.
+- Choose between networking models and deployment topologies (single-zone vs. three-zone).
+- Deploy a Supervisor and troubleshoot common failures.
+- Create and configure a **vSphere Namespace** (permissions, storage, limits, VM classes, content libraries).
+- Apply RBAC to namespaces and understand how vSphere roles map to Kubernetes roles.
+- Access a Supervisor/namespace as a DevOps user.
+
+---
+
+## 2. Core Concepts
+
+### 2.1 What is a Supervisor?
+
+A **Supervisor** is a vSphere cluster that has been enabled with Kubernetes capabilities. It turns the ESXi hosts into Kubernetes worker nodes and deploys a Kubernetes control plane to manage them.
+
+| Component | Description |
+|---|---|
+| **Supervisor Control Plane VMs** | 3 VMs (HA) running the Kubernetes API server, etcd, and controllers. Deployed by vCenter. |
+| **Spherelet** | Kubelet-equivalent agent running on each ESXi host in the Supervisor cluster. |
+| **vSphere Pods** | Pods run natively on ESXi (requires NSX-backed networking in classic setups). |
+| **Supervisor Services** | Extensible services: VM Service, VKS, Harbor registry, Velero, Contour, etc. |
+| **VM Service** | Lets developers deploy and manage VMs declaratively using Kubernetes manifests. |
+| **VKS (vSphere Kubernetes Service)** | Provisions and operates conformant guest Kubernetes clusters on the Supervisor. |
+
+### 2.2 Where Supervisor Fits in VCF
+
+- Supervisors are enabled on a **VI Workload Domain** (or the management domain, though that is generally discouraged for production workloads).
+- The vSphere cluster underneath must meet HA/DRS and networking requirements.
+- In VCF with NSX, Supervisor networking uses NSX segments, Tier-1/Tier-0 gateways, and (depending on version) NSX load balancing, or a VPC model in VCF 9.
+- **SDDC Manager** manages lifecycle of the infrastructure (ESXi, vCenter, NSX), while Supervisor lifecycle is driven from **vCenter** (Supervisor upgrades and Kubernetes version updates).
+
+→ **Exam tip:** In VCF, remember the separation: SDDC Manager handles domain-level lifecycle; Supervisor enablement and Supervisor upgrades are performed through vCenter's **Workload Management**.
+
+---
+
+## 3. Prerequisites for Supervisor Enablement
+
+### 3.1 Infrastructure Checklist
+
+| Requirement | Detail |
+|---|---|
+| **vSphere cluster** | Minimum of **3 ESXi hosts** recommended (vSAN or shared storage). Cluster must have **HA enabled** and **DRS in Fully Automated** mode. |
+| **Licensing** | Appropriate VCF/vSphere Foundation entitlement that includes Supervisor/VKS. |
+| **Networking** | NSX (typical for VCF), or VDS with an external/supported load balancer (Foundation Load Balancer or NSX Advanced Load Balancer / Avi, depending on version). |
+| **Storage policies** | At least one **VM storage policy** for control plane VMs, ephemeral disks, and image cache. |
+| **DNS / NTP** | Forward and reverse DNS where required; NTP synchronized across vCenter, ESXi, NSX, and the control plane VMs. |
+| **Content Library** | A (subscribed) content library for **Kubernetes release images** used by VKS. |
+| **IP addressing** | Management IP range, workload network ranges, and ingress/egress CIDRs (with NSX). |
+| **Time & certificates** | Valid vCenter certificates; time skew will break the deployment. |
+
+### 3.2 Management Network IP Requirements
+
+The Supervisor control plane needs a **contiguous block of IP addresses** on the management network:
+
+- 3 IPs for the control plane VMs
+- 1 floating (virtual) IP for the Kubernetes API endpoint
+- 1 additional IP reserved for rolling upgrades
+
+That is **5 consecutive IPs** (commonly cited exam fact).
+
+### 3.3 NSX-Backed Networking Inputs (Classic NSX Model)
+
+| Input | Purpose |
+|---|---|
+| **Pod CIDR** | Internal CIDR for pods (default commonly `10.244.0.0/20`). |
+| **Service CIDR** | Cluster IP range for Kubernetes services (default commonly `10.96.0.0/23`). |
+| **Ingress CIDR** | Routable IPs for load balancer VIPs and ingress. |
+| **Egress CIDR** | Routable IPs for SNAT of outbound pod traffic. |
+| **Edge Cluster** | NSX Edge cluster hosting Tier-0/Tier-1 and load balancer services. |
+| **Tier-0 Gateway** | Provides north-south connectivity. |
+
+→ **VCF 9 note:** VCF 9 introduces **VPC networking** for Supervisor, simplifying connectivity with VPCs, subnets, and IP blocks (external, private) instead of manually planning every CIDR against a T0/T1 model. Know that both models exist.
+
+---
+
+## 4. Supervisor Deployment
+
+### 4.1 Deployment Topologies
+
+| Topology | Description | Use Case |
+|---|---|---|
+| **Single-zone Supervisor** | Maps to **one vSphere cluster**. | Standard deployments; simplest option. |
+| **Three-zone Supervisor** | Spans **three vSphere zones** (each zone = one cluster) for rack/site-level availability. | Higher availability; failure-domain tolerance. |
+
+Each **vSphere Zone** is associated with exactly one vSphere cluster. A three-zone Supervisor requires three zones, and storage must be accessible and policy-compatible in all zones.
+
+### 4.2 Control Plane Sizing
+
+| Size | Typical Use |
+|---|---|
+| **Tiny** | Proof of concept |
+| **Small** | Small environments |
+| **Medium** | Moderate scale |
+| **Large** | Larger scale/many namespaces |
+
+→ The size can be increased after deployment but **cannot be reduced**. Pick appropriately up front.
+
+### 4.3 Workflow (vSphere Client)
+
+1. Navigate to **Workload Management** in vCenter.
+2. Click **Get Started** (or **Enable** a Supervisor).
+3. Select **vCenter Server** and the **networking stack** (NSX/VPC, or VDS with a load balancer).
+4. Select the **deployment type** (single-zone or three-zone) and the **cluster(s)/zone(s)**.
+5. Select **storage policies** for:
+   - Control plane nodes
+   - Ephemeral disks
+   - Image cache
+6. Configure **management network**: network, starting IP, subnet mask, gateway, DNS, NTP.
+7. Configure **workload network** (pod/service/ingress/egress CIDRs, or VPC settings).
+8. Choose **control plane size** and optional API server DNS names.
+9. Review and **Finish**. Deployment commonly takes **20–45 minutes**.
+
+### 4.4 Post-Deployment Verification
+
+- Supervisor status shows **Running** and config status **Configured** with green checks.
+- The **Kubernetes control plane address** (floating IP) is reachable.
+- The three control plane VMs (named like `SupervisorControlPlaneVM`) are powered on.
+- NSX objects (Tier-1, segments, load balancer) are created as expected.
+- Content library is attached for VKS if you plan to provision guest clusters.
+
+### 4.5 Common Failure Causes
+
+| Symptom | Likely Cause |
+|---|---|
+| Stuck at "Configuring" | DNS/NTP errors, unreachable management network, insufficient IPs |
+| Control plane IP not reachable | Wrong gateway or VLAN, firewall blocking |
+| Load balancer or VIP failures | NSX Edge capacity or T0 routing/BGP problems |
+| Compatibility check fails (cluster not listed) | HA/DRS off, missing networking, unsupported topology, or storage policy issues |
+| Certificate or time errors | NTP drift, expired certificates |
+
+---
+
+## 5. Workload Management and Supervisor Operations
+
+### 5.1 Configuring Workload Management Components
+
+- **Storage policies** become **Kubernetes StorageClasses** when assigned to a namespace.
+- **VM Classes** define CPU and memory sizing for VMs (and VKS node sizing).
+- **Content libraries** supply VM images and Kubernetes release (TKR/VKr) images.
+- **Supervisor Services** are installed and enabled from the **Services** tab.
+
+### 5.2 Lifecycle and Upgrades
+
+- Supervisor and Kubernetes versions are upgraded from **vCenter Workload Management**.
+- Upgrade order matters: keep **vCenter, NSX, and ESXi** within compatibility matrices (verify with the Broadcom Interoperability Matrix).
+- Supervisor upgrades are rolling; the extra control plane IP is used during this process.
+- In VCF, plan Supervisor upgrades alongside SDDC Manager-driven bundles so you don't break compatibility.
+
+---
+
+## 6. vSphere Namespaces
+
+### 6.1 What is a vSphere Namespace?
+
+A **vSphere Namespace** is a logical boundary on the Supervisor that combines:
+
+- A **Kubernetes namespace** (API object boundary)
+- A **resource pool** representation in vSphere (compute boundary)
+- Assigned **storage policies**, **permissions**, **limits**, **VM classes**, and **content libraries**
+
+It is the primary unit of multi-tenancy for the vSphere administrator giving resources to DevOps teams.
+
+### 6.2 Creating a Namespace
+
+**vSphere Client path:** *Workload Management → Namespaces → New Namespace*
+
+1. Select the **Supervisor** (and zone placement if applicable).
+2. Provide a **name** (DNS-compliant, lowercase, alphanumeric and hyphens).
+3. Choose a **network** (when custom namespace networks are used).
+4. Create it, then configure:
+   - **Permissions**
+   - **Storage**
+   - **Capacity and Usage (limits)**
+   - **VM Service** (VM classes, content libraries)
+   - **Tanzu/VKS** settings if provisioning guest clusters
+
+→ **Self-Service Namespaces:** Admins can define a **namespace template** (resources, permissions, limits) and allow DevOps users to create namespaces on demand within guardrails.
+
+### 6.3 Storage Configuration
+
+- Assign one or more **storage policies** to the namespace.
+- Each policy surfaces as a **StorageClass** in that namespace.
+- Optionally set a **storage limit per policy** (quota on total capacity consumed).
+- PersistentVolumeClaims (PVCs) in the namespace consume against these limits.
+- vSAN policies drive placement, availability (FTT), and performance characteristics.
+
+### 6.4 Compute and Object Limits
+
+| Limit Type | Description |
+|---|---|
+| **CPU limit** | Caps total CPU (MHz/cores) consumed by workloads in the namespace. |
+| **Memory limit** | Caps total memory (MiB/GiB). |
+| **Storage limit** | Caps capacity per storage policy. |
+| **Object limits** | Kubernetes object counts: pods, deployments, services, PVCs, secrets, config maps, etc. |
+| **VM class limits** | VMs can only use VM classes assigned to the namespace. |
+
+Under the hood, limits map to **Kubernetes ResourceQuotas** and to vSphere **resource pool** limits.
+
+→ **Exam tip:** Exceeding a limit does not crash existing workloads; **new** objects or pods that would exceed the quota are **rejected**.
+
+### 6.5 VM Classes and Content Libraries
+
+- **VM Classes** are templates for VM hardware (vCPU, memory, reservations, optional vGPU/devices).
+- Assign only the classes you want teams to use.
+- **Content Libraries** attached to the namespace expose VM images to the **VM Service**.
+
+---
+
+## 7. RBAC for Supervisor and Namespaces
+
+### 7.1 Identity Sources
+
+Users and groups come from the **vCenter Single Sign-On** identity sources:
+
+- `vsphere.local` (built-in)
+- Active Directory (LDAPS / IWA / OpenLDAP)
+- Federated identity providers via vCenter Identity Federation (OIDC/SAML-based providers supported in current versions)
+
+### 7.2 Namespace Permission Levels
+
+| vSphere Permission | Kubernetes Mapping | Capabilities |
+|---|---|---|
+| **Can view** | `view` ClusterRole bound in the namespace | Read-only access to namespace objects |
+| **Can edit** | `edit` ClusterRole bound in the namespace | Create, update, delete most namespace objects |
+| **Owner** | `edit` plus ability to manage/delete the namespace (in vSphere) | Full control of the namespace, including permissions |
+
+- Assign permissions to **groups** whenever possible (best practice).
+- Permissions are created as **RoleBindings** in the Kubernetes namespace.
+
+### 7.3 Administrator Access
+
+- vCenter SSO administrators (for example `Administrator@vsphere.local` or members of the SSO administrators group) get **cluster-admin** equivalent access on the Supervisor.
+- Use the **vCenter role-based** model for infrastructure operations (enabling Supervisor, creating namespaces) and the **namespace permissions** model for DevOps access.
+- Create custom vCenter roles with only the needed **Namespaces** privileges (for example, `Namespaces.Manage`, `Namespaces.Configure`) for delegated administrators.
+
+### 7.4 Developer Access Flow
+
+1. Admin shares the **Supervisor control plane address** (or the namespace-specific link).
+2. Developer installs the CLI plugin (`kubectl-vsphere` in classic workflows; the **VCF CLI** in VCF 9).
+3. Developer authenticates:
+   ```bash
+   kubectl vsphere login --server=<SUPERVISOR_IP_OR_FQDN> \
+     --vsphere-username devuser@corp.local
+   ```
+4. Developer sets context and works in the namespace:
+   ```bash
+   kubectl config use-context <namespace>
+   kubectl get pods
+   ```
+5. Authorization is evaluated against the **RoleBindings** created by namespace permissions.
+
+### 7.5 RBAC Best Practices
+
+- Use **AD groups**, not individual users.
+- Grant **Can view** to auditors and support teams.
+- Limit **Owner** to platform/namespace admins.
+- Review permissions regularly; remove stale groups.
+- Combine RBAC with **resource limits** to prevent noisy-neighbor problems.
+
+---
+
+## 8. Quick Reference Tables
+
+### 8.1 Key Numbers to Memorize
+
+| Item | Value |
+|---|---|
+| Control plane VMs | **3** |
+| Management IPs needed | **5 consecutive** (3 VMs + 1 floating + 1 upgrade) |
+| Minimum hosts (recommended) | **3** |
+| Cluster requirements | **HA on**, **DRS Fully Automated** |
+| Zones for HA topology | **3 zones** (3 clusters) |
+| Control plane size change | Can **grow**, cannot shrink |
+
+### 8.2 Who Does What?
+
+| Task | Tool |
+|---|---|
+| Create/upgrade VI workload domain, ESXi/NSX/vCenter bundles | **SDDC Manager** |
+| Enable Supervisor | **vSphere Client (Workload Management)** |
+| Create namespaces, set limits, grant access | **vSphere Client** (or API/automation) |
+| Deploy apps/VMs/VKS clusters | **kubectl / VCF CLI** |
+| Network objects (T0/T1/VPC/segments) | **NSX Manager** |
+
+---
+
+## 9. Exam Tips
+
+1. **Know the prerequisites cold.** HA + DRS (Fully Automated), storage policies, networking, and contiguous management IPs are classic exam targets.
+2. **5 consecutive IPs** for the control plane is a recurring detail.
+3. **Single-zone = one cluster; three-zone = three clusters/zones.** Don't confuse zones with hosts.
+4. **Storage policies become StorageClasses.** If a developer can't see a StorageClass, check the namespace's assigned storage policies.
+5. **Limits are quotas.** New requests exceeding limits fail; running workloads are not killed.
+6. **Permissions map to Kubernetes roles.** *Can view = view*, *Can edit = edit*, *Owner = edit + namespace management*.
+7. **Identity comes from vCenter SSO.** If a user can't log in, verify the identity source and that the user/group has permission on the namespace.
+8. **Separate duties:** SDDC Manager for domain lifecycle; vCenter for Supervisor and namespaces.
+9. **Troubleshooting order:** time/DNS, then management network reachability, then storage policy, then NSX/load balancer, then certificates.
+10. **Read scenario wording carefully.** Look for words like "least privilege," "self-service," "highly available across racks," or "cannot reduce," which point to specific features.
+11. **Version awareness.** Expect terminology such as **VKS**, **VM Service**, and **Supervisor Services**. Older names (Tanzu Kubernetes Grid Service, `TanzuKubernetesCluster`) may appear in legacy content.
+
+---
+
+## 10. Practice Questions
+
+### Question 1
+
+An administrator attempts to enable Workload Management on a cluster in a VI workload domain, but the cluster does not appear in the list of compatible clusters. HA is enabled and the NSX networking is configured. Which additional configuration should the administrator verify FIRST?
+
+- A. The cluster has DRS set to Fully Automated
+- B. The cluster has Enhanced vMotion Compatibility (EVC) disabled
+- C. The cluster uses only local VMFS datastores
+- D. SDDC Manager has a backup schedule configured
+
+**Answer: A**
+
+**Explanation:** Supervisor enablement requires both **vSphere HA** and **DRS in Fully Automated mode**. If either is missing, the cluster will not show as compatible. EVC (B) is not required to be disabled, and Supervisor requires storage accessible with appropriate **storage policies**, not local-only VMFS (C), which would be inadequate for HA. An SDDC Manager backup schedule (D) is unrelated to compatibility.
+
+---
+
+### Question 2
+
+A DevOps team lead needs to deploy workloads and modify most objects inside the `app-prod` namespace, but must NOT be able to delete the namespace or change its permissions. Which permission should the vSphere administrator assign to the team lead's AD group?
+
+- A. Owner
+- B. Can edit
+- C. Can view
+- D. Administrator on the vCenter Server root object
+
+**Answer: B**
+
+**Explanation:** **Can edit** maps to the Kubernetes `edit` role in that namespace, allowing creation and modification of workloads without namespace-level administration. **Owner** (A) adds the ability to manage the namespace and its permissions, which violates the requirement. **Can view** (C) is read-only. The vCenter Administrator role (D) is far too broad and violates **least privilege**.
+
+---
+
+### Question 3
+
+An administrator deploys a Supervisor with a **Small** control plane and later finds the environment is growing with many namespaces and VKS clusters. The administrator wants to reduce overhead by switching the control plane to **Tiny**. What is the correct statement?
+
+- A. The control plane size can be changed freely in either direction through Workload Management
+- B. The control plane can be scaled up but not scaled down; to reduce size the Supervisor must be redeployed
+- C. The control plane size is fixed at deployment and can never be changed
+- D. Changing the size requires SDDC Manager to reimage the ESXi hosts
+
+**Answer: B**
+
+**Explanation:** Supervisor control plane size **can be increased** after deployment but **cannot be decreased**. Moving to a smaller size would require disabling and redeploying the Supervisor, which affects running workloads. Option A is incorrect, C is incorrect because scale-up is supported, and D is unrelated, as ESXi host imaging is not involved in resizing the control plane.
+
+---
+
+## 11. Hands-On Lab Ideas
+
+1. Verify HA and DRS settings and review compatibility results in **Workload Management**.
+2. Create a storage policy and a content library, then enable a Supervisor in a lab.
+3. Create a namespace, assign a storage policy, set CPU/memory/storage limits, and attach VM classes.
+4. Grant **Can edit** to an AD group, log in with `kubectl vsphere login`, and deploy a test pod.
+5. Exceed a ResourceQuota deliberately and observe the rejection message.
+6. Create a namespace template and test self-service namespace creation.
+
+---
+
+## 12. Summary Checklist
+
+- [ ] I can list the Supervisor prerequisites (HA, DRS, storage policy, network, IPs, NTP/DNS).
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know the 5-IP management requirement and what each IP is for.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can distinguish single-zone from three-zone Supervisors.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can create a namespace and configure storage, limits, VM classes, and content libraries.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can map Can view / Can edit / Owner to Kubernetes roles.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know which tasks belong to SDDC Manager, vCenter, NSX, and the developer CLI.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can troubleshoot a failed Supervisor deployment by working through the usual causes.
+<details>
+<summary>Explanation</summary>
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/learning/certs-central/vmware/study-notes/vcf-administrator/vcf-11-workload-domain-provisioning" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Module 11: VI Workload Domain Provisioning & Cluster Expansion
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VMware Study Notes Hub
+  </a>
+  <a href="/learning/certs-central/vmware/study-notes/vcf-administrator/vcf-13-vcf-operations-monitoring" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 13: VCF Operations & Monitoring (Operations / Aria) →
+  </a>
+</div>
