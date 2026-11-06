@@ -451,9 +451,9 @@ export const navigationConfig: NavigationConfig = {
               description: "Deep-dive architectural walkthroughs",
             },
             {
-              label: "Tech Conference Calendar",
-              href: "/resources/tech-conference-calendar",
-              description: "KubeCon, AI conferences, hackathons",
+              label: "Conferences & Summits",
+              href: "/resources/conferences",
+              description: "KubeCon, AI conferences, hackathons & guides",
             },
             { label: "FAQ", href: "/faq", description: "Common questions answered" },
           ],
@@ -538,8 +538,8 @@ export const navigationConfig: NavigationConfig = {
             },
             {
               label: "All Conference Guides",
-              href: "/resources/tech-conference-calendar",
-              description: "Full calendar with links to every event guide",
+              href: "/resources/conferences",
+              description: "Full directory and calendar of every event guide",
             },
           ],
         },

@@ -59,6 +59,10 @@ function buildBreadcrumbs(segments: string[]) {
     if (seg.toLowerCase() === "vcf") label = "VCF";
     if (seg.toLowerCase() === "vmware") label = "VMware";
     if (seg.toLowerCase() === "certifications") label = "Certifications";
+    if (seg.toLowerCase() === "resources") label = "Resources";
+    if (seg.toLowerCase() === "conferences") label = "Conferences & Summits";
+    if (seg.toLowerCase() === "checklists") label = "Checklists";
+    if (seg.toLowerCase() === "guides") label = "Guides";
     if (seg.toLowerCase() === "study-notes") label = "Study Notes";
     if (seg.toLowerCase() === "mock-tests") label = "Mock Tests";
     if (seg.toLowerCase() === "flash-cards") label = "Flash Cards";
@@ -120,6 +124,14 @@ const MdxSubPage = () => {
     if (segments.includes("study-notes") && segments.length >= 5) {
       return true;
     }
+    // In resource guides, conferences, or checklists detail pages
+    if (
+      segments[0] === "resources" &&
+      (segments[1] === "conferences" || segments[1] === "guides" || segments[1] === "checklists") &&
+      segments.length >= 3
+    ) {
+      return true;
+    }
     return Boolean(pageData.frontmatter.track && pageData.frontmatter.moduleNumber);
   }, [pageData, slug]);
 
@@ -130,9 +142,12 @@ const MdxSubPage = () => {
       const parentPath = "/" + segments.slice(0, segments.length - 1).join("/");
       const trackFolder = segments[segments.length - 2];
       let name = "Certification Track";
-      if (trackFolder === "vcf-administrator") name = "Cloud Foundation Administrator (2V0-17.25) Track";
-      if (trackFolder === "vcf9-architect") name = "Cloud Foundation Architect (2V0-13.25) Track";
-      if (trackFolder === "vks-tanzu") name = "VCF vSphere Kubernetes Service (3V0-24.25) Track";
+      if (trackFolder === "conferences") name = "Conferences & Summits";
+      else if (trackFolder === "guides") name = "Guides Hub";
+      else if (trackFolder === "checklists") name = "Checklists Hub";
+      else if (trackFolder === "vcf-administrator") name = "Cloud Foundation Administrator (2V0-17.25) Track";
+      else if (trackFolder === "vcf9-architect") name = "Cloud Foundation Architect (2V0-13.25) Track";
+      else if (trackFolder === "vks-tanzu") name = "VCF vSphere Kubernetes Service (3V0-24.25) Track";
       if (pageData?.frontmatter.track) name = pageData.frontmatter.track;
       return { path: parentPath, name };
     }
@@ -347,9 +362,13 @@ const MdxSubPage = () => {
             <div className="space-y-2 relative z-10">
               <div className="inline-flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-wider text-primary">
                 <span>
-                  {pageData.frontmatter.category
-                    ? `Certifications • ${pageData.frontmatter.category.toUpperCase()}`
-                    : "Technical Certifications"}
+                  {slug.startsWith("certifications")
+                    ? (pageData.frontmatter.category
+                        ? `Certifications • ${pageData.frontmatter.category.toUpperCase()}`
+                        : "Technical Certifications")
+                    : (pageData.frontmatter.category
+                        ? `Resources • ${pageData.frontmatter.category.toUpperCase()}`
+                        : "Resources & Reference")}
                 </span>
               </div>
               <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-foreground">

@@ -43,10 +43,17 @@ export const staticRedirectsData: RedirectsFile = {
     // --- Existing Resource Moves ---
     {
       from: "/resources/k8s-cheat-sheet",
-      to: "/resources/cheatsheets/k8s-cheat-sheet",
+      to: "/learning/cheat-sheets/kubernetes",
       type: "moved",
       createdAt: "2026-08-28T00:00:00.000Z",
-      note: "K8s cheat sheet moved into the dedicated Cheat Sheets section",
+      note: "K8s cheat sheet moved into the dedicated Deep Learning Cheat Sheets section",
+    },
+    {
+      from: "/resources/tech-conference-calendar",
+      to: "/resources/conferences",
+      type: "moved",
+      createdAt: "2026-11-06T00:00:00.000Z",
+      note: "Tech conference calendar moved to canonical conferences hub",
     },
     {
       from: "/resources/devsecops-hardening-checklist",
@@ -345,27 +352,7 @@ export const staticRedirectsData: RedirectsFile = {
       createdAt: "2026-10-26T00:00:00.000Z",
       note: "Learning paths dropped; redirecting to articles",
     },
-    {
-      from: "/learning/cheat-sheets/kubernetes",
-      to: "/resources/cheatsheets/k8s-cheat-sheet",
-      type: "moved",
-      createdAt: "2026-10-26T00:00:00.000Z",
-      note: "Kubernetes cheat sheet mapped to resource",
-    },
-    {
-      from: "/learning/cheat-sheets/docker",
-      to: "/resources/cheatsheets/docker-container-cheat-sheet",
-      type: "moved",
-      createdAt: "2026-10-26T00:00:00.000Z",
-      note: "Docker cheat sheet mapped to resource",
-    },
-    {
-      from: "/learning/cheat-sheets/gen-ai",
-      to: "/resources/cheatsheets/genai-llm-cheat-sheet",
-      type: "moved",
-      createdAt: "2026-10-26T00:00:00.000Z",
-      note: "Gen-AI cheat sheet mapped to resource",
-    },
+
 
     // --- Community & Legal ---
     {

@@ -36,6 +36,7 @@ const ToolDetailPage = lazy(() => import("@/app/tools/[slug]/page"));
 const ResourcesPage = lazy(() => import("@/app/resources/page"));
 const ChecklistsPage = lazy(() => import("@/app/resources/checklists/page"));
 const GuidesPage = lazy(() => import("@/app/resources/guides/page"));
+const ConferencesPage = lazy(() => import("@/app/resources/conferences/page"));
 
 // Deep Learning Pillar Pages
 const DeepLearningPage = lazy(() => import("@/app/learning/page"));
@@ -478,6 +479,22 @@ const App = () => (
                     </SiteShell>
                   </ErrorBoundary>
                 }
+              />
+              <Route
+                path="/resources/conferences"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <ConferencesPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/resources/tech-conference-calendar"
+                element={<Navigate to="/resources/conferences" replace />}
               />
               <Route
                 path="/resources/*"

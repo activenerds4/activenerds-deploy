@@ -51,13 +51,13 @@ export const resourcesRegistry: ResourceDefinition[] = [
     enabled: true,
   },
   {
-    slug: "tech-conference-calendar",
-    title: "Tech Conference Calendar",
+    slug: "conferences",
+    title: "Conferences & Summits",
     description:
-      "Curated, filterable calendar of KubeCon, AI conferences, hackathons, and meetups worldwide.",
+      "Curated guides and calendar for KubeCon, AWS re:Invent, NVIDIA GTC, Black Hat, and global tech summits.",
     type: "directory",
     category: "events-community",
-    tags: ["conferences"],
+    tags: ["conferences", "summits"],
     enabled: true,
   },
 ];

@@ -25,6 +25,7 @@
     { "source": "/conferences/kubecon-na-2026", "destination": "/resources/conferences/kubecon-cloudnativecon-na", "permanent": true },
     { "source": "/conferences/:slug*", "destination": "/resources/conferences", "permanent": true },
     { "source": "/conferences", "destination": "/resources/conferences", "permanent": true },
+    { "source": "/resources/tech-conference-calendar", "destination": "/resources/conferences", "permanent": true },
     { "source": "/blog/(.*)/20-20-20-rule", "destination": "/blog/eye-rest-20-20-20-rule", "permanent": true },
     { "source": "/blog/20-20-20-rule", "destination": "/blog/eye-rest-20-20-20-rule", "permanent": true },
     { "source": "/blog/(.*)/ergonomic-desk-setup-checklist", "destination": "/blog/ergonomic-desk-setup-programmers", "permanent": true },
