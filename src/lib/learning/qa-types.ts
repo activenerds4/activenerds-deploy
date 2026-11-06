@@ -1,7 +1,7 @@
 export type ChallengeTopicSlug = "docker" | "kubernetes" | "gen-ai" | "agentic-ai";
 export type ChallengeLevel = "beginner" | "intermediate" | "advanced";
 export type QuestionFormat = "multiple_choice" | "scenario" | "code_fill" | "open_ended";
-export type ViewMode = "plain" | "quiz" | "flashcard" | "timed";
+export type ViewMode = "plain" | "quiz" | "flashcard" | "timed" | "scenario";
 
 export interface ChallengeQuestion {
   id: string;
@@ -34,10 +34,11 @@ export const VALID_TOPIC_SLUGS: ChallengeTopicSlug[] = [
   "agentic-ai",
 ];
 export const VALID_LEVELS: ChallengeLevel[] = ["beginner", "intermediate", "advanced"];
-export const VALID_MODES: ViewMode[] = ["plain", "quiz", "flashcard", "timed"];
+export const VALID_MODES: ViewMode[] = ["plain", "quiz", "flashcard", "timed", "scenario"];
 
 export function isModeCompatible(format: QuestionFormat, mode: ViewMode): boolean {
   if (mode === "timed" && format === "open_ended") return false;
+  if (mode === "scenario") return format === "scenario";
   return true;
 }
 
@@ -51,6 +52,7 @@ export function getXpForMode(baseXp: number, mode: ViewMode): number {
   if (mode === "plain") return 0;
   if (mode === "flashcard") return Math.floor(baseXp * 0.5);
   if (mode === "timed") return Math.floor(baseXp * 1.2);
+  if (mode === "scenario") return Math.floor(baseXp * 1.5);
   return baseXp;
 }
 

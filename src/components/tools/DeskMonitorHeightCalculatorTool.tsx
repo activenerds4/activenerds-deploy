@@ -41,7 +41,10 @@ const cmToIn = (cm: number) => cm / 2.54;
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export function calculateErgonomics(input: ErgoInput): ErgoResult {
-  const { bodyHeightCm, footwearCm, matCm, mode } = input;
+  const bodyHeightCm = Math.min(250, Math.max(100, Number(input.bodyHeightCm) || 178));
+  const footwearCm = Math.min(15, Math.max(0, Number(input.footwearCm) || 0));
+  const matCm = Math.min(10, Math.max(0, Number(input.matCm) || 0));
+  const mode = input.mode;
 
   // Effective standing height (body + footwear + mat if standing)
   const effectiveHeight =
@@ -136,6 +139,14 @@ export function DeskMonitorHeightCalculatorTool() {
 
   return (
     <Card className="p-6 space-y-6">
+      {(input.bodyHeightCm < 130 || input.bodyHeightCm > 230) && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-500 dark:text-amber-400"
+        >
+          <span>Height ({input.bodyHeightCm} cm) is outside typical ergonomic ranges (130–230 cm). Output has been bounded to safe ergonomic thresholds.</span>
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <Label htmlFor="height">Your height (cm)</Label>

@@ -1,20 +1,25 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import Seo from "@/components/layout/Seo";
 import Container from "@/components/layout/Container";
 import PostList from "@/components/content/PostList";
+import Pagination from "@/components/content/Pagination";
 import JsonLd from "@/components/seo/JsonLd";
 import { breadcrumbSchema } from "@/lib/seo";
 import { listPostsCached, getAllCategoriesCached, getAllTagsCached } from "@/lib/content";
 import type { PostSummary, Category, Tag } from "@/lib/content";
+import { paginate, slicePage, parsePageParam } from "@/lib/content/pagination";
 import { categories as allCategories } from "../../../content/categories";
 import { tags as allTags } from "../../../content/tags";
 
 /**
- * Articles listing page — shows all published posts in a responsive grid,
+ * Articles listing page — shows published posts in a paginated responsive grid (12/page),
  * with browse-by-category and browse-by-tag sections at the bottom.
  */
 const ArticlesPage = () => {
+  const [searchParams] = useSearchParams();
+  const page = parsePageParam(searchParams.get("page"));
+
   const [posts, setPosts] = useState<PostSummary[] | null>(null);
   const [cats, setCats] = useState<Category[] | null>(null);
   const [tagList, setTagList] = useState<Tag[] | null>(null);
@@ -29,12 +34,27 @@ const ArticlesPage = () => {
     );
   }, []);
 
+  useEffect(() => {
+    if (page > 1) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [page]);
+
+  const pagination = posts ? paginate({ total: posts.length, page, pageSize: 12 }) : null;
+  const pagePosts = posts && pagination ? slicePage(posts, pagination) : [];
+
+  const seoTitle = pagination && pagination.page > 1 ? `Articles — Page ${pagination.page}` : "Articles";
+  const seoDescription =
+    pagination && pagination.page > 1
+      ? `Browse all published articles, guides, and insights — page ${pagination.page} of ${pagination.totalPages}.`
+      : "Browse all published articles, guides, and insights by category and topic.";
+
   return (
     <>
       <Seo
-        title="Articles"
-        description="Browse all published articles, guides, and insights by category and topic."
-        path="/articles"
+        title={seoTitle}
+        description={seoDescription}
+        path={pagination && pagination.page > 1 ? `/articles?page=${pagination.page}` : "/articles"}
       />
       <JsonLd
         schema={breadcrumbSchema([{ label: "Home", href: "/" }, { label: "Articles" }])}
@@ -45,7 +65,7 @@ const ArticlesPage = () => {
           <p className="eyebrow mb-3">All Articles</p>
           <h1 className="display-heading mb-4 text-4xl text-foreground sm:text-5xl">The Archive</h1>
           <p className="text-lg text-muted-foreground">
-            Browse all published articles, guides, and insights by category and topic.
+            {posts ? `${posts.length} published articles, guides, and insights.` : "Browse all published articles, guides, and insights by category and topic."}
           </p>
         </header>
 
@@ -61,7 +81,10 @@ const ArticlesPage = () => {
             ))}
           </div>
         ) : (
-          <PostList posts={posts} layout="grid" />
+          <>
+            <PostList posts={pagePosts} layout="grid" />
+            {pagination && <Pagination pagination={pagination} basePath="/articles" />}
+          </>
         )}
 
         {/* Browse by Category */}

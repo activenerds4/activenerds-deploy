@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactElement } from "react";
+import { useState, useEffect, type ComponentProps, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 import { isSlugPublished } from "@/lib/content";
 import Callout from "./Callout";
@@ -137,6 +137,44 @@ function withAnchorLink(Tag: HeadingTag) {
   return Wrapped;
 }
 
+function InteractiveCheckbox(props: ComponentProps<"input">) {
+  const [checked, setChecked] = useState(Boolean(props.checked || props.defaultChecked));
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    if (typeof window === "undefined") return;
+    const key = `tasklist_${window.location.pathname}_${props.id || props.name || "cb"}`;
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved !== null) {
+        setChecked(saved === "true");
+      }
+    } catch {}
+  }, [props.id, props.name]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.checked;
+    setChecked(next);
+    if (typeof window !== "undefined") {
+      const key = `tasklist_${window.location.pathname}_${props.id || props.name || "cb"}`;
+      try {
+        localStorage.setItem(key, String(next));
+      } catch {}
+    }
+  };
+
+  return (
+    <input
+      {...props}
+      disabled={false}
+      checked={mounted ? checked : props.checked}
+      onChange={handleChange}
+      className="mr-2 h-4 w-4 rounded border-border text-primary focus:ring-primary cursor-pointer accent-primary align-middle"
+    />
+  );
+}
+
 /**
  * The MDX component map. Passed to the MDX runtime as the `components` prop.
  * Every HTML element that MDX can render is mapped here so we control the
@@ -150,6 +188,13 @@ export const mdxComponents = {
   h4: withAnchorLink("h4"),
   h5: withAnchorLink("h5"),
   h6: withAnchorLink("h6"),
+
+  input: (props: ComponentProps<"input">) => {
+    if (props.type === "checkbox") {
+      return <InteractiveCheckbox {...props} />;
+    }
+    return <input {...props} />;
+  },
 
   p: ({ children, ...rest }: ComponentProps<"p">) => (
     <p className="mb-4 text-lg leading-relaxed" {...rest}>

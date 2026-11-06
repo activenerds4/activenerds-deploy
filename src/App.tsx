@@ -541,6 +541,18 @@ const App = () => (
                 }
               />
               <Route
+                path="/privacy-policy"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <CookiePolicyPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
+              />
+              <Route
                 path="/about"
                 element={
                   <ErrorBoundary FallbackComponent={RouteError}>

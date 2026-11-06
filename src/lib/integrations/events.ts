@@ -42,8 +42,8 @@ export const CURATED_FALLBACK_EVENTS: Omit<ConferenceEvent, "daysLeft" | "isHapp
   {
     id: "kubecon-na-2026",
     name: "KubeCon + CloudNativeCon NA",
-    date: "2026-11-10",
-    endDate: "2026-11-13",
+    date: "2026-11-09",
+    endDate: "2026-11-12",
     location: "Salt Lake City, UT",
     linkUrl: "/resources/conferences/kubecon-cloudnativecon-na",
     category: "Kubernetes & Cloud",
@@ -147,9 +147,18 @@ export function processEventsList(
   rawList: Array<Omit<ConferenceEvent, "daysLeft" | "isHappeningNow" | "countdownLabel"> & Partial<ConferenceEvent>>
 ): ConferenceEvent[] {
   const processed: ConferenceEvent[] = [];
+  const seenKeys = new Set<string>();
 
   for (const item of rawList) {
     if (!item.name || !item.date) continue;
+
+    const id = item.id || `event-${item.date}-${item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    const dedupeKey = `${item.name.toLowerCase().trim()}_${item.date}`;
+    if (seenKeys.has(id) || seenKeys.has(dedupeKey)) {
+      continue;
+    }
+    seenKeys.add(id);
+    seenKeys.add(dedupeKey);
 
     const { daysLeft, isHappeningNow, countdownLabel } = calculateEventCountdown(item.date, item.endDate);
 
@@ -159,7 +168,7 @@ export function processEventsList(
     }
 
     processed.push({
-      id: item.id || `event-${item.date}-${item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      id,
       name: item.name,
       date: item.date,
       endDate: item.endDate || null,

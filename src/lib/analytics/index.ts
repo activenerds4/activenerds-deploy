@@ -109,7 +109,7 @@ export const ANALYTICS_CONSENT_STORAGE_KEY = "site-analytics-consent";
 // --- Singleton management ---------------------------------------------------
 
 let provider: AnalyticsProvider = new NoopAnalyticsProvider();
-let consentGranted = true;
+let consentGranted = false;
 
 /**
  * Set the active analytics provider.
@@ -215,7 +215,8 @@ export function loadAnalyticsConfig(): AnalyticsConfig | null {
     return null;
   }
 
-  const consentMode = (import.meta.env.VITE_ANALYTICS_CONSENT_MODE as "off" | "opt-in") ?? "off";
+  const rawConsentMode = import.meta.env.VITE_ANALYTICS_CONSENT_MODE;
+  const consentMode: "off" | "opt-in" = rawConsentMode === "off" ? "off" : "opt-in";
 
   return {
     provider: providerType,

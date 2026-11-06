@@ -61,6 +61,37 @@ const Analytics = () => {
     } catch {
       setAnalyticsProvider(new NoopAnalyticsProvider());
     }
+
+    // Handle real-time consent updates (Accept All / Reject Non-Essential / Custom Preferences)
+    const handleConsentChange = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const state = customEvent.detail;
+      const isGranted = Boolean(state?.categories?.analytics);
+      setAnalyticsConsent(isGranted);
+
+      if (typeof window !== "undefined") {
+        const w = window as unknown as { gtag?: (...args: unknown[]) => void };
+        if (w.gtag) {
+          w.gtag("consent", "update", {
+            analytics_storage: isGranted ? "granted" : "denied",
+            ad_storage: isGranted ? "granted" : "denied",
+            ad_user_data: isGranted ? "granted" : "denied",
+            ad_personalization: isGranted ? "granted" : "denied",
+          });
+        }
+      }
+
+      // If granted and using GA, ensure script tag is loaded
+      if (isGranted && config.gaMeasurementId) {
+        const gtagSrc = `https://www.googletagmanager.com/gtag/js?id=${config.gaMeasurementId.trim()}`;
+        injectScript(gtagSrc, { async: "true" });
+      }
+    };
+
+    window.addEventListener("consent-change", handleConsentChange);
+    return () => {
+      window.removeEventListener("consent-change", handleConsentChange);
+    };
   }, []);
 
   // Track page views on subsequent SPA route changes (skip initial mount to avoid duplicate beacons)
@@ -143,16 +174,24 @@ function createGaProvider(config: AnalyticsConfig): AnalyticsProvider {
       ad_personalization: currentConsent ? "granted" : "denied",
     });
 
-    // Standard GA4 config (do not pass send_page_view: false; automatically dispatches initial beacon)
-    w.gtag("config", measurementId);
+    // GA4 config with send_page_view: false to prevent sending hits before or without consent
+    w.gtag("config", measurementId, {
+      send_page_view: false,
+    });
   }
 
-  const gtagSrc = `https://www.googletagmanager.com/gtag/js?id=${measurementId}`;
-  injectScript(gtagSrc, { async: "true" });
+  // Only inject the gtag.js script if affirmative consent is already granted
+  const isOptIn = config.consentMode === "opt-in";
+  const currentConsent = isOptIn ? isAnalyticsConsentGranted() : true;
+  if (currentConsent) {
+    const gtagSrc = `https://www.googletagmanager.com/gtag/js?id=${measurementId}`;
+    injectScript(gtagSrc, { async: "true" });
+  }
 
   return {
     id: "ga",
     track(event, properties) {
+      if (!isAnalyticsConsentGranted()) return;
       try {
         const w = window as unknown as { gtag?: (...args: unknown[]) => void };
         w.gtag?.("event", event, properties);
@@ -161,6 +200,7 @@ function createGaProvider(config: AnalyticsConfig): AnalyticsProvider {
       }
     },
     trackPageView(path, properties) {
+      if (!isAnalyticsConsentGranted()) return;
       try {
         const w = window as unknown as { gtag?: (...args: unknown[]) => void };
         w.gtag?.("event", "page_view", {

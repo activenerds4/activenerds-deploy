@@ -9,8 +9,11 @@ import Seo from "@/components/layout/Seo";
 import Container from "@/components/layout/Container";
 import { Link } from "react-router-dom";
 import { cookieConfig, getCookiesByCategory, type CookieCategory } from "@/lib/config/cookies";
+import { useConsent } from "@/lib/cookies/use-consent";
 
 const CookiePolicyPage = () => {
+  const { openPreferences } = useConsent();
+
   return (
     <>
       <Seo
@@ -46,9 +49,13 @@ const CookiePolicyPage = () => {
             <p className="mb-4 text-muted-foreground">
               We categorize our cookies into four types. You can control which optional cookies are
               set by adjusting your{" "}
-              <Link to="/cookie-policy" onClick={() => {}} className="text-accent underline">
+              <button
+                type="button"
+                onClick={openPreferences}
+                className="text-accent underline hover:text-accent/80 focus-visible:outline-2 focus-visible:outline-ring rounded-xs"
+              >
                 cookie preferences
-              </Link>{" "}
+              </button>{" "}
               at any time.
             </p>
 
@@ -96,11 +103,18 @@ const CookiePolicyPage = () => {
             <h2 className="mb-3 text-xl font-semibold text-foreground">
               Managing Your Preferences
             </h2>
-            <p className="text-muted-foreground">
+            <p className="text-muted-foreground mb-4">
               You can change your cookie preferences at any time by clicking the "Cookie Settings"
               link in the footer or the settings icon in the bottom-left corner of the screen. You
               can also clear cookies through your browser settings.
             </p>
+            <button
+              type="button"
+              onClick={openPreferences}
+              className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-xs font-semibold text-accent-foreground shadow-xs transition-all hover:bg-accent/90 focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              Manage Your Cookie Preferences on This Site
+            </button>
           </section>
 
           <section>

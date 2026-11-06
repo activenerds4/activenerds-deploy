@@ -70,6 +70,12 @@ const ChallengeTopicDetailPage: React.FC = () => {
       xp: "+10 XP",
     },
     {
+      id: "scenario",
+      name: "Scenario Analysis",
+      desc: "Troubleshoot real-world production incidents, system failures, and deep root causes.",
+      xp: "+30 XP",
+    },
+    {
       id: "timed",
       name: "Speed Run / Timed",
       desc: "Test speed and low-latency recall with time multipliers and high XP.",
@@ -168,7 +174,7 @@ const ChallengeTopicDetailPage: React.FC = () => {
         <label className="font-mono text-xs font-semibold uppercase tracking-wider text-primary block">
           2. Select Practice Mode
         </label>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {MODES.map((mode) => {
             const isSelected = selectedMode === mode.id;
 

@@ -48,6 +48,7 @@ const ChallengeSessionRunnerPage: React.FC = () => {
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [sessionCompleted, setSessionCompleted] = useState(false);
   const [earnedSessionXp, setEarnedSessionXp] = useState(0);
+  const [hypothesis, setHypothesis] = useState("");
 
   if (!topic || questions.length === 0) {
     return (
@@ -76,6 +77,7 @@ const ChallengeSessionRunnerPage: React.FC = () => {
     setRevealed(false);
     setSelectedOption(null);
     setQuizSubmitted(false);
+    setHypothesis("");
 
     if (currentIndex < questions.length - 1) {
       setCurrentIndex((prev) => prev + 1);
@@ -89,6 +91,7 @@ const ChallengeSessionRunnerPage: React.FC = () => {
       setRevealed(false);
       setSelectedOption(null);
       setQuizSubmitted(false);
+      setHypothesis("");
       setCurrentIndex((prev) => prev - 1);
     }
   };
@@ -130,6 +133,7 @@ const ChallengeSessionRunnerPage: React.FC = () => {
     setQuizSubmitted(false);
     setSessionCompleted(false);
     setEarnedSessionXp(0);
+    setHypothesis("");
   };
 
   if (sessionCompleted) {
@@ -242,8 +246,55 @@ const ChallengeSessionRunnerPage: React.FC = () => {
           )}
         </div>
 
-        {/* MODE 1 & 2: Flashcard or Timed */}
-        {modeTyped !== "quiz" && (
+        {/* MODE 1: Scenario Analysis */}
+        {modeTyped === "scenario" && (
+          <div className="space-y-4 pt-4 border-t border-border/50">
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-2">
+              <span className="font-mono text-xs uppercase tracking-wider text-primary font-bold flex items-center gap-1.5">
+                <Sparkles className="h-4 w-4" /> Scenario Incident Diagnosis
+              </span>
+              <p className="text-xs text-muted-foreground">
+                Read the failure incident above. Formulate your architectural hypothesis or remediation command before inspecting the production root cause.
+              </p>
+              <textarea
+                rows={3}
+                placeholder="Draft your diagnosis or CLI fix (e.g. volume mounts, network DNS, OOM cgroups)..."
+                value={hypothesis}
+                onChange={(e) => setHypothesis(e.target.value)}
+                disabled={revealed}
+                className="w-full mt-2 rounded-lg border border-border bg-background p-3 font-mono text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+              />
+            </div>
+
+            {!revealed ? (
+              <button
+                type="button"
+                onClick={handleReveal}
+                className="w-full py-3.5 rounded-xl border border-primary/40 bg-primary/10 hover:bg-primary/20 font-mono text-xs font-semibold text-primary transition-all flex items-center justify-center gap-2"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span>Verify Root Cause & Architectural Solution</span>
+              </button>
+            ) : (
+              <div className="space-y-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-6 animate-in fade-in-50 duration-200">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs uppercase tracking-wider text-emerald-400 font-bold flex items-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4" /> Production Root Cause & Remediation
+                  </span>
+                  <span className="text-xs font-mono text-amber-400 font-semibold">
+                    +{getXpForMode(currentQ.xpValue, modeTyped)} XP
+                  </span>
+                </div>
+                <div className="text-sm sm:text-base text-foreground font-medium leading-relaxed whitespace-pre-line">
+                  {currentQ.modelAnswer}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* MODE 2: Flashcard or Timed */}
+        {modeTyped !== "quiz" && modeTyped !== "scenario" && (
           <div className="space-y-4 pt-4 border-t border-border/50">
             {!revealed ? (
               <button

@@ -41,13 +41,26 @@ export interface UseConsentReturn {
   isPreferencesOpen: boolean;
 }
 
+let globalPreferencesOpen = false;
+const preferencesListeners = new Set<(open: boolean) => void>();
+
+function setGlobalPreferencesOpen(open: boolean) {
+  globalPreferencesOpen = open;
+  preferencesListeners.forEach((listener) => listener(open));
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(open ? "cookie-preferences-open" : "cookie-preferences-close")
+    );
+  }
+}
+
 export function useConsent(): UseConsentReturn {
   const [consent, setConsent] = useState<ConsentState>(() => readConsent() ?? getDefaultConsent());
   const [hasDecided, setHasDecided] = useState<boolean>(() => hasConsented());
-  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(globalPreferencesOpen);
 
   useEffect(() => {
-    const handler = (e: Event) => {
+    const consentHandler = (e: Event) => {
       const customEvent = e as CustomEvent<ConsentState>;
       if (customEvent.detail) {
         setConsent(customEvent.detail);
@@ -58,8 +71,22 @@ export function useConsent(): UseConsentReturn {
       }
     };
 
-    window.addEventListener("consent-change", handler);
-    return () => window.removeEventListener("consent-change", handler);
+    const prefListener = (open: boolean) => setIsPreferencesOpen(open);
+    preferencesListeners.add(prefListener);
+
+    const openHandler = () => setIsPreferencesOpen(true);
+    const closeHandler = () => setIsPreferencesOpen(false);
+
+    window.addEventListener("consent-change", consentHandler);
+    window.addEventListener("cookie-preferences-open", openHandler);
+    window.addEventListener("cookie-preferences-close", closeHandler);
+
+    return () => {
+      preferencesListeners.delete(prefListener);
+      window.removeEventListener("consent-change", consentHandler);
+      window.removeEventListener("cookie-preferences-open", openHandler);
+      window.removeEventListener("cookie-preferences-close", closeHandler);
+    };
   }, []);
 
   const acceptAll = useCallback(() => {
@@ -91,8 +118,8 @@ export function useConsent(): UseConsentReturn {
     [consent],
   );
 
-  const openPreferences = useCallback(() => setIsPreferencesOpen(true), []);
-  const closePreferences = useCallback(() => setIsPreferencesOpen(false), []);
+  const openPreferences = useCallback(() => setGlobalPreferencesOpen(true), []);
+  const closePreferences = useCallback(() => setGlobalPreferencesOpen(false), []);
 
   return {
     consent,

@@ -254,8 +254,7 @@ export const PollWidget: React.FC<PollWidgetProps> = ({
   }
 
   // Step 1: Submit Vote & Request OTP (or reveal if already voted)
-  const handleSubmitVote = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitVote = async () => {
     if (honeypot) return; // Silent honeypot drop
     if (!selectedOption) {
       setErrorMessage("Please select an option before continuing.");
@@ -319,6 +318,12 @@ export const PollWidget: React.FC<PollWidgetProps> = ({
         body: JSON.stringify(payload),
       });
 
+      if (!res.ok) {
+        throw new Error(
+          `Poll service returned error (${res.status}). Please try again.`
+        );
+      }
+
       const data = await res.json();
 
       if (data.status === "already_voted" || data.status === "success") {
@@ -342,16 +347,20 @@ export const PollWidget: React.FC<PollWidgetProps> = ({
       }
     } catch (err: any) {
       setErrorMessage(
-        err.message || "An error occurred while connecting to the poll service."
+        err.message || "An error occurred while connecting to the poll service. Please retry."
       );
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Step 2: Verify OTP
-  const handleVerifyOtp = async (e: React.FormEvent) => {
+  const handleSubmitVote = (e: React.FormEvent) => {
     e.preventDefault();
+    submitVote();
+  };
+
+  // Step 2: Verify OTP
+  const verifyOtp = async () => {
     if (!otp || otp.trim().length < 6) {
       setErrorMessage("Please enter the complete 6-digit code.");
       return;
@@ -396,6 +405,12 @@ export const PollWidget: React.FC<PollWidgetProps> = ({
         body: JSON.stringify(payload),
       });
 
+      if (!res.ok) {
+        throw new Error(
+          `Verification service returned error (${res.status}). Please try again.`
+        );
+      }
+
       const data = await res.json();
 
       if (data.status === "success") {
@@ -419,6 +434,11 @@ export const PollWidget: React.FC<PollWidgetProps> = ({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleVerifyOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    verifyOtp();
   };
 
   // Resend OTP
@@ -480,10 +500,29 @@ export const PollWidget: React.FC<PollWidgetProps> = ({
       {errorMessage && (
         <div
           role="alert"
-          className="mt-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive"
+          className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive"
         >
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{errorMessage}</span>
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          {(step === "voting" || step === "otp_verification") && (
+            <button
+              type="button"
+              onClick={() => {
+                if (step === "voting") {
+                  submitVote();
+                } else if (step === "otp_verification") {
+                  verifyOtp();
+                }
+              }}
+              disabled={isLoading}
+              className="inline-flex items-center gap-1 font-semibold underline hover:no-underline shrink-0 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`} />
+              Retry
+            </button>
+          )}
         </div>
       )}
 

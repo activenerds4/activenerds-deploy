@@ -53,37 +53,52 @@ const DEFAULTS: VramInput = {
   overheadPct: 10,
 };
 
+/* ── Model architecture heuristics based on parameter size ──────────────── */
+function getModelArchitecture(paramsB: number): { layers: number; kvHeads: number; headDim: number } {
+  if (paramsB <= 3) return { layers: 24, kvHeads: 8, headDim: 64 };
+  if (paramsB <= 9) return { layers: 32, kvHeads: 8, headDim: 128 }; // 7B / 8B (Llama 3 8B)
+  if (paramsB <= 16) return { layers: 40, kvHeads: 8, headDim: 128 }; // 13B / 14B
+  if (paramsB <= 45) return { layers: 48, kvHeads: 8, headDim: 128 }; // 30B - 34B
+  return { layers: 80, kvHeads: 8, headDim: 128 }; // 70B+ (Llama 3 70B GQA)
+}
+
 export function calculateVram(input: VramInput): VramResult {
-  const params = input.paramsB * 1e9;
-  const bytesPerParam = QUANT_BYTES[input.quant];
+  // Input boundary clamping (prevents negative, NaN, or absurd values)
+  const safeParamsB = Math.max(0.1, Math.min(1000, Number(input.paramsB) || 0.1));
+  const safeContextLen = Math.max(512, Math.min(1048576, Number(input.contextLen) || 4096));
+  const safeBatchSize = Math.max(1, Math.min(512, Number(input.batchSize) || 1));
+  const safeGpuVramGb = Math.max(1, Math.min(512, Number(input.gpuVramGb) || 24));
+  const safeOverheadPct = Math.max(0, Math.min(100, Number(input.overheadPct) || 0));
+
+  const params = safeParamsB * 1e9;
+  const bytesPerParam = QUANT_BYTES[input.quant] ?? 0.55;
   const modelBytes = params * bytesPerParam;
   const modelGb = modelBytes / 1e9;
 
-  // KV cache: 2 * n_layers * n_heads * head_dim * seq_len * batch * 2 bytes
-  // Approximate layers/heads from params: rough heuristic ~64 layers for 7B
-  const approxLayers = Math.max(1, Math.round(input.paramsB * 8));
-  const approxHeads = 32;
-  const headDim = 128;
+  // KV cache: 2 (K & V) * n_layers * n_kv_heads * head_dim * contextLen * batch * bytes_per_element
+  // Uses FP16 (2 bytes per float) with GQA architecture specs
+  const arch = getModelArchitecture(safeParamsB);
+  const BYTES_PER_KV_ELEMENT = 2;
   const kvCacheBytes =
     2 *
-    approxLayers *
-    approxHeads *
-    headDim *
-    input.contextLen *
-    input.batchSize *
-    CONTEXT_KV_BYTES;
+    arch.layers *
+    arch.kvHeads *
+    arch.headDim *
+    safeContextLen *
+    safeBatchSize *
+    BYTES_PER_KV_ELEMENT;
   const kvCacheGb = kvCacheBytes / 1e9;
 
-  // Activations: ~0.5GB per 1B params at batch 1, scales with batch
-  const activationGb = input.paramsB * 0.05 * input.batchSize;
+  // Activations: ~0.02 GB per 1B params at batch 1, scales with batch size
+  const activationGb = safeParamsB * 0.02 * safeBatchSize;
 
   const subtotal = modelGb + kvCacheGb + activationGb;
-  const overhead = subtotal * (input.overheadPct / 100);
+  const overhead = subtotal * (safeOverheadPct / 100);
   const totalVramGb = subtotal + overhead;
 
-  const fits = totalVramGb <= input.gpuVramGb;
-  const numGpusNeeded = Math.max(1, Math.ceil(totalVramGb / input.gpuVramGb));
-  // System RAM should be ~1.5x model size for offload headroom
+  const fits = totalVramGb <= safeGpuVramGb;
+  const numGpusNeeded = Math.max(1, Math.ceil(totalVramGb / safeGpuVramGb));
+  // System RAM recommendation: ~1.5x model weights + KV cache for offload headroom
   const systemRamGb = modelGb * 1.5 + kvCacheGb;
 
   return {
@@ -109,8 +124,23 @@ export function LlmVramHardwareSizerTool() {
 
   const reset = () => setInput(DEFAULTS);
 
+  const isInputOutOfRange =
+    input.paramsB <= 0 ||
+    input.contextLen <= 0 ||
+    input.batchSize <= 0 ||
+    input.gpuVramGb <= 0 ||
+    input.paramsB > 1000;
+
   return (
     <Card className="p-6 space-y-6">
+      {isInputOutOfRange && (
+        <div
+          role="alert"
+          className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-400 font-medium"
+        >
+          ⚠️ Warning: Values must be positive numbers within valid hardware bounds (e.g., 0.1B to 1,000B parameters). Calculations have been clamped to safe ranges.
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <Label htmlFor="params">Model Parameters (B)</Label>

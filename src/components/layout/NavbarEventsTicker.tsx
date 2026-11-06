@@ -255,7 +255,7 @@ export default function NavbarEventsTicker() {
         onClick={() => setIsOpen((prev) => !prev)}
         aria-expanded={isOpen}
         aria-haspopup="true"
-        aria-label={`Upcoming event: ${currentEvent.name}, ${displayedDays} Days left. Click to view all ${events.length} events.`}
+        aria-label={`Upcoming event: ${currentEvent.name}, ${currentEvent.isHappeningNow ? "Happening now" : `${currentEvent.daysLeft} days left`}. Click to view all ${events.length} events.`}
         className={cn(
           "group flex h-9 w-[290px] xl:w-[325px] items-center justify-between rounded-md border border-border/80 bg-card px-2.5 py-1 text-xs transition-all hover:border-accent hover:bg-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring cursor-pointer select-none shrink-0",
           isOpen && "border-accent ring-1 ring-accent bg-card"

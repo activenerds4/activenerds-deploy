@@ -50,24 +50,32 @@ function mibToGib(mib: number) {
 }
 
 export function calculateResources(input: ResourceInput): ResourceResult {
-  const totalCpuReq = mlToCores(input.cpuRequest) * input.replicas;
-  const totalCpuLim = mlToCores(input.cpuLimit) * input.replicas;
-  const totalMemReq = mibToGib(input.memRequest) * input.replicas;
-  const totalMemLim = mibToGib(input.memLimit) * input.replicas;
+  const replicas = Math.max(1, Math.min(10000, Number(input.replicas) || 1));
+  const cpuRequest = Math.max(1, Number(input.cpuRequest) || 100);
+  const cpuLimit = Math.max(cpuRequest, Number(input.cpuLimit) || cpuRequest);
+  const memRequest = Math.max(1, Number(input.memRequest) || 128);
+  const memLimit = Math.max(memRequest, Number(input.memLimit) || memRequest);
+  const nodeCpu = Math.max(1, Number(input.nodeCpu) || 4);
+  const nodeMem = Math.max(1, Number(input.nodeMem) || 16);
+
+  const totalCpuReq = mlToCores(cpuRequest) * replicas;
+  const totalCpuLim = mlToCores(cpuLimit) * replicas;
+  const totalMemReq = mibToGib(memRequest) * replicas;
+  const totalMemLim = mibToGib(memLimit) * replicas;
 
   // Reserve ~10% for system daemons
-  const usableCpu = input.nodeCpu * 0.9;
-  const usableMem = input.nodeMem * 0.9;
+  const usableCpu = nodeCpu * 0.9;
+  const usableMem = nodeMem * 0.9;
   const podsPerNode = Math.max(
     1,
     Math.floor(
-      Math.min(usableCpu / mlToCores(input.cpuRequest), usableMem / mibToGib(input.memRequest)),
+      Math.min(usableCpu / mlToCores(cpuRequest), usableMem / mibToGib(memRequest)),
     ),
   );
-  const nodesNeeded = Math.ceil(input.replicas / podsPerNode);
+  const nodesNeeded = Math.max(1, Math.ceil(replicas / podsPerNode));
 
-  const nodeCpuUtil = (totalCpuReq / (nodesNeeded * input.nodeCpu)) * 100;
-  const nodeMemUtil = (totalMemReq / (nodesNeeded * input.nodeMem)) * 100;
+  const nodeCpuUtil = Math.min(100, (totalCpuReq / (nodesNeeded * nodeCpu)) * 100);
+  const nodeMemUtil = Math.min(100, (totalMemReq / (nodesNeeded * nodeMem)) * 100);
 
   const limitRangeYaml = `apiVersion: v1
 kind: LimitRange
@@ -77,14 +85,14 @@ spec:
   limits:
     - type: Container
       default:
-        cpu: "${input.cpuLimit}m"
-        memory: "${input.memLimit}Mi"
+        cpu: "${cpuLimit}m"
+        memory: "${memLimit}Mi"
       defaultRequest:
-        cpu: "${input.cpuRequest}m"
-        memory: "${input.memRequest}Mi"
+        cpu: "${cpuRequest}m"
+        memory: "${memRequest}Mi"
       max:
-        cpu: "${input.cpuLimit * 2}m"
-        memory: "${input.memLimit * 2}Mi"`;
+        cpu: "${cpuLimit * 2}m"
+        memory: "${memLimit * 2}Mi"`;
 
   const resourceQuotaYaml = `apiVersion: v1
 kind: ResourceQuota
@@ -96,7 +104,7 @@ spec:
     requests.memory: "${totalMemReq.toFixed(1)}Gi"
     limits.cpu: "${totalCpuLim.toFixed(2)}"
     limits.memory: "${totalMemLim.toFixed(1)}Gi"
-    pods: "${input.replicas * 2}"`;
+    pods: "${replicas * 2}"`;
 
   return {
     totalCpuReq,
@@ -128,6 +136,19 @@ export function K8sResourceQuotaCalculatorTool() {
 
   return (
     <Card className="p-6 space-y-6">
+      {(input.cpuLimit < input.cpuRequest || input.memLimit < input.memRequest) && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-500 dark:text-amber-400"
+        >
+          <span>
+            Notice: In Kubernetes, resource limits must be ≥ requests (
+            {input.cpuLimit < input.cpuRequest && "CPU limit < request; "}
+            {input.memLimit < input.memRequest && "Memory limit < request"}
+            ). Calculations automatically reconcile limits to requests.
+          </span>
+        </div>
+      )}
       {/* Inputs */}
       <div className="grid gap-4 sm:grid-cols-2">
         <div>

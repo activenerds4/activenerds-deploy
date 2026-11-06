@@ -39,10 +39,13 @@ const aboutNav = [
 ];
 
 const socialLinks = [
-  { label: "Twitter", href: siteConfig.social.twitter, isExternal: true },
+  { label: "Twitter / X", href: siteConfig.social.twitter, isExternal: true },
   { label: "GitHub", href: siteConfig.social.github, isExternal: true },
   { label: "LinkedIn", href: siteConfig.social.linkedin, isExternal: true },
   { label: "RSS Feed", href: "/feed.xml", isExternal: false },
+  { label: "Atom Feed", href: "/atom.xml", isExternal: false },
+  { label: "JSON Feed", href: "/feed.json", isExternal: false },
+  { label: "LLMs Context", href: "/llms.txt", isExternal: false },
   { label: "Sitemap", href: "/sitemap.xml", isExternal: false },
 ];
 
@@ -174,7 +177,13 @@ export const SiteFooter = () => {
           <p className="text-xs text-muted-foreground">
             &copy; {year} {siteConfig.name}. Built with care for the web.
           </p>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <Link
+              to="/privacy-policy"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Privacy Policy
+            </Link>
             <Link
               to="/cookie-policy"
               className="text-xs text-muted-foreground transition-colors hover:text-foreground"

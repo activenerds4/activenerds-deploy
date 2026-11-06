@@ -35,14 +35,12 @@ const SiteShell = ({ children }: SiteShellProps) => {
     initTagLoader();
 
     const analyticsConfig = loadAnalyticsConfig();
-    const isAnalyticsOptIn = analyticsConfig?.consentMode === "opt-in";
+    const isAnalyticsOptIn = (analyticsConfig?.consentMode ?? "opt-in") === "opt-in";
 
     // Sync analytics consent with cookie consent state ONLY in opt-in mode
     if (isAnalyticsOptIn) {
       const existing = readConsent();
-      if (existing) {
-        setAnalyticsConsent(existing.categories.analytics ?? false);
-      }
+      setAnalyticsConsent(Boolean(existing?.categories?.analytics));
     } else {
       setAnalyticsConsent(true);
     }

@@ -54,24 +54,38 @@ export function buildSitemapEntries(params: {
   // appear in the sitemap since they permanently redirect elsewhere.
   const redirectSources = new Set(getRedirectSources());
 
+  // Compute latest post date as fallback lastmod for aggregate and static pages
+  const latestPostDate = posts.reduce((latest, p) => {
+    const postDate = p.updated ?? p.date;
+    if (!postDate) return latest;
+    return !latest || new Date(postDate) > new Date(latest) ? postDate : latest;
+  }, "");
+  const defaultLastMod = latestPostDate
+    ? new Date(latestPostDate).toISOString().split("T")[0]
+    : new Date().toISOString().split("T")[0];
+
   // --- Static pages ---
   entries.push({
     loc: buildUrl("/"),
+    lastmod: defaultLastMod,
     changefreq: "daily",
     priority: 1.0,
   });
   entries.push({
     loc: buildUrl("/articles"),
+    lastmod: defaultLastMod,
     changefreq: "daily",
     priority: 0.9,
   });
   entries.push({
     loc: buildUrl("/blog"),
+    lastmod: defaultLastMod,
     changefreq: "daily",
     priority: 0.9,
   });
   entries.push({
     loc: buildUrl("/about"),
+    lastmod: defaultLastMod,
     changefreq: "monthly",
     priority: 0.5,
   });
@@ -107,7 +121,7 @@ export function buildSitemapEntries(params: {
 
     entries.push({
       loc: resolveCanonical(path),
-      lastmod: post.updated ?? post.date,
+      lastmod: post.updated ?? post.date ?? defaultLastMod,
       changefreq: "weekly",
       priority: 0.8,
       alternates,
@@ -118,6 +132,7 @@ export function buildSitemapEntries(params: {
   for (const category of categories) {
     entries.push({
       loc: buildUrl(`/category/${category.slug}`),
+      lastmod: defaultLastMod,
       changefreq: "weekly",
       priority: 0.6,
     });
@@ -128,6 +143,7 @@ export function buildSitemapEntries(params: {
     if (tag.count > 0) {
       entries.push({
         loc: buildUrl(`/tag/${tag.slug}`),
+        lastmod: defaultLastMod,
         changefreq: "weekly",
         priority: 0.5,
       });
@@ -140,6 +156,7 @@ export function buildSitemapEntries(params: {
     if (postAuthors.has(author.slug)) {
       entries.push({
         loc: buildUrl(`/author/${author.slug}`),
+        lastmod: defaultLastMod,
         changefreq: "weekly",
         priority: 0.5,
       });
