@@ -131,8 +131,8 @@ const Home = () => {
       ) : null}
 
       {/* Modern Developer Split Hero Section (Aligned with max-w-7xl) */}
-      <section className="border-b border-border/80 bg-background">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10">
+      <section className="border-b border-border/80 bg-background overflow-hidden w-full">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 w-full min-w-0">
           {featured && featured.length > 0 ? (
             <ModernDeveloperHero
               slides={featured}
