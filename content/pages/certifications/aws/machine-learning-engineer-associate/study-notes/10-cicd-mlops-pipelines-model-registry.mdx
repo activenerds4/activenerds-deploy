@@ -1,0 +1,420 @@
+---
+title: "Module 10: MLOps CI/CD: CodePipeline, SageMaker Pipelines, Model Registry & Retraining Automation"
+description: "Task 3.3 (classic MLOps): deployment strategies/rollbacks, CodeBuild/CodeCommit/CodeDeploy/CodePipeline/CodeConnections, Step Functions, MWAA, EventBridge retraining triggers, Model Registry, MLflow, automated testing."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 10
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Domain 3, Task 3.3 - skills 3.3.1 to 3.3.6 (classic MLOps): automated deployment and rollback, the AWS Code* suite, training/inference job configuration, automated testing, retraining mechanisms, and model versioning with SageMaker Model Registry and MLflow. GenAI-specific skills 3.3.7 to 3.3.11 (prompts, agents, RAG refresh) are in Module 11.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 3.3 (Skills 3.3.1 - 3.3.6)">
+Task 3.3 sits in Domain 3, which is 24% of scored content. Questions are scenario-based: "the team wants a new model version deployed automatically after approval, with automatic rollback if latency alarms fire" or "retrain whenever drift is detected with the least operational overhead". Expect to choose between CodePipeline, SageMaker Pipelines, Step Functions and MWAA, and to know which service owns which responsibility (code CI/CD vs ML workflow vs model governance).
+</Callout>
+
+---
+
+## 1. The MLOps Mental Model: Two Pipelines, One Registry
+
+A production ML system has two loops that meet at the **Model Registry**:
+
+* **Training / ML workflow pipeline** (data to model): process data, train, evaluate, apply a quality gate, register the model. Built mostly with **SageMaker Pipelines** (or Step Functions / MWAA).
+* **Code and deployment pipeline** (approved model to endpoint): build, test, deploy to staging, approve, deploy to production with a traffic-shifting strategy and rollback. Built mostly with **CodePipeline + CodeBuild + CodeDeploy/CloudFormation**.
+
+```
+ Git push / new data / drift alarm / schedule
+                |
+                v
+   +---------------------------+        +----------------------------+
+   |  ML workflow pipeline     |        |  CI/CD pipeline            |
+   |  (SageMaker Pipelines)    |        |  (CodePipeline)            |
+   |  Process -> Train -> Eval |        |  Source -> Build -> Test   |
+   |  -> Condition -> Register |        |  -> Deploy(staging)        |
+   +-------------+-------------+        |  -> Manual approval        |
+                 |                      |  -> Deploy(prod)           |
+                 v                      +--------------+-------------+
+   +---------------------------+                       ^
+   |  SageMaker Model Registry | --- Approved event ---+
+   |  (model package group,    |   (EventBridge)
+   |   versions, approval)     |
+   +---------------------------+
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Who owns what? Division of responsibility">
+
+Memorize the responsibilities, because distractors usually swap them:
+
+* **AWS CodePipeline** orchestrates stages and actions (source, build, test, deploy, approval, invoke). It moves **artifacts** between stages through an **S3 artifact store**, which can be encrypted with a customer managed KMS key.
+* **AWS CodeBuild** runs commands in a managed container, driven by `buildspec.yml`. Use it for unit tests, linting, container image builds, and to *start* a SageMaker pipeline.
+* **AWS CodeDeploy** shifts traffic and runs lifecycle hooks for EC2/on-premises, Lambda and ECS targets, and can roll back automatically.
+* **AWS CodeConnections** (formerly CodeStar Connections) lets CodePipeline and CodeBuild reach third-party source providers such as GitHub, GitLab and Bitbucket. It is a source-connectivity service, not a build or deploy service.
+* **AWS CodeCommit** is the AWS-hosted Git repository source.
+* **SageMaker Pipelines** is the ML-native DAG: data processing, training, tuning, evaluation, conditions and model registration, with step caching and lineage.
+* **SageMaker Model Registry** is the governance catalog: versions, metrics, approval status and deployment lineage.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Why not put everything in CodePipeline?">
+
+CodePipeline can invoke SageMaker through CloudFormation, Lambda or CodeBuild actions, but it has no concept of ML steps such as a Condition on an evaluation metric, step-level caching of unchanged training steps, or experiment lineage. Conversely, SageMaker Pipelines has no first-class cross-account approval stages or Git source triggers. The common exam-correct pattern is therefore a **hybrid**: CodePipeline for code CI/CD and promotion, SageMaker Pipelines for the ML workflow, and the Model Registry as the contract between them.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Skill 3.3.2: The AWS Code* Suite for ML
+
+### CodeBuild and buildspec.yml
+
+`buildspec.yml` defines the phases `install`, `pre_build`, `build` and `post_build`. A failed command in `install`, `pre_build` or `build` fails the build; `post_build` still runs after a failed `build` (unless the build is stopped), so do not put "publish" steps there without checking `CODEBUILD_BUILD_SUCCEEDING`.
+
+```yaml
+version: 0.2
+env:
+  variables:
+    PIPELINE_NAME: "churn-training-pipeline"
+  parameter-store:
+    ROLE_ARN: "/mlops/sagemaker/execution-role-arn"
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - pip install -r requirements.txt
+  pre_build:
+    commands:
+      - pytest tests/unit --maxfail=1
+      - python -m flake8 src
+  build:
+    commands:
+      - python pipelines/upsert_pipeline.py --role-arn "$ROLE_ARN"
+      - python pipelines/start_pipeline.py --name "$PIPELINE_NAME"
+  post_build:
+    commands:
+      - echo "Pipeline started at $(date)"
+artifacts:
+  files:
+    - pipelines/**/*
+reports:
+  unit-tests:
+    files:
+      - "reports/junit.xml"
+    file-format: JUNITXML
+```
+
+### CodeDeploy and appspec
+
+The AppSpec file differs by compute platform. Hook names are a frequent exam item.
+
+| Platform | AppSpec content | Lifecycle hooks | Built-in traffic configurations |
+|---|---|---|---|
+| EC2 / on-premises | `files`, `permissions`, `hooks` | ApplicationStop, BeforeInstall, AfterInstall, ApplicationStart, ValidateService | AllAtOnce, HalfAtATime, OneAtATime (in-place); blue/green uses load balancer |
+| AWS Lambda | `Resources` with function Name, Alias, CurrentVersion, TargetVersion | BeforeAllowTraffic, AfterAllowTraffic | Canary10Percent5Minutes (and 10/15/30 min variants), Linear10PercentEvery1Minute (and 2/3/10 min variants), AllAtOnce |
+| Amazon ECS | `Resources` with TaskDefinition, ContainerName, ContainerPort | BeforeInstall, AfterInstall, AfterAllowTestTraffic, BeforeAllowTraffic, AfterAllowTraffic | ECSCanary10Percent5Minutes, ECSLinear10PercentEvery1Minutes, ECSAllAtOnce |
+
+```yaml
+# appspec.yml for an ML inference Lambda behind an alias
+version: 0.0
+Resources:
+  - InferenceFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        Name: "churn-inference"
+        Alias: "live"
+        CurrentVersion: "7"
+        TargetVersion: "8"
+Hooks:
+  - BeforeAllowTraffic: "PreTrafficSmokeTest"
+  - AfterAllowTraffic: "PostTrafficValidation"
+```
+
+<Callout variant="warning" title="Exam Trap: SageMaker endpoints do not use an AppSpec">
+CodeDeploy does not natively deploy to SageMaker endpoints. For SageMaker, use **SageMaker deployment guardrails** (blue/green with all-at-once, canary or linear traffic shifting and CloudWatch alarm auto-rollback) driven from CloudFormation, the SDK, or a CodePipeline action. CodeDeploy hooks and AppSpec are for EC2, Lambda and ECS (for example, when a model is packaged in a container served by ECS or in a Lambda function).
+</Callout>
+
+---
+
+## 3. Skill 3.3.1: Automated Deployment Strategies and Rollback Actions
+
+| Strategy | How it works | Rollback speed | Cost | Typical use |
+|---|---|---|---|---|
+| All-at-once | Replace everything immediately | Slow (redeploy previous) | Lowest | Dev/test |
+| Rolling / in-place | Replace capacity in batches | Moderate | Low | Stateless fleets that tolerate mixed versions |
+| Blue/green | New fleet next to old, then switch traffic | Fast (switch back) | Temporarily 2x capacity | Production endpoints needing zero downtime |
+| Canary | Small slice first, then the rest after a bake time | Fast | Slightly above blue/green baseline | Risky model changes; verify with live traffic |
+| Linear | Equal increments at fixed intervals | Fast | Similar to canary | Gradual exposure with continuous alarm checks |
+| Shadow | Mirror traffic to the new variant, responses discarded | n/a (no user impact) | Extra variant cost | Validating a model before any user sees it |
+
+### SageMaker deployment guardrails
+
+```python
+import boto3
+sm = boto3.client("sagemaker")
+
+sm.update_endpoint(
+    EndpointName="churn-prod",
+    EndpointConfigName="churn-config-v8",
+    DeploymentConfig={
+        "BlueGreenUpdatePolicy": {
+            "TrafficRoutingConfiguration": {
+                "Type": "CANARY",                      # ALL_AT_ONCE | CANARY | LINEAR
+                "CanarySize": {"Type": "CAPACITY_PERCENT", "Value": 10},
+                "WaitIntervalInSeconds": 600           # bake time before the rest shifts
+            },
+            "TerminationWaitInSeconds": 300,           # keep blue fleet briefly for fast rollback
+            "MaximumExecutionTimeoutInSeconds": 3600
+        },
+        "AutoRollbackConfiguration": {
+            "Alarms": [
+                {"AlarmName": "churn-prod-5xx-alarm"},
+                {"AlarmName": "churn-prod-p99-latency-alarm"}
+            ]
+        }
+    },
+)
+```
+
+If any listed alarm enters the ALARM state during the deployment, SageMaker shifts traffic back to the old fleet automatically. A **rolling** deployment policy is also available, which updates capacity in batches and avoids doubling the instance count for large GPU fleets.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Rollback in each layer of the stack">
+
+* **Endpoint level:** guardrail auto-rollback on CloudWatch alarms (see above); or repoint the endpoint to the previous endpoint config with `update_endpoint`.
+* **Lambda / ECS level:** CodeDeploy automatic rollback on deployment failure or alarm breach; rollback re-routes the alias or target group to the previous version.
+* **Infrastructure level:** CloudFormation rolls back a failed stack update automatically; with `--disable-rollback` you keep failed resources for debugging.
+* **Model level:** set the faulty model package version to `Rejected` in the Model Registry, and redeploy the last `Approved` version. Because versions are immutable, this gives repeatable and auditable rollbacks.
+* **Pipeline level:** CodePipeline can stop at a **manual approval** action before production; a rejection stops the execution and nothing is promoted.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Choosing alarms for rollback">
+
+Good rollback alarms combine *infrastructure* and *model-quality* signals: `Invocation5XXErrors`, `ModelLatency`/`OverheadLatency` p99, and a custom business metric such as a prediction-distribution proxy. Alarms based only on CPU can miss a model that is healthy technically but wrong. Remember that ground-truth-based model quality metrics arrive late, so they suit post-deployment monitoring (Module 12), not a ten-minute canary bake.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Skill 3.3.3: Configuring Training and Inference Jobs
+
+Pipelines and CI/CD ultimately call the same primitives. Know which job type serves which purpose.
+
+| Job type | API | Purpose | Notes |
+|---|---|---|---|
+| Processing job | `CreateProcessingJob` | Pre-/post-processing, evaluation | Used by ProcessingStep; supports scikit-learn, Spark, custom containers |
+| Training job | `CreateTrainingJob` | Train a model from S3 data | Supports Spot (`EnableManagedSpotTraining`), checkpoints, distributed training |
+| Hyperparameter tuning job | `CreateHyperParameterTuningJob` | Automatic model tuning | TuningStep in a pipeline |
+| Batch transform job | `CreateTransformJob` | Offline inference on a whole dataset | No persistent endpoint, pay for job duration |
+| Endpoint | `CreateEndpoint` | Online inference | Real-time, serverless or async variants |
+
+```python
+from sagemaker.workflow.pipeline import Pipeline
+from sagemaker.workflow.steps import ProcessingStep, TrainingStep, CacheConfig
+from sagemaker.workflow.condition_step import ConditionStep
+from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
+from sagemaker.workflow.functions import JsonGet
+from sagemaker.workflow.model_step import ModelStep
+from sagemaker.workflow.parameters import ParameterString, ParameterFloat
+
+input_data = ParameterString(name="InputData", default_value="s3://ml-bucket/raw/")
+min_auc = ParameterFloat(name="MinAuc", default_value=0.85)
+cache = CacheConfig(enable_caching=True, expire_after="P7D")   # skip unchanged steps
+
+step_process = ProcessingStep(name="Prep", processor=sk_processor, code="prep.py",
+                              inputs=[...], outputs=[...], cache_config=cache)
+step_train = TrainingStep(name="Train", estimator=xgb, inputs={...}, cache_config=cache)
+step_eval = ProcessingStep(name="Evaluate", processor=sk_processor, code="evaluate.py",
+                           property_files=[evaluation_report])
+
+auc = JsonGet(step_name=step_eval.name, property_file=evaluation_report,
+              json_path="classification_metrics.auc.value")
+step_cond = ConditionStep(
+    name="CheckAuc",
+    conditions=[ConditionGreaterThanOrEqualTo(left=auc, right=min_auc)],
+    if_steps=[step_register],      # ModelStep that registers into the Model Registry
+    else_steps=[],                 # or a FailStep
+)
+
+pipeline = Pipeline(name="churn-training-pipeline",
+                    parameters=[input_data, min_auc],
+                    steps=[step_process, step_train, step_eval, step_cond])
+pipeline.upsert(role_arn=ROLE_ARN)
+pipeline.start()
+```
+
+Common SageMaker Pipelines step types include Processing, Training, Tuning, Transform, Model/RegisterModel, Condition, Callback, Lambda, ClarifyCheck, QualityCheck, EMR and Fail.
+
+---
+
+## 5. Orchestration Choices: SageMaker Pipelines vs Step Functions vs MWAA
+
+| Criterion | SageMaker Pipelines | AWS Step Functions | Amazon MWAA (Airflow) |
+|---|---|---|---|
+| Best for | ML-native workflow with lineage | Serverless glue across many AWS services | Teams with existing Airflow DAGs / portability |
+| Authoring | Python SDK | Amazon States Language (JSON) or CDK | Python DAGs |
+| ML features | Step caching, Condition, Model Registry integration, Clarify/Quality checks | Optimized SageMaker integrations (run a job and wait) | SageMaker operators/hooks |
+| Infrastructure | Fully managed, no servers | Fully managed, serverless | Managed environment billed while running |
+| Exam signal | "ML workflow", "least operational overhead for ML steps" | "orchestrate Lambda, Glue, SageMaker and SNS together" | "already uses Apache Airflow" |
+
+<Callout variant="tip" title="Rule of thumb for the exam">
+Pure ML lifecycle with lineage and registry? SageMaker Pipelines. Cross-service business workflow with retries, choice states and human approval callbacks? Step Functions. "Existing Airflow DAGs must be migrated with minimal rewrite"? MWAA.
+</Callout>
+
+---
+
+## 6. Skill 3.3.5: Mechanisms to Re-train Models
+
+Retraining should be triggered by evidence, not habit. Common triggers all converge on `StartPipelineExecution`:
+
+```
+ +-----------------+   +------------------------+   +--------------------------+
+ | EventBridge     |   | S3 Event Notification  |   | Model Monitor violation  |
+ | schedule (cron) |   | (new data landed)      |   | -> CloudWatch alarm      |
+ +--------+--------+   +-----------+------------+   +------------+-------------+
+          |                        |                             |
+          +------------------------+-----------------------------+
+                                   v
+                      EventBridge rule -> Lambda / Pipelines target
+                                   |
+                                   v
+                  SageMaker Pipelines: StartPipelineExecution
+```
+
+* **EventBridge** can target a SageMaker pipeline directly. Use cron rules for fixed cadence, event patterns for S3 object-created events or Model Monitor alarms.
+* **Model Monitor + CloudWatch alarm:** a data-quality or model-quality violation publishes metrics; an alarm state change event triggers retraining.
+* **Pipeline parameters** let the triggered run accept the new data location without code changes.
+* **Step caching** reduces cost by reusing the output of steps whose inputs did not change.
+
+<Callout variant="warning" title="Exam Trap: Retrain automatically, deploy deliberately">
+Automatic retraining does not mean automatic production promotion. Keep the registry approval status as the gate: new models register as `PendingManualApproval`, an evaluation condition or a human approves, and only the `Approved` event starts deployment.
+</Callout>
+
+---
+
+## 7. Skill 3.3.6: Model Versions for Repeatability and Audits
+
+### SageMaker Model Registry
+
+* A **model package group** represents one ML problem; each registration creates a numbered, immutable **model package version** that stores the image URI, model artifact location, inference specification, metrics, and lineage.
+* **Approval status:** `PendingManualApproval`, `Approved` or `Rejected`. Changing the status emits an EventBridge event (`SageMaker Model Package State Change`) used to trigger deployment.
+* **Cross-account use:** share the group through resource-based policies so a production account can deploy approved models trained in a shared-services account.
+
+```python
+import boto3
+sm = boto3.client("sagemaker")
+sm.update_model_package(
+    ModelPackageArn="arn:aws:sagemaker:us-east-1:111122223333:model-package/churn/12",
+    ModelApprovalStatus="Approved",
+    ApprovalDescription="AUC 0.91 on holdout, bias report reviewed",
+)
+```
+
+### MLflow on SageMaker AI
+
+SageMaker AI offers a **managed MLflow tracking server** so experiments, parameters, metrics and artifacts are logged with the open-source MLflow API (`mlflow.log_param`, `mlflow.log_metric`, `mlflow.sklearn.log_model`). Models registered in the MLflow Model Registry can be surfaced in the SageMaker Model Registry. Choose MLflow when the team already uses MLflow APIs or needs framework-agnostic tracking; choose SageMaker Experiments/Model Registry for tightly integrated native lineage.
+
+| Need | Best fit |
+|---|---|
+| Audit "which data and code produced the model in production?" | Model Registry lineage + pipeline execution record |
+| Compare many training runs and parameters | MLflow tracking or SageMaker Experiments |
+| Approval workflow and deployment trigger | Model Registry approval status + EventBridge |
+| Reproduce training exactly | Pinned container image digest, versioned code in Git, parameters, S3 data version |
+
+---
+
+## 8. Skill 3.3.4: Automated Testing in ML CI/CD
+
+```
+ Commit
+   |
+   v
+ [Unit tests]            feature code, preprocessing functions (CodeBuild, pytest)
+   |
+ [Data validation]       schema, null rates, distributions (Glue Data Quality / DataBrew / custom)
+   |
+ [Training smoke test]   tiny sample, few epochs - catch config errors in minutes
+   |
+ [Model quality gate]    ConditionStep on AUC/RMSE vs threshold or champion model
+   |
+ [Integration test]      deploy to staging endpoint, call it, check schema and latency
+   |
+ [Canary / shadow]       live traffic validation with alarms
+```
+
+* **Unit tests** run in CodeBuild before anything expensive starts, which saves training cost.
+* **Quality gates** compare candidate metrics with an absolute threshold or with the current champion's metrics.
+* **Infrastructure tests** validate CloudFormation or CDK templates (for example, `cfn-lint`, CDK assertions) before deployment.
+* **CodeBuild reports** publish JUnit/Cucumber test results to the console for audit.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can state which service handles code CI/CD, which handles the ML workflow, and which handles model governance.
+<details>
+<summary>Explanation</summary>
+
+CodePipeline (with CodeBuild, CodeDeploy, CodeConnections) handles code CI/CD and promotion across environments. SageMaker Pipelines handles the ML DAG: processing, training, evaluation, conditions and registration, with step caching and lineage. The SageMaker Model Registry handles governance: versions, metrics, approval status and deployment triggers through EventBridge. The usual exam-correct design uses all three, joined by the registry's approval event.
+
+</details>
+
+- [ ] I know the CodeDeploy hooks and built-in traffic configurations for Lambda and ECS.
+<details>
+<summary>Explanation</summary>
+
+Lambda: hooks BeforeAllowTraffic and AfterAllowTraffic; configs such as Canary10Percent5Minutes, Linear10PercentEvery1Minute and AllAtOnce. ECS adds BeforeInstall, AfterInstall and AfterAllowTestTraffic and uses ECSCanary10Percent5Minutes, ECSLinear10PercentEvery1Minutes and ECSAllAtOnce. EC2 in-place uses ApplicationStop, BeforeInstall, AfterInstall, ApplicationStart and ValidateService with AllAtOnce, HalfAtATime or OneAtATime. CodeDeploy does not deploy directly to SageMaker endpoints.
+
+</details>
+
+- [ ] I can configure a SageMaker endpoint update with canary traffic shifting and automatic rollback.
+<details>
+<summary>Explanation</summary>
+
+Call `update_endpoint` with a `DeploymentConfig` that contains a `BlueGreenUpdatePolicy` (TrafficRoutingConfiguration of type CANARY, a CanarySize, a WaitIntervalInSeconds bake time, and TerminationWaitInSeconds) and an `AutoRollbackConfiguration` listing CloudWatch alarms. If an alarm fires during the deployment, SageMaker shifts traffic back to the old fleet automatically. Blue/green temporarily doubles capacity; a rolling policy avoids that for large fleets.
+
+</details>
+
+- [ ] I can pick between SageMaker Pipelines, Step Functions and MWAA for a given scenario.
+<details>
+<summary>Explanation</summary>
+
+SageMaker Pipelines is the ML-native choice with caching, Condition steps and Model Registry integration and no servers to manage. Step Functions is best for serverless orchestration across many AWS services with retries, branching and callbacks. MWAA fits teams that already operate Apache Airflow DAGs and want portability, but it is billed while the environment runs and carries more operational surface.
+
+</details>
+
+- [ ] I can design an automated retraining trigger that does not auto-promote an unvalidated model.
+<details>
+<summary>Explanation</summary>
+
+Trigger on an EventBridge schedule, an S3 new-data event, or a Model Monitor alarm; the rule calls StartPipelineExecution. The pipeline trains, evaluates, applies a ConditionStep against a metric threshold, and registers the model as PendingManualApproval. Approval (human or automated check) flips the status to Approved, and the resulting EventBridge event starts the deployment pipeline with canary traffic shifting and rollback alarms.
+
+</details>
+
+- [ ] I understand how versions in the Model Registry and MLflow support repeatability and audits.
+<details>
+<summary>Explanation</summary>
+
+Each model package version is immutable and records the container image, artifact location, metrics and lineage to the pipeline execution, giving a durable answer to "what is in production and how was it built". Pinning image digests, Git commit IDs, parameters and data versions makes training reproducible. MLflow adds framework-neutral run tracking and a registry that can feed the SageMaker Model Registry. Rolling back means redeploying the previous Approved version and marking the faulty one Rejected.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/09-provisioning-vpc-autoscaling-knowledge-bases" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 09: Provisioning Resources: Containers, VPC Endpoints, Auto Scaling, Knowledge Bases & GPU Scaling
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/11-genaiops-prompts-agents-rag-pipelines" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 11: GenAIOps: Prompt Management, Agent Pipelines, Fine-tuned Model Versioning & RAG Refresh →
+  </a>
+</div>

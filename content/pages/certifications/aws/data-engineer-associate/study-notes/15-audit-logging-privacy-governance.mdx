@@ -1,0 +1,223 @@
+---
+title: "Module 15: Audit Logs, Data Privacy, Sovereignty & Governance"
+description: "CloudTrail and CloudTrail Lake, Config, data sharing in Redshift and Data Exchange, Region restrictions, sovereignty, and SageMaker Catalog projects."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 15
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Tasks 4.4 and 4.5 (excluding PII identification, covered in Module 14): CloudTrail and CloudTrail Lake, CloudWatch Logs for audit, log analysis, data sharing in Redshift, preventing replication to disallowed Regions, AWS Config, data sovereignty, SageMaker Catalog projects, and governance frameworks (Skills 4.4.1–4.4.5, 4.5.1, 4.5.3–4.5.7).
+
+<Callout variant="info" title="Exam Blueprint Focus: Audit, Privacy & Governance">
+Audit answers **who did what, when**. Governance answers **who may see which data, where it may live, and how it is shared**. Expect scenario questions that combine **Region restrictions (SCPs)**, **Config**, **Lake Formation/Redshift sharing**, and **immutable log retention**.
+</Callout>
+
+---
+
+## 1. Preparing Logs for Audit (Skills 4.4.1–4.4.5)
+
+```
+ API calls ──> CloudTrail ──> S3 (SSE-KMS, Object Lock, digest validation) ──> Athena
+                  │
+                  ├──> CloudTrail Lake (event data store, SQL, long retention)
+                  └──> CloudWatch Logs ──> metric filter/alarm ──> SNS
+ App logs ──> CloudWatch Logs ──> Logs Insights | subscription ──> Firehose ──> S3 / OpenSearch
+ Huge log volumes ──> S3 ──> EMR/Spark or Glue ──> Parquet ──> Athena
+```
+
+| Task | Tool | Key configuration |
+|---|---|---|
+| Track API calls (Skill 4.4.1) | **AWS CloudTrail** | Multi-Region organization trail, management + data events, SSE-KMS, **log file integrity validation**, S3 bucket with restricted write and **Object Lock** |
+| Store application logs (Skill 4.4.2) | **CloudWatch Logs** | Retention policy, KMS, data protection policy, export/stream to S3, cross-account log centralization |
+| Centralized logging queries (Skill 4.4.3) | **CloudTrail Lake** | Event data stores (retention up to ~7 years or 10 years extendable), SQL queries, federated to Athena/Glue, multi-account via organizations, ingests non-AWS events via channels |
+| Analyze logs (Skill 4.4.4) | **Athena, CloudWatch Logs Insights, OpenSearch Service** | Partitioned/Parquet logs; Insights for recent data; OpenSearch for search and dashboards |
+| Integrate services for logging at scale (Skill 4.4.5) | **EMR** (and Glue) | Spark jobs for very large log volumes; transient clusters, Spot; results to S3/Athena |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: CloudTrail Lake vs trail + Athena">
+
+| | **Trail → S3 → Athena** | **CloudTrail Lake** |
+|---|---|---|
+| Storage | Your S3 bucket (cheap, flexible lifecycle) | Managed event data store |
+| Query | Athena (create table, partition projection) | Built-in SQL console/API |
+| Setup | More (table DDL, permissions) | Minimal |
+| Cost model | S3 + Athena scan | Ingestion + retention + query |
+| Multi-account | Organization trail | Organization event data store, delegated admin |
+| Best for | Lowest cost, custom retention | Fast centralized investigation and compliance queries |
+
+Both can be encrypted with KMS. Use **S3 Object Lock** on the trail bucket for WORM audit evidence, and **digest validation** (`aws cloudtrail validate-logs`) to prove logs were not altered.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: AWS Config for configuration changes (Skill 4.5.4)">
+
+* **Records resource configuration history** and relationships (a timeline of changes) per Region; **view** what changed, when, and in combination with CloudTrail who changed it.
+* **Config rules** (managed, custom Lambda, or Guard) evaluate compliance continuously; for example `s3-bucket-server-side-encryption-enabled`, `s3-bucket-public-read-prohibited`, `redshift-cluster-kms-enabled`, `rds-storage-encrypted`, `cloudtrail-enabled`.
+* **Conformance packs** deploy rule sets; **aggregators** consolidate across accounts and Regions; **remediation actions** use Systems Manager Automation (auto-fix, for example enable encryption).
+* **Config vs CloudTrail:** Config shows *state and history of configuration*; CloudTrail shows *API calls and actors*.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Data Sharing and Privacy Controls (Skills 4.5.1, 4.5.3, 4.5.5)
+
+### Redshift data sharing (Skill 4.5.1)
+
+* Share **live, read-write-capable** data across Redshift clusters/workgroups, accounts, and Regions **without copying or moving data**. Producer creates a **datashare**, adds schemas/tables/views/functions, grants usage to consumer namespaces or accounts; **consumer** creates a database from the datashare. Accounts must **authorize** the share (and AWS Data Exchange can distribute shares commercially). Works with RA3 and Serverless.
+* **Lake Formation** can govern Redshift datashares through the Glue Data Catalog for lake-style permissions.
+
+```sql
+-- Producer
+CREATE DATASHARE sales_share;
+ALTER DATASHARE sales_share ADD SCHEMA sales;
+ALTER DATASHARE sales_share ADD ALL TABLES IN SCHEMA sales;
+GRANT USAGE ON DATASHARE sales_share TO NAMESPACE 'consumer-namespace-guid';
+-- Consumer
+CREATE DATABASE sales_shared FROM DATASHARE sales_share OF NAMESPACE 'producer-namespace-guid';
+```
+
+### Other sharing patterns
+
+| Pattern | Mechanism | Notes |
+|---|---|---|
+| Lake Formation cross-account grants | LF permissions + RAM, resource links | Fine-grained column/row sharing |
+| S3 | Bucket policy, Access Points, cross-account roles, presigned URLs, replication | Simple object sharing |
+| **AWS Data Exchange** | Subscribe to or publish third-party data products (S3 objects, APIs, Redshift datashares, Lake Formation data permission) | Monetized or licensed data sharing |
+| SageMaker Catalog subscriptions | Request/approve workflows | Governed business-level sharing |
+| Athena/Glue catalog sharing | Resource links | Shared metadata |
+
+### Preventing backups/replication to disallowed Regions (Skill 4.5.3) and data sovereignty (Skill 4.5.5)
+
+* **Data sovereignty** means data is subject to the laws of the country where it is stored; **data residency** is the location requirement. Keep data in approved Regions and control cross-border access.
+* **Service control policies (SCPs)** deny actions outside approved Regions using `aws:RequestedRegion`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "DenyOutsideEU",
+    "Effect": "Deny",
+    "NotAction": ["iam:*", "organizations:*", "route53:*", "cloudfront:*", "support:*", "sts:*"],
+    "Resource": "*",
+    "Condition": { "StringNotEquals": { "aws:RequestedRegion": ["eu-west-1", "eu-central-1"] } }
+  }]
+}
+```
+
+* **AWS Control Tower** Region deny guardrail applies this at scale; **S3 replication rules** list only approved destination buckets (use bucket policies/SCP to deny `s3:PutReplicationConfiguration` to other Regions); **AWS Backup** copy rules and vault access policies restrict cross-Region copy destinations; **RDS/Redshift snapshot copy** and **DynamoDB global tables** only to approved Regions; **KMS multi-Region keys** only where allowed.
+* **Detective controls:** Config rules and CloudTrail alarms on replication/backups to unauthorized Regions; **Macie** to locate regulated data.
+
+---
+
+## 3. SageMaker Catalog Projects and Governance Frameworks (Skills 4.5.6, 4.5.7)
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Managing data access with SageMaker Catalog projects (Skill 4.5.6)">
+
+* A **project** is the unit of access: producers **publish** assets from their project; consumers **subscribe** with their project; owners **approve** or auto-approve; the platform provisions grants (Lake Formation for Glue tables, Redshift datashares/grants) to the **project role**.
+* Membership (owner/contributor/viewer) controls who works in the project and inherits its data access. **Domain units** and **authorization policies** control who can create projects, use blueprints, and publish.
+* Benefits: no ad hoc IAM, access is auditable, revocable through unsubscribe, and discoverable through the catalog.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Governance data framework and data sharing patterns (Skill 4.5.7)">
+
+A **data governance framework** defines people, policies, and processes for managing data:
+
+| Pillar | Content | AWS support |
+|---|---|---|
+| Ownership & stewardship | Data owners, stewards, domains | SageMaker Catalog domains and projects |
+| Cataloging & metadata | Business glossary, classification | Glue Data Catalog, SageMaker Catalog |
+| Access control | Least privilege, tag-based policies | IAM, Lake Formation, LF-Tags |
+| Quality | Rules, SLAs | Glue Data Quality, DataBrew |
+| Security & privacy | Encryption, masking, PII | KMS, Macie, DDM |
+| Lineage & audit | Traceability | SageMaker lineage, CloudTrail, Config |
+| Lifecycle & retention | Retention, deletion, legal hold | S3 Lifecycle, Object Lock, Backup |
+| Compliance | Evidence, reporting | **AWS Audit Manager**, Config conformance packs, Security Hub |
+
+**Operating models and sharing patterns:**
+* **Centralized:** one data lake account, central governance (Lake Formation admin), simplest control.
+* **Data mesh (federated):** domain-owned **data products**, each domain with its own account, shared through a **central catalog** and cross-account grants (Lake Formation/RAM, SageMaker Catalog subscriptions). Centralized governance guardrails plus decentralized ownership.
+* **Hub-and-spoke:** central hub shares curated data with spoke accounts.
+* **Sharing mechanisms:** Lake Formation cross-account grants, Redshift datashares, S3 Access Points/replication, AWS Data Exchange, SageMaker Catalog subscriptions, **clean rooms** (AWS Clean Rooms) for collaboration without sharing raw data.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Common Traps and Watchouts
+
+* **"Who deleted the table / changed the policy?"** → CloudTrail. **"What did the configuration look like last week?"** → Config.
+* **"Immutable, tamper-evident audit logs"** → S3 Object Lock + CloudTrail log file validation + KMS.
+* **"Query years of API activity centrally with minimal setup"** → CloudTrail Lake.
+* **"Share Redshift data without copying"** → datashare (not UNLOAD/COPY).
+* **"Prevent data leaving approved Regions across the organization"** → SCP with `aws:RequestedRegion` (or Control Tower Region deny), not just IAM.
+* **"Third-party or licensed data sets"** → AWS Data Exchange.
+* **SCPs never grant permissions;** they only limit what identities in member accounts can be allowed.
+* **Config does not record who made the change;** pair with CloudTrail.
+* **CloudWatch Logs Insights isn't the cheapest for multi-year archives;** use S3 + Athena.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can design an audit-ready logging architecture.
+<details>
+<summary>Explanation</summary>
+
+Organization multi-Region CloudTrail (management + needed data events) to an S3 bucket with SSE-KMS, Object Lock, and integrity validation; CloudWatch Logs with retention for application logs; CloudTrail Lake or Athena for queries; alarms through metric filters and SNS.
+
+</details>
+
+- [ ] I can explain CloudTrail vs CloudTrail Lake vs Config.
+<details>
+<summary>Explanation</summary>
+
+CloudTrail records API activity. CloudTrail Lake is a managed, SQL-queryable store for that activity (and other events) with long retention. Config records resource configuration history and compliance against rules.
+
+</details>
+
+- [ ] I can share data across accounts using Redshift data sharing and Lake Formation.
+<details>
+<summary>Explanation</summary>
+
+Redshift: create a datashare on the producer, grant to the consumer namespace/account, authorize, and create a database from the share on the consumer. Lake Formation: cross-account grants (RAM) with resource links and LF-Tags or column/row filters.
+
+</details>
+
+- [ ] I can enforce Region restrictions for data residency.
+<details>
+<summary>Explanation</summary>
+
+SCP/Control Tower deny on `aws:RequestedRegion` outside approved Regions; restrict replication, AWS Backup copy rules, snapshot copy, and global tables to approved destinations; add Config/CloudTrail detective controls.
+
+</details>
+
+- [ ] I can describe a governance framework and data mesh sharing pattern.
+<details>
+<summary>Explanation</summary>
+
+Ownership, catalog, access control, quality, security, lineage, retention, and compliance pillars. Data mesh: domain teams own and publish data products into a shared catalog with centralized guardrails; consumers subscribe and access is granted through Lake Formation/Redshift under SageMaker Catalog workflows.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/14-encryption-kms-masking-macie" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 14: Encryption, KMS, Data Masking & PII Discovery
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    ✓ Complete: Back to Study Guide Hub →
+  </a>
+</div>

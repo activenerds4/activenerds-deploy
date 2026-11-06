@@ -1,0 +1,418 @@
+---
+title: "Module 13: VCF Operations & Monitoring (Operations / Aria)"
+description: "Operations deployment via SDDC Manager / Aria Suite Lifecycle, cross-domain capacity dashboards, symptom definitions, rightsizing."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF Administrator Study Guide"
+trackSlug: "/certifications/vmware/vcf-administrator"
+moduleNumber: 13
+totalModules: 18
+layout: "article"
+---
+
+> **Instructor note:** This guide is written from the perspective of a VMware Certified Instructor. Product names changed with VCF 9.0 (vRealize/Aria Operations is now **VCF Operations**). Older course material, blogs, and KB articles may still use the Aria/vRealize names; the concepts are nearly identical. Always confirm exact UI labels and default values against the current VCF documentation and the official exam guide, because defaults and menus change between releases.
+
+---
+
+## 1. Learning Objectives
+
+After completing this module you should be able to:
+
+- Explain the role of VCF Operations within the VCF management stack.
+- Describe how VCF Operations integrates with SDDC Manager, vCenter, vSAN, and NSX.
+- Explain how metrics, properties, and events are collected (adapters, cloud proxies, collection cycles).
+- Configure and interpret alert definitions, symptoms, recommendations, notifications, and policies.
+- Use predefined and custom dashboards, views, and reports.
+- Interpret capacity analytics: time remaining, capacity remaining, demand vs. allocation, what-if scenarios, and reclamation.
+- Apply troubleshooting logic to common monitoring problems.
+
+---
+
+## 2. Where VCF Operations Fits in the Architecture
+
+| Component | Primary Role | Monitoring Relationship |
+|---|---|---|
+| **SDDC Manager** | Lifecycle management, domain/cluster/host operations, certificates, passwords, bundles | Source of VCF inventory/topology and health context; also a monitored object |
+| **vCenter Server** | Compute management for each domain | Main data source via the vCenter adapter |
+| **NSX** | Software-defined networking | Monitored via NSX adapter/management pack |
+| **vSAN** | Storage | Monitored via vCenter/vSAN adapter |
+| **VCF Operations** | Performance, capacity, health, configuration, cost, compliance | Central analytics and alerting engine |
+| **VCF Operations for logs** | Log aggregation and query | Complements metrics with log-based events |
+| **VCF Operations for networks** | Network flow visibility | Complements topology and security troubleshooting |
+
+**Key concept:** SDDC Manager *manages the lifecycle* of the platform; VCF Operations *observes and analyzes* it. Do not confuse the two on the exam. If a question asks "which tool forecasts when the cluster will run out of capacity?", the answer is VCF Operations, not SDDC Manager.
+
+---
+
+## 3. Integration with SDDC Manager
+
+### 3.1 What the integration provides
+
+- **VCF-aware inventory:** Management domain and workload domains, clusters, hosts, and VCF components appear in VCF Operations in the context of VCF rather than as unrelated vCenter objects.
+- **Health of the platform itself:** SDDC Manager services, appliances, and VCF-specific objects can be monitored and alerted on.
+- **Domain-level views:** Capacity and health can be viewed per workload domain, cluster, or the whole fleet.
+- **Unified troubleshooting:** Operators move from an alert in VCF Operations to the object and, when action is needed, perform remediation or lifecycle operations in SDDC Manager (or the equivalent VCF management console).
+
+### 3.2 How the integration is typically established
+
+1. Deploy or enable VCF Operations as part of the VCF management domain (in VCF 9.x this is part of the standard fleet deployment).
+2. Confirm that credentials used by the adapter have the required read privileges on SDDC Manager and vCenter.
+3. Add/verify the **SDDC Manager (VCF) adapter instance** under **Administration → Integrations → Repository / Accounts** (menu naming varies by release).
+4. Use **Validate Connection** and confirm the adapter instance is in **Data Receiving** state.
+5. Confirm that the VCF objects show in inventory and that predefined VCF dashboards populate.
+
+### 3.3 Operational guidance
+
+- Use **service accounts** with least privilege, and rotate credentials via SDDC Manager's password management so adapter accounts do not silently expire. If a password is rotated but the adapter credential is not updated, collection fails.
+- Certificate replacement in SDDC Manager can break adapter trust. After replacing certificates, re-accept/import the certificate in the adapter configuration and re-test.
+- Keep time synchronized (NTP) across all appliances. Time skew causes missing or misaligned data points and authentication failures.
+
+→ **Exam tip:** If metrics suddenly stop for a VCF component, check in this order: (1) adapter instance status, (2) credentials, (3) certificate trust, (4) network/DNS/FQDN reachability, (5) collector/cloud proxy health.
+
+---
+
+## 4. Metric Collection
+
+### 4.1 Data types
+
+| Type | Description | Example |
+|---|---|---|
+| **Metrics** | Time-series numeric values | CPU demand %, memory consumed, datastore latency |
+| **Properties** | Configuration attributes (change infrequently) | vCPU count, ESXi version, cluster HA setting |
+| **Events/Changes** | Discrete occurrences | Host disconnected, configuration change |
+| **Relationships** | Parent/child topology | VM → Host → Cluster → Datacenter → vCenter |
+
+### 4.2 Collection mechanics
+
+- **Adapters** (formerly "management packs"/solutions) pull data from endpoints. The **vCenter adapter** is the most fundamental.
+- The standard **collection cycle is 5 minutes** for most objects. Properties are collected less frequently. Verify per adapter.
+- **Collectors / Cloud Proxies** gather data remotely and forward it to the VCF Operations analytics nodes. Use **collector groups** for resilience and to place collection close to remote sites.
+- **Analytics** processes incoming data: computes **dynamic thresholds**, derives **badges** (Health, Risk, Efficiency), evaluates symptoms and alerts, and calculates capacity.
+- Data is retained according to configured retention (time-series, properties, changes). Capacity forecasting accuracy depends on having sufficient history, so avoid reducing retention drastically.
+
+### 4.3 Analytics concepts frequently tested
+
+- **Dynamic thresholds (DT):** Learned normal behavior per metric; deviations create symptoms. Require several days to weeks of data to be meaningful.
+- **Static (hard) thresholds:** Fixed values set in symptom definitions.
+- **Super metrics:** Custom formulas combining metrics across objects (for example, average CPU of all hosts in a cluster, or a custom ratio). Must be *enabled in the policy* and assigned to object types.
+- **Badges:**
+  - **Health:** Immediate issues.
+  - **Risk:** Potential future problems.
+  - **Efficiency:** Optimization opportunities (waste, oversizing, reclamation).
+- **Policies:** Control which metrics are collected, which alerts/symptoms are active, DT enablement, capacity settings, and which super metrics are enabled. Policies apply to **groups** of objects and are inherited by priority.
+
+### 4.4 Troubleshooting collection
+
+| Symptom | Likely Cause | Action |
+|---|---|---|
+| Adapter shows *Collection failed* | Bad credentials / expired password | Update adapter credential and validate |
+| Adapter shows *Warning/Not receiving* | Certificate or connectivity change | Re-accept certificate, check DNS/firewall |
+| Gaps in graphs | Collector overload or time skew | Check collector health, NTP |
+| Object not appearing | Not in monitored scope or adapter filter | Check adapter configuration/inventory filters |
+| Super metric empty | Not enabled in active policy | Enable in policy, wait for next collection |
+
+---
+
+## 5. Alert Management
+
+### 5.1 Alert building blocks
+
+```
+Symptom Definition  -->  Alert Definition  -->  Alert (instance)
+ (condition)             (symptoms + logic)     (object, criticality, status)
+                              |
+                              +--> Recommendation --> Action
+                              +--> Notification (email, webhook, SNMP, etc.)
+```
+
+- **Symptom definitions:** Metric/property/message/fault/event conditions (static or dynamic threshold) with a severity.
+- **Alert definitions:** Combine one or more symptom sets with **Any/All** logic, attach a **base object type**, impact **badge** (Health/Risk/Efficiency), **criticality** (Info, Warning, Immediate, Critical), wait/cancel cycles, and **recommendations**.
+- **Recommendations / Actions:** Descriptive guidance or an executable action (for example, power off an idle VM, resize a VM).
+- **Notification rules:** Filter alerts (by object, type, criticality, etc.) and send via **email, REST/webhook, SNMP trap, log file, or integrations** such as ticketing systems.
+- **Wait cycle / cancel cycle:** Number of collection cycles a condition must persist before the alert triggers, or clear before cancellation. This prevents flapping.
+
+### 5.2 Alert lifecycle
+
+| State | Meaning |
+|---|---|
+| **Active** | Condition currently true |
+| **Acknowledged / Assigned** | Operator ownership recorded |
+| **Suspended** | Temporarily muted for a period |
+| **Canceled** | Alert closed; system cancels automatically when symptoms clear, or manually canceled |
+| **Recurs** | Will re-trigger if conditions persist after manual cancel |
+
+
+
+<Callout variant="warning" title="Important Notice">
+Manually canceling an alert does **not** fix the underlying issue. If the symptom is still true, the alert will be regenerated.
+</Callout>
+
+
+
+### 5.3 Best practices
+
+- Tune alert definitions via **policy** rather than editing predefined content in place; clone predefined alerts before changing them.
+- Use **maintenance schedules** for objects undergoing lifecycle operations (for example, an SDDC Manager upgrade or host remediation) to avoid noisy alerts.
+- Use **groups** and **custom groups** (dynamic membership by criteria) to scope policies and notifications.
+- Route alerts by criticality: Critical/Immediate to paging; Warning to email/ticket; Info to dashboards only.
+- Review **Recommendations** first; many VCF-specific alerts have a documented resolution path.
+
+### 5.4 Alert vs. symptom example
+
+→ *Cluster memory contention → 5% for 3 consecutive cycles.* The **symptom** is the contention threshold; the **alert definition** is "Cluster has memory contention" with a wait cycle of 3 and a Risk/Health impact; the **notification rule** emails the infrastructure team for Immediate or higher.
+
+---
+
+## 6. Dashboards, Views, and Reports
+
+### 6.1 Content types
+
+| Content | Purpose | Key Points |
+|---|---|---|
+| **Dashboards** | At-a-glance visual status | Built from **widgets** (Object List, Scoreboard, Heat Map, Health Chart, Topology, Alert List, View, etc.) |
+| **Views** | Reusable data presentation (list, trend, distribution, summary, image) | Can be embedded in dashboards and reports |
+| **Reports** | Scheduled/on-demand exported documents (PDF/CSV) | Built from views and dashboards; can be emailed on a schedule |
+| **Super metrics** | Custom calculations | Must be enabled in policy |
+
+### 6.2 Predefined dashboards to know
+
+- **Operations Overview / Environment Overview:** High-level health, risk, efficiency.
+- **Capacity Overview / Capacity Remaining dashboards:** Cluster- and datastore-level capacity.
+- **Cluster Utilization, Host Utilization, Datastore Utilization.**
+- **Workload / Troubleshooting dashboards.**
+- **Environment-specific dashboards** for vSAN, NSX, and VCF components when the relevant adapter is configured.
+
+### 6.3 Building a custom dashboard (workflow)
+
+1. **Visualize → Dashboards → Create**.
+2. Choose a layout and add **widgets**.
+3. Configure each widget's **data source** (self provider vs. interaction from another widget) and **object scope**.
+4. Define **widget interactions** (selecting an object in a list updates a trend chart).
+5. Save, then **share** with users/groups or set as default for a role.
+6. Optionally embed in a report and schedule delivery.
+
+### 6.4 Access control
+
+- Role-based access control (RBAC) governs who can see objects and edit content. Roles combine **privileges** with **object scope**. Assign users/groups (often via identity federation/SSO) to roles.
+- Dashboards can be shared selectively; visibility of objects inside a dashboard still respects the viewer's object permissions.
+
+---
+
+## 7. Capacity Management and Forecasting
+
+### 7.1 Core capacity terms
+
+| Term | Definition |
+|---|---|
+| **Capacity remaining** | Amount of resource still available before limits are reached, based on the selected model |
+| **Time remaining** | Projected days until the most constrained resource is exhausted, based on trends |
+| **VMs remaining** | Estimated number of additional VMs of a profile that fit |
+| **Demand** | Actual resource consumption (what workloads actively use) |
+| **Allocation** | Resources assigned/configured (vCPU, vRAM, provisioned storage) regardless of use |
+| **Capacity buffer** | Reserved headroom (for example, for HA or growth) excluded from usable capacity |
+| **Reclaimable capacity** | Idle VMs, powered-off VMs, old snapshots, oversized VMs that can be reclaimed or right-sized |
+| **Stress / Workload** | How heavily resources are being used relative to capacity |
+
+### 7.2 Capacity models
+
+- **Demand-based model:** Uses actual usage. Enables higher consolidation; best for performance-driven planning.
+- **Allocation-based model:** Uses configured resources and an overcommit ratio (for example, vCPU:pCPU). Best for service-provider or strict SLA/chargeback environments.
+- Many environments use both, with the **policy** deciding which model applies to which cluster or group. The most constrained resource determines time remaining.
+
+### 7.3 How forecasting works (conceptually)
+
+1. VCF Operations collects historical utilization over time.
+2. It applies **trend analysis** (and seasonality awareness where applicable) to project future demand.
+3. It subtracts **buffers** (HA failover capacity, user-defined buffer percentages) from raw capacity.
+4. It calculates time remaining for each resource (CPU, memory, disk space, and in some views network or I/O) and reports the **most constrained**.
+5. It displays the result as **capacity remaining, time remaining, and risk badges**.
+
+**Factors that change the forecast:**
+
+- Policy settings (aggressive vs. conservative, overcommit ratios, buffers).
+- Amount of historical data available.
+- Planned changes entered via **what-if** analysis.
+- Inclusion/exclusion of powered-off VMs, snapshots, and templates in calculations.
+- HA admission control settings reflected in usable capacity.
+
+### 7.4 What-if analysis
+
+Use **What-If scenarios** (Plan or Optimize area) to model:
+
+- **Workload planning:** Add or remove VMs/workloads and see impact on time remaining.
+- **Infrastructure planning:** Add or remove hosts or datastores.
+- **Migration / platform comparison:** Compare running in the current environment vs. alternatives (cost and capacity).
+- **Domain/cluster scenarios in VCF:** Evaluate whether an existing workload domain can absorb new workloads before expanding the cluster through SDDC Manager.
+
+### 7.5 Optimization and reclamation
+
+- Use **Right-sizing** recommendations to reduce oversized VMs (and increase undersized ones).
+- Use **Reclaim** recommendations for idle VMs, powered-off VMs, and snapshots.
+- Review **workload balance** and **optimization recommendations** (for example, rebalancing across clusters).
+- Link results to **cost** insights to show savings.
+
+### 7.6 Connecting capacity findings to VCF actions
+
+| Finding | Typical VCF action |
+|---|---|
+| Cluster time remaining below threshold | Expand the cluster (add hosts) via SDDC Manager workflows |
+| Storage time remaining low | Add vSAN capacity/disk groups or expand datastore |
+| Domain consistently constrained | Plan an additional cluster or workload domain |
+| Large reclaim potential | Right-size or delete idle VMs before buying hardware |
+
+→ **Exam tip:** Capacity analysis happens in VCF Operations, but **adding hosts, creating clusters, and expanding domains is done through SDDC Manager** (or VCF's lifecycle management interface). Separate "analyze" from "act."
+
+---
+
+## 8. Exam Tips and Common Traps
+
+1. **Know the roles of each tool.** SDDC Manager = lifecycle; VCF Operations = analytics, alerting, capacity; vCenter = compute management; Logs = log analysis.
+2. **Symptom vs. alert vs. notification.** Symptoms are conditions; alerts combine symptoms; notifications deliver alerts.
+3. **Policies drive behavior.** If a super metric, alert, or threshold is "missing," the first suspect is the active policy.
+4. **Badges:** Health = now, Risk = future, Efficiency = optimization.
+5. **Dynamic thresholds need history.** New environments do not have meaningful DT immediately.
+6. **Cancel does not resolve.** An alert with a persisting symptom returns.
+7. **Most constrained resource wins** in time-remaining calculations.
+8. **Demand vs. allocation.** Know which model to choose for which business case.
+9. **Collection gaps usually come from credentials, certificates, DNS/NTP, or collector health.**
+10. **Use maintenance schedules** during lifecycle activities to suppress expected alerts.
+11. **Naming drift.** The exam may use current names (VCF Operations) but supporting references might say Aria/vRealize Operations. Map them mentally.
+12. **Least privilege.** Service accounts for adapters should have only the required read access.
+13. **Read the scenario for scope.** "Per cluster," "per domain," and "environment-wide" change which object or group you should select.
+
+### Quick-reference cheat sheet
+
+| Need | Where / What |
+|---|---|
+| Forecast when capacity runs out | Capacity → Time Remaining |
+| Model adding VMs or hosts | What-If analysis |
+| Reduce waste | Reclaim / Right-sizing |
+| Send alerts to ticketing | Notification rules / outbound integration |
+| Custom calculation | Super metric (enable in policy) |
+| Scheduled PDF | Report with schedule |
+| Silence alerts during upgrade | Maintenance schedule |
+| Fix missing data | Check adapter, credentials, certificates, collector |
+
+---
+
+## 9. Practice Questions
+
+### Question 1
+An administrator notices that the dashboards for a workload domain stopped updating shortly after a scheduled password rotation performed through SDDC Manager. The VCF Operations adapter instance for that domain shows a *Collection failed* status. What should the administrator do first?
+
+- A. Redeploy the VCF Operations appliance
+- B. Update the credential used by the adapter instance and validate the connection
+- C. Increase the data retention period in the policy
+- D. Create a new dynamic threshold for the domain
+
+**Answer: B**
+
+**Explanation:** Password rotation changed the credentials the adapter relies on, so authentication to the endpoint fails and collection stops. Updating the adapter credential and running *Validate Connection* addresses the root cause. Redeploying (A) is unnecessary and disruptive. Retention (C) affects how long data is kept, not whether it is collected. Dynamic thresholds (D) affect alerting, not data collection.
+
+---
+
+### Question 2
+A capacity planner sees that a cluster has 40 days of time remaining because memory is the most constrained resource, even though CPU shows over 300 days. The planner wants to know whether adding 50 new VMs will change this. Which feature should be used?
+
+- A. A custom super metric on cluster memory
+- B. A notification rule with a memory threshold
+- C. A What-If workload planning scenario
+- D. A new dashboard with a Heat Map widget
+
+**Answer: C**
+
+**Explanation:** What-If scenarios let administrators model the addition or removal of workloads or infrastructure and see the projected impact on capacity and time remaining. A super metric (A) can calculate a custom value but does not model future workload. Notification rules (B) only deliver alerts. A Heat Map (D) visualizes current data and does not forecast the effect of new VMs. Note also that time remaining reflects the **most constrained** resource, which here is memory.
+
+---
+
+### Question 3
+An operations team manually cancels a "Cluster memory contention" alert, but the alert reappears several collection cycles later. What is the most likely reason?
+
+- A. The notification rule was not configured with an email address
+- B. Canceling an alert permanently disables the alert definition
+- C. The underlying symptom condition is still true, so the alert was triggered again
+- D. The alert was automatically converted to a dashboard widget
+
+**Answer: C**
+
+**Explanation:** Alerts are generated from symptom conditions. Manually canceling an alert only closes that alert instance; it does not resolve the cause. When the condition continues to evaluate as true after the wait cycle, a new alert is generated. The team should investigate and remediate the memory contention (for example, rebalance workloads, right-size VMs, or add capacity through SDDC Manager). Notification configuration (A) affects delivery, not generation. Canceling does not disable definitions (B), and alerts do not convert into widgets (D).
+
+---
+
+## 10. Hands-On Lab Ideas
+
+1. Verify that the VCF-related adapter instances are in *Data Receiving* state and identify the collector used.
+2. Clone a predefined alert definition, adjust the wait cycle, assign it via a policy to a custom group of one cluster, and confirm the change.
+3. Build a dashboard with an Object List (clusters) interacting with a Health Chart and a Scoreboard.
+4. Create a super metric for average host memory usage per cluster, enable it in a policy, and chart it.
+5. Run a What-If scenario that adds 20 VMs, then compare time remaining before and after.
+6. Configure a notification rule that sends Critical alerts to a webhook or email and test it.
+7. Apply a maintenance schedule to a host and observe alert behavior during maintenance.
+
+---
+
+## 11. Review Checklist
+
+- [ ] I can explain the difference between SDDC Manager and VCF Operations responsibilities.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can list common reasons for collection failures and the correct troubleshooting order.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can differentiate symptoms, alert definitions, recommendations, and notifications.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can describe Health, Risk, and Efficiency badges.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know why policies matter and how groups scope them.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can explain demand vs. allocation capacity models.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I understand how time remaining is determined and what influences it.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can describe what-if analysis, right-sizing, and reclamation.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can map a capacity finding to the correct VCF remediation action.
+<details>
+<summary>Explanation</summary>
+
+</details>
+---
+
+*Study tip: Complete the lab ideas in a lab environment or Hands-on Labs, then re-read Section 8. Verify details against the current VCF documentation and exam guide before your test date.*
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vcf-administrator/study-notes/vcf-12-supervisor-cluster-namespaces" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Module 12: Supervisor Clusters & vSphere Namespaces in VCF
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VCF Administrator Track
+  </a>
+  <a href="/certifications/vmware/vcf-administrator/study-notes/vcf-14-log-intelligence-troubleshooting" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 14: Log Intelligence, Syslog & Centralized Troubleshooting →
+  </a>
+</div>

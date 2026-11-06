@@ -1,0 +1,234 @@
+---
+title: "Module 07: Agentic AI: Strands Agents, Bedrock AgentCore, MCP & Safeguarded Workflows"
+description: "Agent memory/state, ReAct with Step Functions, stopping conditions, multi-agent coordination, human-in-the-loop, and MCP servers (Task 2.1)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 7
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 2.1 (Skills 2.1.1 - 2.1.7): autonomous agents with memory and state, structured reasoning, safeguarded workflows, multi-model coordination, human collaboration, tool integrations, and MCP-based model extension.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 2 (26% of scored content), Task 2.1">
+Task 2.1 has the most skills of any task (seven). Know the AWS agent stack: **Strands Agents** (open-source SDK), **AWS Agent Squad** (multi-agent orchestration), **Amazon Bedrock Agents**, **Amazon Bedrock AgentCore** (runtime, memory, gateway, identity, observability), and **MCP**. Safeguards (stop conditions, timeouts, IAM boundaries) are heavily tested.
+</Callout>
+
+---
+
+## 1. Agent Anatomy and Memory/State (Skill 2.1.1)
+
+An agent loops: **observe, reason (FM), choose a tool, act, observe the result**, until the goal is met or a limit is hit.
+
+```
+User goal --> [Agent loop]
+               |-- FM reasons over: system prompt + history + tool results
+               |-- picks tool (function call) --> tool executes (Lambda / API / MCP server)
+               |-- result appended to context --> repeat
+               '-- final answer
+          Memory: short-term (session context), long-term (summaries, preferences)
+```
+
+| Framework / service | Role |
+|---|---|
+| **Strands Agents** | Open-source AWS SDK for building agents in code; model-driven loop, tools, multi-agent patterns, MCP support |
+| **AWS Agent Squad** | Orchestrates multiple specialized agents with a classifier that routes requests |
+| **Amazon Bedrock Agents** | Managed agents: instructions, action groups (OpenAPI or function schemas backed by Lambda), knowledge bases, memory, tracing |
+| **Amazon Bedrock AgentCore** | Managed infrastructure for deploying and operating agents securely at scale: serverless runtime, memory, gateway for tools, identity, observability, code interpreter and browser tools |
+| **MCP** | Protocol for agent-to-tool interactions |
+
+| Memory type | Storage options |
+|---|---|
+| Short-term (within session) | Conversation context, DynamoDB session table |
+| Long-term (across sessions) | Summaries and facts in DynamoDB, vector store, Bedrock Agents memory, AgentCore Memory |
+| Shared state in multi-agent | Central store (DynamoDB, S3) with clear ownership |
+
+```python
+# Strands Agents minimal pattern
+from strands import Agent, tool
+
+@tool
+def get_order_status(order_id: str) -> str:
+    """Return the shipping status for an order."""
+    return lookup(order_id)
+
+agent = Agent(tools=[get_order_status],
+              system_prompt="You are a support agent. Use tools; never guess order data.")
+print(agent("Where is order 8841?"))
+```
+
+---
+
+## 2. Structured Reasoning Systems (Skill 2.1.2)
+
+* **ReAct (Reason + Act):** the model alternates a thought, an action, and an observation. Implement explicitly with **Step Functions**: a Task state invokes Bedrock, a Choice state inspects whether a tool call is requested, a Task state runs the tool, and a loop returns to the model.
+* **Chain-of-thought:** step-by-step reasoning in the prompt for decomposable problems.
+* **Plan-and-execute:** one model call creates a plan; a workflow executes steps (often with a Map state) and a final call synthesizes.
+
+```
+Start --> [Bedrock InvokeModel: plan/next action] --> Choice
+              |-- tool_use  --> [Lambda tool] --> append observation --> back to model
+              |-- final     --> End
+              '-- iterations > max --> Fail / escalate
+```
+
+Step Functions provides explicit, **auditable** state transitions, which is why it is the exam answer when "visibility and control over each reasoning step" is required.
+
+---
+
+## 3. Safeguarded AI Workflows (Skill 2.1.3)
+
+Autonomy needs boundaries. Layer controls:
+
+| Risk | Safeguard |
+|---|---|
+| Infinite loops | Max iteration counter and stopping conditions in Step Functions or agent config |
+| Runaway duration | Lambda timeouts, Step Functions `TimeoutSeconds`, per-task deadlines |
+| Over-broad access | IAM policies scoped per tool and per agent role (resource boundaries), permission boundaries |
+| Cascading failures | Circuit breakers, bulkheads, retries with caps |
+| Harmful actions | Human approval for high-impact tools, Guardrails on inputs and outputs |
+| Cost runaway | Token budgets, request quotas, anomaly alarms |
+
+<Callout variant="warning" title="Exam Trap: Prompt-only safety">
+"Instruct the agent not to delete data" is never the best answer. Enforce with **IAM** (the tool's role cannot delete), **validation** in the tool Lambda, and **approval gates** for destructive actions.
+</Callout>
+
+---
+
+## 4. Model Coordination (Skill 2.1.4)
+
+| Pattern | Description | Example |
+|---|---|---|
+| Specialist routing | Route by task to a best-fit FM | Code to a code-strong model, vision to a multimodal model |
+| Ensemble with aggregation | Several models answer; custom logic merges or votes | Fact-critical classification |
+| Orchestrator-worker | Planner agent delegates to worker agents | Agent Squad or Strands multi-agent |
+| Model selection framework | Rules or classifier chooses model by complexity, cost, latency | Cascading from small to large |
+
+Aggregation logic is **your code** (Lambda): majority vote, confidence weighting, or a judge model that picks the best answer.
+
+---
+
+## 5. Human-in-the-Loop (Skill 2.1.5)
+
+```
+Agent drafts action --> Step Functions Task with .waitForTaskToken
+   --> notify reviewer (SNS / email / app) with task token
+   --> reviewer approves/rejects via API Gateway --> Lambda SendTaskSuccess/Failure
+   --> workflow resumes
+```
+
+| Component | Purpose |
+|---|---|
+| Step Functions callback pattern (`.waitForTaskToken`) | Pause without polling until a human responds |
+| API Gateway + Lambda | Capture approval and feedback |
+| Amazon Augmented AI (A2I) | Managed human review workflows |
+| Feedback storage | DynamoDB or S3 to feed evaluation and prompt improvement |
+| Bedrock Agents return of control | Agent hands a parameter-confirmation or action back to your app |
+
+---
+
+## 6. Tool Integrations (Skill 2.1.6)
+
+Reliable tools are **well-described, validated, and fail gracefully**.
+
+* Use **standardized function definitions**: clear name, description, JSON Schema for parameters. The model selects tools from the description, so vague descriptions cause wrong calls.
+* Validate parameters in the tool Lambda; return structured errors the model can act on.
+* Implement timeouts, retries, and idempotency keys for write actions.
+* Return concise results; truncate large payloads.
+
+```python
+def handler(event, context):
+    try:
+        args = validate(event["parameters"])        # schema + business rules
+        result = call_backend(args, idempotency_key=event.get("requestId"))
+        return {"status": "ok", "data": result}
+    except ValidationError as e:
+        return {"status": "error", "retryable": False, "message": str(e)}
+    except TimeoutError:
+        return {"status": "error", "retryable": True, "message": "backend timeout"}
+```
+
+---
+
+## 7. Model Context Protocol and Extension Frameworks (Skill 2.1.7)
+
+MCP standardizes how agents discover and call tools: an **MCP client** inside the agent talks to **MCP servers** that expose tools, resources, and prompts.
+
+| Hosting option | Use when |
+|---|---|
+| AWS Lambda (stateless MCP server) | Lightweight, short tool calls; scale to zero; pay per use |
+| Amazon ECS / Fargate (MCP server) | Complex tools, long-running operations, persistent connections or state |
+| AgentCore Gateway | Convert APIs and Lambda functions into MCP-compatible tools with managed auth |
+| MCP client libraries | Consistent access patterns across agents and frameworks |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Lambda vs ECS for MCP servers">
+
+Lambda MCP servers fit **stateless request/response** tools, with 15-minute maximum duration and no long-lived connections, so they work best with streamable HTTP interactions that do not require server-held session state. ECS (with Fargate) suits servers that keep connections open, hold in-memory state or caches, run heavy dependencies, or execute long operations. The exam usually frames this as "lightweight tool access" (Lambda) versus "complex tools" (ECS).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 8. Exam Traps & Common Distractors
+
+- **Trap 1:** Using a single giant prompt when the scenario needs specialized agents or tools.
+- **Trap 2:** Relying on natural-language prohibitions instead of IAM boundaries and tool-level validation.
+- **Trap 3:** Polling for human approval instead of the Step Functions callback token pattern.
+- **Trap 4:** Hosting a long-running, stateful tool as Lambda; use ECS.
+- **Trap 5:** Forgetting loop limits, so an agent burns tokens indefinitely.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can map Strands Agents, Agent Squad, Bedrock Agents, AgentCore, and MCP to their roles.
+<details>
+<summary>Explanation</summary>
+
+Strands is a code-first agent SDK; Agent Squad routes among multiple specialized agents; Bedrock Agents is a managed agent service with action groups and knowledge bases; AgentCore provides secure runtime, memory, gateway, identity, and observability for production agents; MCP is the protocol standardizing agent-tool interaction.
+
+</details>
+
+- [ ] I can implement a ReAct loop with Step Functions and name its safeguards.
+<details>
+<summary>Explanation</summary>
+
+Bedrock Task, Choice on tool request, Lambda tool Task, loop back with the observation, and exit on final answer. Safeguards: max iteration counter, state timeouts, retries with caps, Catch to a failure or escalation state, and scoped IAM for tools.
+
+</details>
+
+- [ ] I can add human approval to an automated workflow.
+<details>
+<summary>Explanation</summary>
+
+Use a Step Functions task with `.waitForTaskToken`, send the token to the reviewer through a notification, and resume via SendTaskSuccess or SendTaskFailure from an API Gateway-backed Lambda. A2I provides managed review UIs.
+
+</details>
+
+- [ ] I can choose between Lambda and ECS for hosting an MCP server.
+<details>
+<summary>Explanation</summary>
+
+Lambda for stateless, short, lightweight tools with scale-to-zero cost. ECS or Fargate for complex, long-running, stateful, or dependency-heavy tools needing persistent connections.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/06-prompt-engineering-management-governance-flows" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 06: Prompt Engineering, Prompt Management, Governance & Prompt Flows
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/08-fm-deployment-strategies" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 08: FM Deployment Strategies: On-Demand, Provisioned Throughput & SageMaker AI →
+  </a>
+</div>

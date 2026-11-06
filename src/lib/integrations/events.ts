@@ -35,7 +35,7 @@ export const CURATED_FALLBACK_EVENTS: Omit<ConferenceEvent, "daysLeft" | "isHapp
     date: "2027-01-05",
     endDate: "2027-01-08",
     location: "Las Vegas, NV",
-    linkUrl: "https://www.ces.tech/",
+    linkUrl: "/resources/conferences/ces-las-vegas",
     category: "Consumer Tech & AI",
     featured: true,
   },

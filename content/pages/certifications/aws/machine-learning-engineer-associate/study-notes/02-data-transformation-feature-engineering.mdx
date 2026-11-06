@@ -1,0 +1,339 @@
+---
+title: "Module 02: Data Transformation & Feature Engineering with Glue, DataBrew, Data Wrangler & Feature Store"
+description: "Task 1.2 (classic ML): Glue, DataBrew, EMR Spark, SageMaker Data Wrangler, streaming transforms with Lambda/Spark, scaling, standardization, binning, log transforms and SageMaker Feature Store."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 2
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Content Domain 1, Task 1.2 skills 1.2.1 to 1.2.4 (classic ML transformation and feature engineering). The GenAI-flavored skills of Task 1.2 (embeddings, tokenization, RAG chunking, masking, fine-tuning datasets) are in Module 03.
+
+<Callout variant="info" title="Exam Blueprint Focus: Skills 1.2.1, 1.2.2, 1.2.3, 1.2.4">
+**1.2.1** transform data with AWS Glue, AWS Glue DataBrew, Spark on Amazon EMR and SageMaker Data Wrangler; **1.2.2** create and manage features with SageMaker Feature Store; **1.2.3** transform streaming data with AWS Lambda and Spark; **1.2.4** perform feature engineering: scaling, standardization, feature splitting, binning, log transformation and normalization. Expect scenario questions that ask for the tool with the *least operational effort* and questions that ask which mathematical transform fixes a specific data problem.
+</Callout>
+
+---
+
+## 1. The Transformation Tool Landscape (Skill 1.2.1)
+
+| Tool | Style | Compute | Best for | Output |
+|---|---|---|---|---|
+| **AWS Glue (ETL jobs)** | Code (PySpark/Scala, Python shell, Ray), visual Glue Studio | Serverless Spark, billed per DPU-second; auto scaling | Large scheduled ETL, Data Catalog integration, job bookmarks | S3, JDBC targets, catalog tables |
+| **AWS Glue DataBrew** | **No-code** visual data preparation with 250+ built-in transforms and recipes | Serverless | Analysts and data scientists cleaning and profiling data without code | Recipe jobs write to S3/others; profile jobs produce statistics |
+| **Spark on Amazon EMR** | Code (PySpark, Scala, SQL) | Cluster you choose (EC2, EKS or Serverless) | Very large or custom Spark workloads, existing Spark code, fine tuning of the cluster | S3, HDFS, anything Spark writes |
+| **SageMaker Data Wrangler** | Low-code visual flow inside SageMaker Canvas/Studio, 300+ built-in transforms plus custom pandas/PySpark/SQL | Processing job on managed instances when exported | ML-specific prep: encoding, scaling, imputation, join, quick model, bias/leakage insight; export to Pipelines, Feature Store or a notebook | S3, Feature Store, Pipelines step |
+| **SageMaker Processing** | Script-based (your container or built-in sklearn/Spark containers) | Managed instances for the job duration | Repeatable preprocessing/evaluation jobs as a Pipeline step | S3 |
+| **Amazon Athena (CTAS)** | SQL | Serverless | Quick SQL transformations over S3 | S3 tables |
+
+```
+ Raw S3 / RDS / streams
+        |
+        |-- no code, analyst, "clean and profile"  --> Glue DataBrew (recipe) ---+
+        |-- scheduled big ETL, catalog, bookmarks  --> AWS Glue (Spark) ---------+--> curated S3 (Parquet)
+        |-- huge/custom Spark, own cluster         --> Spark on EMR -------------+        |
+        |-- ML-focused visual prep, export to      --> SageMaker Data Wrangler --+        v
+        |   Pipelines or Feature Store                                                Training / Feature Store
+        '-- repeatable script in a pipeline        --> SageMaker Processing job
+```
+
+<Callout variant="tip" title="Decision shortcuts">
+"No code / visual profiling of data quality" suggests DataBrew. "Visual prep integrated with SageMaker and exportable to a pipeline or Feature Store" suggests Data Wrangler. "Existing Spark code and need control of cluster configuration" suggests EMR. "Serverless scheduled ETL with Data Catalog" suggests Glue.
+</Callout>
+
+### Glue ETL example (PySpark)
+
+```python
+import sys
+from awsglue.context import GlueContext
+from awsglue.utils import getResolvedOptions
+from awsglue.job import Job
+from pyspark.context import SparkContext
+from pyspark.sql import functions as F
+
+args = getResolvedOptions(sys.argv, ["JOB_NAME"])
+sc = SparkContext(); glueContext = GlueContext(sc); spark = glueContext.spark_session
+job = Job(glueContext); job.init(args["JOB_NAME"], args)
+
+df = glueContext.create_dynamic_frame.from_catalog(database="ml", table_name="raw_orders").toDF()
+df = (df.dropDuplicates(["order_id"])
+        .withColumn("order_value_log", F.log1p("order_value"))
+        .fillna({"discount": 0.0}))
+df.write.mode("overwrite").partitionBy("order_date").parquet("s3://ml-curated/orders/")
+job.commit()
+```
+
+### DataBrew recipe (JSON, abbreviated)
+
+```json
+[
+  { "Action": { "Operation": "REMOVE_DUPLICATES" } },
+  { "Action": { "Operation": "FILL_WITH_AVERAGE",
+                "Parameters": { "sourceColumn": "age" } } },
+  { "Action": { "Operation": "MIN_MAX_SCALER",
+                "Parameters": { "sourceColumn": "income", "targetColumn": "income_scaled" } } }
+]
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Glue internals the exam touches (DPUs, bookmarks, DynamicFrames, crawlers)">
+
+* **DPU (data processing unit):** a unit of Glue compute (vCPU plus memory). More workers or a larger worker type fixes out-of-memory or slow jobs; **auto scaling** adjusts workers to the workload.
+* **Job bookmarks:** Glue remembers what it already processed so a rerun handles only new data. Use for incremental loads from S3 or JDBC.
+* **DynamicFrame vs DataFrame:** DynamicFrames tolerate inconsistent schemas via *choice* types (`ResolveChoice`); convert with `toDF()` for full Spark SQL.
+* **Crawlers and the Data Catalog:** crawlers infer schemas and register tables in the Glue Data Catalog, which Athena, EMR, Redshift Spectrum and Data Wrangler can read.
+* **Triggers/workflows:** schedule or chain jobs; EventBridge can start a job on new S3 data.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Data Wrangler flow and export options">
+
+A Data Wrangler *flow* is a graph: import (S3, Athena, Redshift, Snowflake, Feature Store), transform steps, analyses (histograms, target leakage, bias report, quick model), and export. Export targets include a **SageMaker Pipelines** step, a **Processing job** notebook, **Feature Store** ingestion, or plain Python code. Because the flow exports to a repeatable job, it solves the "prototype visually, then operationalize" requirement without rewriting the logic. For large datasets, the data is sampled in the UI and the full dataset is processed when the exported job runs.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Feature Engineering Techniques (Skill 1.2.4)
+
+Feature engineering converts raw columns into signals a model can learn from. The exam tests *which technique solves which problem*.
+
+| Technique | What it does | Use when | Watch out |
+|---|---|---|---|
+| **Normalization (min-max scaling)** | Rescales values to a fixed range, usually [0, 1]: `(x - min) / (max - min)` | Distance-based or gradient-based models (kNN, neural nets) with bounded features | Sensitive to outliers because min and max define the range |
+| **Standardization (z-score)** | Centers to mean 0 and scales to standard deviation 1: `(x - mean) / std` | Linear/logistic regression, SVM, PCA, k-means, neural nets; roughly Gaussian features | Does not bound values; outliers still influence mean/std |
+| **Robust scaling** | Uses median and IQR | Data with many outliers | Less common in questions but a valid answer |
+| **Log transformation** | `log(x)` or `log1p(x)` | **Right-skewed** data (income, prices, counts) and multiplicative relationships; compresses large values | Requires positive values (`log1p` handles zero) |
+| **Binning (bucketing / discretization)** | Converts continuous values to ranges (age 0-17, 18-34, ...) | Non-linear effects, reduces noise and outlier influence, simpler interpretation | Loses information; choose boundaries carefully (equal-width vs quantile) |
+| **Feature splitting** | Breaks one column into several (timestamp to hour, day-of-week, month; full name to parts; address to city/zip) | Composite fields hide useful signals | Avoid leaking future information |
+| **One-hot encoding** | One binary column per category | Nominal categories with low cardinality | High cardinality explodes dimensionality |
+| **Ordinal / label encoding** | Integer per category | Categories with natural order, or tree models | Implies order for nominal data in linear models |
+| **Target / frequency / hash encoding** | Replaces category by statistic or hash | High cardinality categories | Target encoding can leak the label if not cross-validated |
+| **Imputation** | Fill missing values (mean/median/mode, model-based) | Missing values | Add a "was missing" flag when missingness is informative |
+| **Cyclical encoding** | sin/cos of hour or month | Cyclic features | Keeps 23:00 close to 00:00 |
+| **Polynomial / interaction features** | Products and powers of features | Linear model needs non-linearity | Dimensionality growth |
+| **Dimensionality reduction (PCA)** | Projects to fewer components | Many correlated features | Reduces interpretability |
+
+```python
+import numpy as np, pandas as pd
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, KBinsDiscretizer
+
+df["income_log"]   = np.log1p(df["income"])                       # fix right skew
+df[["age_mm"]]     = MinMaxScaler().fit_transform(df[["age"]])    # normalization to [0,1]
+df[["bal_z"]]      = StandardScaler().fit_transform(df[["balance"]])  # standardization
+df["age_bin"]      = pd.cut(df["age"], bins=[0, 17, 34, 54, 120],
+                            labels=["minor", "young", "mid", "senior"])
+df["hour"]         = pd.to_datetime(df["ts"]).dt.hour             # feature splitting
+df["dow"]          = pd.to_datetime(df["ts"]).dt.dayofweek
+```
+
+**Normalization vs standardization quick rule:** normalization maps to a bounded range; standardization centers to mean 0 / unit variance. Tree-based models (XGBoost, random forest) do not need scaling because splits depend only on order.
+
+<Callout variant="warning" title="Exam Trap: Data leakage when scaling">
+Fit scalers, imputers and encoders on the **training split only**, then apply the fitted transformer to validation and test data. Fitting on the full dataset leaks test information into training. In SageMaker, save the fitted transformer (for example with `joblib`) and reuse it at inference so training and serving apply identical transforms (avoids **training-serving skew**).
+</Callout>
+
+### Choosing a transform for a data problem
+
+| Problem statement | Best transform |
+|---|---|
+| "Income is heavily right skewed" | Log transformation |
+| "Features are on very different scales for a neural network or k-means" | Standardization (or normalization) |
+| "Need values between 0 and 1" | Min-max normalization |
+| "Age as a continuous field is too noisy for decision groups" | Binning |
+| "Timestamp contains day-of-week signal" | Feature splitting |
+| "Category with 50,000 distinct values" | Embeddings, target/frequency/hash encoding (not one-hot) |
+| "Outliers distort the scaling" | Robust scaling, clipping/winsorizing, or log |
+
+---
+
+## 3. Creating and Managing Features with SageMaker Feature Store (Skill 1.2.2)
+
+Module 01 covered ingestion. Here is the *management* view.
+
+* **Feature groups** define a schema: feature names and types (String, Integral, Fractional), one **record identifier**, one **event time**. A schema cannot have features removed; new features can be added to an existing group.
+* **Online store** (latest value, low latency) for inference; **offline store** (S3, Parquet or Iceberg, Glue-cataloged) for training and analysis. You can enable one or both.
+* **Time travel and point-in-time joins:** the offline store keeps every version, so you can build training sets "as of" each event time and avoid leakage from future data.
+* **Governance:** encrypt with KMS, control access with IAM, and query lineage and metadata through the Glue Data Catalog and Athena.
+* **Reuse:** teams share features across models, preventing duplicated and inconsistent feature logic.
+
+```python
+from sagemaker.feature_store.feature_group import FeatureGroup
+from sagemaker.session import Session
+import sagemaker
+
+sess = sagemaker.Session()
+fg = FeatureGroup(name="customer-features", sagemaker_session=sess)
+fg.load_feature_definitions(data_frame=df)        # infer schema from pandas
+fg.create(
+    s3_uri="s3://ml-feature-store/offline/",
+    record_identifier_name="customer_id",
+    event_time_feature_name="event_time",
+    role_arn=role, enable_online_store=True)
+# Offline retrieval with Athena
+query = fg.athena_query()
+query.run(query_string=f'SELECT * FROM "{query.table_name}" LIMIT 100',
+          output_location="s3://ml-feature-store/query-results/")
+```
+
+---
+
+## 4. Transforming Streaming Data (Skill 1.2.3)
+
+| Approach | How | Latency | Fit |
+|---|---|---|---|
+| **AWS Lambda** on Kinesis Data Streams, Firehose or MSK | Function per batch of records (batch size, window) | Low (seconds) | Light, stateless transforms: parse, enrich, filter, call `PutRecord` to Feature Store |
+| **Firehose + Lambda transformation** | Firehose invokes Lambda on buffered records before delivery | Near real time | Clean/reshape records while delivering to S3; combine with Parquet conversion |
+| **Amazon Managed Service for Apache Flink** | Stateful stream processing with windows, joins | Real time | Rolling aggregates (clicks per 5 minutes), sessionization, anomaly detection |
+| **Spark Structured Streaming** (Glue streaming jobs, EMR) | Micro-batch streaming ETL | Seconds | Existing Spark code, joins of stream with static tables |
+
+```python
+# Lambda handler on a Kinesis event source: parse, compute feature, write to Feature Store
+import base64, json, boto3
+fs = boto3.client("sagemaker-featurestore-runtime")
+
+def handler(event, context):
+    for rec in event["Records"]:
+        d = json.loads(base64.b64decode(rec["kinesis"]["data"]))
+        fs.put_record(
+            FeatureGroupName="session-features",
+            Record=[
+                {"FeatureName": "user_id", "ValueAsString": d["user"]},
+                {"FeatureName": "event_time", "ValueAsString": d["ts"]},
+                {"FeatureName": "clicks_last_min", "ValueAsString": str(d["clicks"])},
+            ])
+```
+
+```
+ Clickstream --> Kinesis Data Streams --+--> Lambda (stateless) ----------------> Feature Store (online+offline)
+                                         |
+                                         +--> Managed Flink (5-min window) ----> S3 Parquet / Feature Store
+                                         |
+                                         +--> Firehose (+Lambda transform) ----> S3
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Stateless vs stateful streaming transforms">
+
+* **Stateless** transforms (parse JSON, convert units, mask a field, add a lookup value) need only the current record: **Lambda** is simplest and cheapest.
+* **Stateful** transforms (counts in a window, running averages, joins across events, deduplication across time) must remember earlier events: use **Flink** (managed state, checkpoints, event-time windows) or Spark Structured Streaming.
+* **Tumbling windows** are fixed non-overlapping intervals, **sliding windows** overlap, **session windows** close after inactivity. Lambda supports tumbling windows on Kinesis and DynamoDB streams for simple aggregations.
+* Exam heuristic: "rolling 10-minute aggregate or sessionization" is Flink; "lightweight per-record enrichment" is Lambda.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Keeping training and serving features consistent">
+
+Compute a feature the same way offline and online. Common pattern: define the feature logic once (a Glue/Spark job or a shared library), write results to a Feature Store group, and let both batch training jobs (offline store) and real-time endpoints (online store) read from it. Divergent code paths for training and serving create **training-serving skew**, a frequent root cause of accuracy dropping after deployment.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 5. SageMaker Processing and Pipelines Integration
+
+When a transformation must be repeatable, put it in code and run it as a **SageMaker Processing** job (and later a **Pipelines** processing step). Processing runs your script on managed instances for the duration of the job, reads from S3 channels and writes outputs back to S3.
+
+```python
+from sagemaker.sklearn.processing import SKLearnProcessor
+from sagemaker.processing import ProcessingInput, ProcessingOutput
+
+proc = SKLearnProcessor(framework_version="1.2-1", role=role,
+                        instance_type="ml.m5.xlarge", instance_count=2)
+proc.run(
+    code="preprocess.py",
+    inputs=[ProcessingInput(source="s3://ml-curated/orders/",
+                            destination="/opt/ml/processing/input")],
+    outputs=[ProcessingOutput(source="/opt/ml/processing/train",
+                              destination="s3://ml-features/train/"),
+             ProcessingOutput(source="/opt/ml/processing/test",
+                              destination="s3://ml-features/test/")])
+```
+
+---
+
+## 6. Common Traps and Distractors for Task 1.2 (classic ML)
+
+* **"Use Data Wrangler for a nightly 5 TB ETL."** Production-scale scheduled ETL belongs in Glue, EMR or a Processing/Pipelines step; Data Wrangler is for interactive prep and can export to those.
+* **"One-hot encode a column with tens of thousands of categories."** Choose embeddings or target/frequency/hash encoding.
+* **"Standardize before the train/test split."** Leakage. Fit on training only.
+* **"Scale features for XGBoost."** Trees do not need it; scaling is mostly for distance/gradient-based models.
+* **"Log transform negative numbers."** Log needs positive input; use `log1p` for zeros or another transform for negatives.
+* **"Use Lambda for windowed joins."** Lambda is stateless per invocation; use Flink for stateful windows.
+* **"Query the offline store for real-time inference."** Online store is for inference.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Glue, DataBrew, EMR, Data Wrangler and SageMaker Processing for a given requirement.
+<details>
+<summary>Explanation</summary>
+
+* **DataBrew:** no-code, visual, recipe-based cleaning and data profiling for analysts.
+* **Glue:** serverless Spark ETL with Data Catalog, bookmarks and scheduling for large pipelines.
+* **EMR:** maximum control over a Spark/Hadoop cluster, existing code or very large and custom jobs.
+* **Data Wrangler:** ML-oriented visual prep with leakage and bias analyses, exportable to Pipelines, Processing or Feature Store.
+* **Processing:** script-based, repeatable job and Pipelines step.
+The deciding phrases are "no code", "least operational overhead", "existing Spark code" and "integrate with SageMaker Pipelines".
+
+</details>
+
+- [ ] I know which feature engineering transform fixes right-skewed data, mixed scales, bounded range needs and noisy continuous variables.
+<details>
+<summary>Explanation</summary>
+
+Right skew: **log transform** (`log1p` if zeros present). Mixed scales for distance or gradient-based models: **standardization** (or normalization). Need values in [0, 1]: **min-max normalization**. Noisy continuous variable or non-linear effect with interpretable groups: **binning**. Composite fields such as timestamps: **feature splitting**. Outlier-heavy data: robust scaling or clipping.
+
+</details>
+
+- [ ] I can explain how to avoid data leakage and training-serving skew in preprocessing.
+<details>
+<summary>Explanation</summary>
+
+Split data first, then fit scalers/imputers/encoders on the training set only and apply them to validation, test and inference data. Persist the fitted transformer artifact and package it with the model or an inference pipeline so serving applies exactly the same transformation. Use a Feature Store with one feature definition for both offline training and online inference, and use point-in-time joins from the offline store so training rows never see future values.
+
+</details>
+
+- [ ] I can describe how Feature Store feature groups are defined and what the online and offline stores are for.
+<details>
+<summary>Explanation</summary>
+
+A feature group has a schema, a record identifier and an event time feature. The online store returns the latest record by identifier in milliseconds for real-time inference. The offline store keeps full history in S3 (Glue-cataloged, queryable with Athena) for training sets, batch scoring and time-travel. You can enable both, and ingestion writes to both consistently.
+
+</details>
+
+- [ ] I can pick the right engine for transforming streaming data (Lambda, Firehose transform, Flink, Spark Streaming).
+<details>
+<summary>Explanation</summary>
+
+Lambda handles stateless per-record or small-batch transforms with minimal operations. Firehose with a Lambda transformation reshapes records while delivering to S3. Managed Service for Apache Flink handles stateful windowing, joins and sessionization in real time. Spark Structured Streaming (Glue streaming or EMR) fits teams with Spark code and micro-batch needs. If the scenario needs rolling aggregates over time windows, Lambda alone is the wrong answer.
+
+</details>
+
+- [ ] I know when scaling is unnecessary and when one-hot encoding is the wrong choice.
+<details>
+<summary>Explanation</summary>
+
+Tree-based models (decision trees, random forest, XGBoost) split on thresholds and are invariant to monotonic scaling, so scaling is optional. One-hot encoding is fine for low-cardinality nominal categories but produces huge sparse matrices for high-cardinality features, where embeddings, frequency/target encoding or hashing are better. Target encoding must be computed within cross-validation folds to avoid label leakage.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/01-data-collection-storage-ingestion" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 01: Data Collection, Storage, Streaming Ingestion & Vector Stores
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/03-genai-data-preparation-embeddings-rag" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 03: GenAI Data Preparation: Embeddings, Text Pre-processing, RAG Chunking & FM Tuning Datasets →
+  </a>
+</div>

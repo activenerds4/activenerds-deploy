@@ -148,33 +148,163 @@ export const navigationConfig: NavigationConfig = {
             },
           ],
         },
+      ],
+      viewAll: { label: "Explore Learning Hub", href: "/learning" },
+    },
+    {
+      id: "certifications",
+      label: "Certifications",
+      href: "/certifications",
+      enabled: true,
+      cascade: true,
+      groups: [
         {
-          label: "Certs Central: VMware",
+          label: "Browse",
           items: [
             {
-              label: "VMware Study Notes Hub",
-              href: "/learning/certs-central/vmware/study-notes",
-              description: "Master VCF 9: Administrator, Architect & Tanzu Kubernetes notes",
+              label: "All Certifications Hub",
+              href: "/certifications",
+              description: "Unified credential roadmaps across all providers",
+            },
+          ],
+        },
+        {
+          label: "VMware Cloud Foundation",
+          items: [
+            {
+              label: "Cloud Foundation Administrator (2V0-17.25)",
+              href: "/certifications/vmware/vcf-administrator",
+              description: "Deploy, configure, manage & operate full-stack VCF private cloud",
             },
             {
-              label: "VCF Administrator Exam Notes",
-              href: "/learning/certs-central/vmware/study-notes/vcf-administrator",
-              description: "18-module deep dive: architecture, NSX, vSAN, SDDC & LCM",
+              label: "Cloud Foundation Architect (2V0-13.25)",
+              href: "/certifications/vmware/vcf9-architect",
+              description: "Enterprise SDDC architectural design, RCAR framework & physical design",
             },
             {
-              label: "VCF 9 Architect Exam Notes",
-              href: "/learning/certs-central/vmware/study-notes/vcf9-architect",
-              description: "13-section guide: conceptual, logical, physical, AMPRS-M",
+              label: "VCF vSphere Kubernetes Service (3V0-24.25)",
+              href: "/certifications/vmware/vks-tanzu",
+              description: "Supervisor clusters, Tanzu Kubernetes Grid & container workloads",
+            },
+          ],
+        },
+        {
+          label: "Amazon Web Services (AWS)",
+          items: [
+            {
+              label: "AWS Certified Solutions Architect – Associate (SAA-C03)",
+              href: "/certifications/aws/solutions-architect-associate",
+              description: "Resilient VPC, compute, storage, IAM & high availability design",
             },
             {
-              label: "VKS Tanzu (3V0-24.25) Notes",
-              href: "/learning/certs-central/vmware/study-notes/vks-tanzu",
-              description: "5-section guide: Supervisor, vSphere Pods, Cluster API & TKGS",
+              label: "AWS Certified Solutions Architect – Professional (SAP-C02 / SAP-C03)",
+              href: "/certifications/aws/solutions-architect-professional",
+              description: "Complex multi-account governance, hybrid networks, migration & DR",
+            },
+            {
+              label: "AWS Certified Developer – Associate (DVA-C02 / DVA-C03)",
+              href: "/certifications/aws/developer-associate",
+              description: "Serverless Lambda, API Gateway, DynamoDB, Cognito & CI/CD",
+            },
+            {
+              label: "AWS Certified SysOps Administrator – Associate (SOA-C02 / SOA-C03)",
+              href: "/certifications/aws/cloudops-engineer-associate",
+              description: "Monitoring, automated remediation, scaling, backup/DR & compliance",
+            },
+            {
+              label: "AWS Certified Data Engineer – Associate (DEA-C01)",
+              href: "/certifications/aws/data-engineer-associate",
+              description: "Batch/streaming ingestion, Glue & EMR transformation & Lake Formation",
+            },
+            {
+              label: "AWS Certified Machine Learning Engineer – Associate (MLA-C01 / MLA-C02)",
+              href: "/certifications/aws/machine-learning-engineer-associate",
+              description: "SageMaker model training, Bedrock FMs, GenAIOps & inference hosting",
+            },
+            {
+              label: "AWS Certified Generative AI Developer – Professional (AIP-C01)",
+              href: "/certifications/aws/generative-ai-developer-professional",
+              description: "Bedrock agents, multi-agent flows, hybrid RAG & guardrails",
+            },
+          ],
+        },
+        {
+          label: "Kubernetes & CNCF",
+          items: [
+            {
+              label: "Certified Kubernetes Administrator (CKA)",
+              href: "/certifications#k8s-cka",
+              description: "Cluster architecture, installation, storage, networking & live troubleshooting (Coming Soon)",
+            },
+            {
+              label: "Certified K8s Security Specialist (CKS)",
+              href: "/certifications#k8s-cks",
+              description: "Cluster hardening, vulnerability scanning, runtime security & Falco policies (Coming Soon)",
+            },
+            {
+              label: "Certified K8s Application Developer (CKAD)",
+              href: "/certifications#k8s-ckad",
+              description: "Pods, deployments, ConfigMaps & ingress traffic routing (Coming Soon)",
+            },
+          ],
+        },
+        {
+          label: "AI & Machine Learning",
+          items: [
+            {
+              label: "AWS Certified AI Practitioner (AIF-C01)",
+              href: "/certifications#ai-aif",
+              description: "Foundational models, prompt engineering, fine-tuning & RAG architectures (Coming Soon)",
+            },
+            {
+              label: "Google Cloud Professional ML Engineer",
+              href: "/certifications#ai-gcp",
+              description: "Vertex AI, ML pipelines, feature stores & model deployment (Coming Soon)",
+            },
+            {
+              label: "Azure AI Engineer Associate (AI-102)",
+              href: "/certifications#ai-az102",
+              description: "Azure OpenAI, Cognitive Services & conversational AI solutions (Coming Soon)",
+            },
+          ],
+        },
+        {
+          label: "HashiCorp Infrastructure",
+          items: [
+            {
+              label: "Terraform Associate (003)",
+              href: "/certifications#hashi-terraform",
+              description: "HCL syntax, state management, provider configuration & module composition (Coming Soon)",
+            },
+            {
+              label: "Vault Associate (002)",
+              href: "/certifications#hashi-vault",
+              description: "Dynamic secrets, auth backends, encryption-as-a-service & token policies (Coming Soon)",
+            },
+          ],
+        },
+        {
+          label: "Microsoft Azure",
+          items: [
+            {
+              label: "Azure Administrator (AZ-104)",
+              href: "/certifications#azure-az104",
+              description: "Entra ID, virtual networks, storage & compute VMs (Coming Soon)",
+            },
+            {
+              label: "Azure Solutions Architect (AZ-305)",
+              href: "/certifications#azure-az305",
+              description: "Enterprise cloud governance, identity, disaster recovery & infrastructure design (Coming Soon)",
+            },
+            {
+              label: "Azure AI Fundamentals (AI-900)",
+              href: "/certifications#azure-ai900",
+              description: "Computer vision, NLP, conversational AI & Azure Machine Learning workloads (Coming Soon)",
             },
           ],
         },
       ],
-      viewAll: { label: "Explore VMware Study Notes Hub", href: "/learning/certs-central/vmware/study-notes" },
+      viewAll: { label: "Explore All Certifications", href: "/certifications" },
     },
     {
       id: "tools",

@@ -1,0 +1,434 @@
+---
+title: "Module 07: Evaluating ML and GenAI Systems: Metrics, Drift Baselines, Explainability & LLM-as-a-Judge"
+description: "Task 2.3: MLflow experiments, baselines/drift, shadow variants, explainability, convergence debugging, classification/regression metrics, human evaluation, BLEU/ROUGE/BERTScore, LLM-as-a-judge, RAG evaluation."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 7
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Task 2.3 (Skills 2.3.1 - 2.3.10): reproducible experiments, baselines and drift, shadow variants, explainability, convergence debugging, traditional ML and GenAI evaluation, human evaluation, NLP metrics, LLM-as-a-judge, and RAG monitoring.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 2.3 - Analyze and evaluate the performance of ML and AI systems">
+Domain 2 carries 24% of scored content. Skills 2.3.7 - 2.3.10 (human evaluation, BLEU/ROUGE/BERTScore, LLM-as-a-judge, RAG retrieval accuracy) are new in MLA-C02, so expect scenario questions that ask you to pick the right metric or the right Amazon Bedrock evaluation mode for a task. The classic skills (2.3.1 - 2.3.6) still appear as questions about MLflow, Model Monitor baselines, shadow tests, Clarify, and Debugger.
+</Callout>
+
+---
+
+## 1. Reproducible Experiments (Skill 2.3.1)
+
+Reproducibility means that anyone can rerun an experiment and obtain the same result, because the code version, data version, hyperparameters, environment, and random seeds are all recorded.
+
+| Tool | What it tracks | Typical exam trigger |
+|---|---|---|
+| SageMaker AI managed MLflow (tracking server) | Parameters, metrics, artifacts, model versions, run lineage | "Team already uses MLflow and wants managed tracking with minimal operations" |
+| SageMaker Experiments | Runs, parameters, metrics, linked training jobs | "Compare many training runs inside SageMaker Studio" |
+| Amazon Bedrock Evaluations | Scores of FM outputs on a dataset | "Compare two foundation models on the same prompt dataset" |
+| Amazon Bedrock Prompt Management | Prompt versions and variants | "Compare two prompt templates against the same model" |
+| SageMaker Model Registry | Model package versions, approval status, metrics | "Audit which model version was approved and deployed" |
+
+A managed MLflow tracking server on SageMaker AI is created once and referenced by its ARN. Your training code then uses the standard MLflow API:
+
+```python
+import mlflow
+
+# The tracking URI is the ARN of the SageMaker AI MLflow tracking server
+mlflow.set_tracking_uri("arn:aws:sagemaker:us-east-1:111122223333:mlflow-tracking-server/ml-team")
+mlflow.set_experiment("churn-xgboost")
+
+with mlflow.start_run(run_name="baseline-depth6"):
+    mlflow.log_params({"max_depth": 6, "eta": 0.2, "seed": 42})
+    mlflow.log_metric("validation_auc", 0.912)
+    mlflow.log_artifact("feature_list.json")
+    mlflow.sklearn.log_model(model, "model")
+```
+
+Reproducibility checklist that the exam rewards:
+
+* Fix random seeds and log them as parameters.
+* Version the dataset (S3 object versioning, or a dataset snapshot path logged as a parameter).
+* Pin the container image digest and framework version.
+* Store everything in a tracked run, not in a notebook cell output.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Managed MLflow vs SageMaker Experiments vs Model Registry">
+
+These three overlap, and exam distractors exploit that overlap.
+
+* **Experiment tracking** (MLflow or SageMaker Experiments) answers "which run produced which metrics with which parameters."
+* **Model Registry** answers "which packaged model version is approved for deployment, and what are its metrics and lineage." Models logged in MLflow can be registered, and MLflow model versions can appear in the SageMaker Model Registry so that governance and deployment pipelines work from one source of truth.
+* **Bedrock Evaluations** does not train anything. It scores model or RAG outputs against a dataset and stores job results in Amazon S3.
+
+If a question says "audit and repeatability of deployed model versions," think Model Registry. If it says "compare hyperparameter runs," think experiment tracking.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Why a managed tracking server instead of a self-hosted MLflow on EC2">
+
+A self-hosted server needs patching, a backend database, artifact storage, authentication, and high availability. The managed tracking server removes that work, uses IAM for access control, and stores artifacts in Amazon S3. The exam usually frames this as "least operational overhead," which points to the managed option.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Evaluation Metrics for Traditional ML (Skill 2.3.6)
+
+Choose the metric from the business cost of errors, not from habit.
+
+| Problem | Metric | Formula or meaning | Use when |
+|---|---|---|---|
+| Classification | Accuracy | Correct divided by total | Classes balanced and errors equally costly |
+| Classification | Precision | TP / (TP + FP) | False positives are expensive (spam filter blocks real mail) |
+| Classification | Recall (sensitivity) | TP / (TP + FN) | False negatives are expensive (fraud, disease screening) |
+| Classification | F1 | Harmonic mean of precision and recall | Imbalanced classes, need one balanced number |
+| Classification | AUC-ROC | Area under TPR vs FPR curve | Threshold-independent ranking quality |
+| Classification | PR-AUC | Area under precision-recall curve | Heavily imbalanced data, where ROC looks too optimistic |
+| Regression | RMSE | Square root of mean squared error | Large errors must be penalized more |
+| Regression | MAE | Mean absolute error | Robust to outliers, easy to explain |
+| Regression | R squared | Variance explained | Relative goodness of fit |
+
+```
+                    Predicted Positive     Predicted Negative
+Actual Positive          TP                      FN   <- recall looks here
+Actual Negative          FP                      TN
+                         ^
+                    precision looks here
+```
+
+<Callout variant="warning" title="Exam Trap: Accuracy on imbalanced data">
+A model that predicts "not fraud" for every transaction scores 99.9% accuracy when fraud is 0.1% of data, yet it has zero recall. When a scenario mentions rare events, rule out accuracy and look for recall, F1, or PR-AUC.
+</Callout>
+
+---
+
+## 3. Baselines, Drift Detection, and Shadow Variants (Skills 2.3.2 and 2.3.3)
+
+### Baselines and drift
+
+A **baseline** is a statistical snapshot of the training data and of model quality at the time of approval. Amazon SageMaker Model Monitor compares live traffic to the baseline and raises violations.
+
+```
+Training data ──► suggest_baseline ──► statistics.json + constraints.json (in S3)
+                                               │
+ Endpoint ──► Data capture (S3) ──► Monitoring schedule ──► Violations report ──► CloudWatch alarm
+```
+
+| Monitor type | Baseline source | Detects |
+|---|---|---|
+| Data quality | Training dataset statistics and constraints | Missing values, type changes, distribution shift |
+| Model quality | Ground truth labels merged with captured predictions | Falling accuracy, precision, recall, RMSE |
+| Bias drift | Clarify bias metrics on training data | Change in fairness metrics over time |
+| Feature attribution drift | SHAP attributions on training data | Features gaining or losing importance |
+
+```python
+from sagemaker.model_monitor import DefaultModelMonitor
+from sagemaker.model_monitor.dataset_format import DatasetFormat
+
+monitor = DefaultModelMonitor(role=role, instance_count=1, instance_type="ml.m5.xlarge")
+monitor.suggest_baseline(
+    baseline_dataset="s3://ml-bucket/train/train.csv",
+    dataset_format=DatasetFormat.csv(header=True),
+    output_s3_uri="s3://ml-bucket/monitoring/baseline",
+)
+```
+
+Model quality monitoring needs ground truth, which often arrives late. That delay is the reason model quality jobs are scheduled to merge labels after they become available, while data quality monitoring works immediately because it needs no labels.
+
+### Shadow variants versus production variants
+
+An endpoint can host several **production variants**. Variants with traffic weights serve A/B tests, and the caller sees responses from whichever variant handled the request. A **shadow variant** is different: it receives a copy of the request, its response is logged but never returned to the caller, so risk to users is zero.
+
+| Technique | Caller sees new model's answer? | Risk to users | Best for |
+|---|---|---|---|
+| Shadow test (shadow variant) | No | None | Validating latency, errors, and prediction differences on real traffic before launch |
+| A/B test with weighted production variants | Yes, for the weighted share | Some | Measuring real business outcomes |
+| Blue/green or canary deployment | Yes | Controlled and reversible | Rolling out a validated model |
+
+```python
+import boto3
+sm = boto3.client("sagemaker")
+
+sm.create_inference_experiment(
+    Name="churn-v2-shadow",
+    Type="ShadowMode",
+    RoleArn=role_arn,
+    EndpointName="churn-endpoint",
+    ModelVariants=[
+        {"ModelName": "churn-v1", "VariantName": "production",
+         "InfrastructureConfig": {"InfrastructureType": "RealTimeInference",
+           "RealTimeInferenceConfig": {"InstanceType": "ml.m5.xlarge", "InstanceCount": 1}}},
+        {"ModelName": "churn-v2", "VariantName": "shadow",
+         "InfrastructureConfig": {"InfrastructureType": "RealTimeInference",
+           "RealTimeInferenceConfig": {"InstanceType": "ml.m5.xlarge", "InstanceCount": 1}}},
+    ],
+    ShadowModeConfig={"SourceModelVariantName": "production",
+                      "ShadowModelVariants": [{"ShadowModelVariantName": "shadow",
+                                               "SamplingPercentage": 100}]},
+    DataStorageConfig={"Destination": "s3://ml-bucket/shadow-capture"},
+)
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Reading a shadow test result">
+
+SageMaker AI shows side-by-side metrics for the production and shadow variants, such as invocation count, model latency, and invocation errors. You then promote the shadow variant if it matches or beats production, or stop the experiment. Because shadow traffic consumes real compute on the shadow variant, size it to match the load you want to validate.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Drift flavors and what to do about each">
+
+* **Data drift (covariate shift):** input distribution changes while the relationship between inputs and labels stays the same. Remedy: refresh features, retrain on recent data.
+* **Concept drift:** the relationship between inputs and the target changes (customer behavior shifts). Remedy: retrain with new labels and revisit features.
+* **Prediction drift:** the distribution of outputs changes. A useful early signal when labels are delayed.
+* **Bias or attribution drift:** fairness or feature importance moves away from the baseline, which can occur even if accuracy looks stable.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Explaining Model Outputs and Debugging Convergence (Skills 2.3.4 and 2.3.5)
+
+### Explainability with SageMaker Clarify
+
+Clarify computes **SHAP** (Shapley value) feature attributions. Global attributions show which features matter across the dataset, and local attributions explain a single prediction. Clarify also produces pre-training and post-training bias metrics and can be used for text and image inputs.
+
+```python
+from sagemaker import clarify
+
+processor = clarify.SageMakerClarifyProcessor(
+    role=role, instance_count=1, instance_type="ml.m5.xlarge", sagemaker_session=session)
+
+shap_config = clarify.SHAPConfig(
+    baseline=[baseline_row],       # reference record(s) the model is compared against
+    num_samples=100,
+    agg_method="mean_abs",
+)
+processor.run_explainability(
+    data_config=data_config,
+    model_config=model_config,
+    explainability_config=shap_config,
+)
+```
+
+Interpretable model families (linear and logistic regression, decision trees) are explainable by design, while deep networks and ensembles need post-hoc tools such as SHAP. Skill 2.1.3 in the previous module already linked interpretability to model choice, so expect a question that offers "use a tree-based model" as the answer when regulators require explanations.
+
+### Debugging convergence with SageMaker Debugger
+
+Debugger attaches **rules** to a training job and emits findings (and can stop the job) when training misbehaves.
+
+| Symptom | Likely cause | Debugger rule or fix |
+|---|---|---|
+| Loss does not decrease | Learning rate too low, bad initialization, dead features | `loss_not_decreasing` |
+| Loss oscillates or becomes NaN | Learning rate too high, exploding gradients | `exploding_tensor`, lower the learning rate, clip gradients |
+| Gradients near zero in early layers | Vanishing gradients (deep nets, sigmoid or tanh) | `vanishing_gradient`, use ReLU, residual connections, batch normalization |
+| Training loss falls, validation loss rises | Overfitting | `overfit`, regularization, early stopping |
+| Both losses stay high | Underfitting | Larger model, better features, train longer |
+
+```python
+from sagemaker.debugger import Rule, rule_configs
+
+rules = [
+    Rule.sagemaker(rule_configs.vanishing_gradient()),
+    Rule.sagemaker(rule_configs.loss_not_decreasing()),
+    Rule.sagemaker(rule_configs.overfit()),
+]
+# pass rules=rules to the Estimator, then inspect rule status after fit()
+```
+
+---
+
+## 5. Evaluating GenAI Models and Systems (Skills 2.3.6 - 2.3.9)
+
+GenAI outputs are free text, so there is rarely a single correct answer. AWS offers three complementary families of evaluation, and the exam expects you to match them to the situation.
+
+| Approach | How it scores | Strength | Weakness | Amazon Bedrock mode |
+|---|---|---|---|---|
+| Automatic metrics with reference answers (BLEU, ROUGE, BERTScore) | Compares output to a reference text | Cheap, fast, repeatable | Needs reference answers, weak on style and factuality | Automatic (programmatic) evaluation |
+| LLM-as-a-judge | A judge model rates outputs on a rubric (correctness, completeness, helpfulness, coherence, harmfulness) | Scales, no reference needed for many metrics | Judge bias, cost of judge calls | Model evaluation with a judge model |
+| Human evaluation | People rate or compare outputs | Gold standard for tone, brand fit, nuance | Slow and expensive | Human-based evaluation (your workforce or an AWS-managed workforce) |
+
+### NLP metrics (Skill 2.3.8)
+
+| Metric | Measures | Orientation | Classic task |
+|---|---|---|---|
+| BLEU | N-gram overlap between candidate and reference | Precision-oriented (with a brevity penalty) | Machine translation |
+| ROUGE (ROUGE-N, ROUGE-L) | N-gram or longest-common-subsequence overlap | Recall-oriented | Summarization |
+| BERTScore | Cosine similarity of contextual token embeddings | Semantic, tolerant of paraphrase | Any text generation where wording varies |
+| Semantic similarity | Cosine similarity of sentence embeddings | Meaning-level | Answer versus reference comparison |
+| Perplexity | How surprised a language model is by text | Lower is better | Language model quality |
+
+Memory aid: **B**LEU = **B**ilingual translation, **R**OUGE = **R**ecall for summaries, BERTScore = meaning not exact words.
+
+### Human evaluation and human-in-the-loop (Skill 2.3.7)
+
+* **Bedrock human-based evaluation jobs** let you bring your own team or use an AWS-managed work team to rate responses on criteria such as helpfulness, style, and brand voice, using rating scales or thumbs up and down.
+* **Amazon SageMaker Ground Truth and Amazon Augmented AI (A2I)** provide human review workflows, for example routing low-confidence predictions to reviewers.
+* The open source FMEval library can run evaluations such as factual knowledge, toxicity, and summarization accuracy for models hosted on SageMaker AI.
+
+### Bedrock model evaluation job (Skill 2.3.9)
+
+```python
+import boto3
+bedrock = boto3.client("bedrock")
+
+bedrock.create_evaluation_job(
+    jobName="summarization-eval-1",
+    roleArn=role_arn,
+    applicationType="ModelEvaluation",
+    evaluationConfig={"automated": {"datasetMetricConfigs": [{
+        "taskType": "Summarization",
+        "dataset": {"name": "my-dataset",
+                    "datasetLocation": {"s3Uri": "s3://ml-bucket/eval/prompts.jsonl"}},
+        "metricNames": ["Builtin.Accuracy", "Builtin.Robustness", "Builtin.Toxicity"],
+    }]}},
+    inferenceConfig={"models": [{"bedrockModel": {
+        "modelIdentifier": "anthropic.claude-3-haiku-20240307-v1:0",
+        "inferenceParams": "{\"temperature\":0.2}"}}]},
+    outputDataConfig={"s3Uri": "s3://ml-bucket/eval/results/"},
+)
+```
+
+Each dataset line is JSON with a `prompt`, and an optional `referenceResponse` and `category`. The same API family also supports LLM-as-a-judge and human-based configurations.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: LLM-as-a-judge design and its known biases">
+
+A judge model is given the prompt, the candidate response, optionally a reference answer, and a rubric. It returns a score and a short rationale.
+
+* **Position bias:** judges favor the first or second answer in a pairwise comparison. Mitigate by swapping order and averaging.
+* **Verbosity bias:** longer answers score higher. Mitigate with rubric language that penalizes padding.
+* **Self-preference bias:** a judge tends to prefer outputs from its own model family. Mitigate by using a different family as judge.
+* **Validation:** spot check a sample of judge decisions against human ratings to confirm agreement before trusting scores at scale.
+
+Common Bedrock judge metric categories include quality metrics (correctness, completeness, helpfulness, coherence, relevance, following instructions) and responsible AI metrics (harmfulness, stereotyping, refusal).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Content quality validation and bias detection in GenAI">
+
+Content quality validation checks coherence, factuality, and instruction following. Bias detection samples outputs across demographic variations of the same prompt and compares the results, or uses a judge with responsible AI rubrics. Bedrock Guardrails (covered in the security module) enforce policies at runtime, whereas evaluation measures quality offline, so do not confuse the two.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 6. Evaluating and Monitoring RAG Systems (Skill 2.3.10)
+
+A RAG system has two stages, and each must be measured separately because a wrong answer can come from bad retrieval or bad generation.
+
+```
+Question ──► Embed ──► Vector search (top k) ──► Context chunks ──► FM generates answer
+                         │                                            │
+                  Retrieval metrics                         Generation metrics
+              (context relevance, coverage,             (correctness, faithfulness /
+               precision@k, recall@k, MRR)               groundedness, citation quality)
+```
+
+| Stage | Question it answers | Example metrics |
+|---|---|---|
+| Retrieval | Did we fetch the right passages? | Context relevance, context coverage, precision@k, recall@k, MRR, nDCG |
+| Generation | Is the answer correct and grounded in the passages? | Correctness, completeness, faithfulness (groundedness), citation precision and coverage |
+| End to end | Is the user helped? | Helpfulness, user feedback, latency, cost |
+
+Amazon Bedrock Knowledge Bases evaluation supports **retrieve only** jobs (scores the quality of retrieved passages) and **retrieve and generate** jobs (scores the final answer). For monitoring in production, log queries, retrieved chunk IDs, similarity scores, and user feedback, then alarm on falling average relevance, rising "no result" rate, or rising hallucination judgments.
+
+Low retrieval accuracy is usually fixed in the retrieval layer, not by changing the generator:
+
+* Adjust chunk size and overlap, or move to hierarchical or semantic chunking.
+* Add metadata filters.
+* Use hybrid search (semantic plus keyword) and reranking.
+* Try a different embedding model, then re-embed the corpus.
+
+<Callout variant="warning" title="Exam Trap: Fine-tuning the FM to fix retrieval problems">
+If the right passage is never retrieved, a bigger or fine-tuned generator cannot answer correctly. Fix chunking, embeddings, filters, hybrid search, or reranking first. If the right passage is retrieved but the answer ignores it, then work on the prompt or the generation model.
+</Callout>
+
+---
+
+## 7. Choosing Quickly: Evaluation Decision Table
+
+| Scenario | Best answer |
+|---|---|
+| Compare hyperparameter runs and register the best model | MLflow on SageMaker AI or SageMaker Experiments, then Model Registry |
+| Detect that live input distribution differs from training | Model Monitor data quality with a baseline |
+| Test a new model on live traffic with zero user impact | Shadow test (shadow variant) |
+| Gradually expose users to a new model and compare conversions | A/B test with production variant weights |
+| Explain why one loan was rejected | SageMaker Clarify local SHAP attributions |
+| Training loss becomes NaN | Lower the learning rate, use Debugger `exploding_tensor` |
+| Score summaries against reference summaries | ROUGE |
+| Score translations against references | BLEU |
+| Paraphrases should score as correct | BERTScore or semantic similarity |
+| No reference answers, need scalable quality scoring | LLM-as-a-judge |
+| Brand tone and nuance matter | Human evaluation |
+| RAG gives wrong answers, cause unknown | Separate retrieve-only and retrieve-and-generate evaluation |
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between precision, recall, F1, AUC-ROC, and PR-AUC from a business scenario.
+<details>
+<summary>Explanation</summary>
+
+Use **recall** when missing a positive is costly (fraud, disease) and **precision** when raising a false alarm is costly. **F1** balances them, and **PR-AUC** is preferred over AUC-ROC when positives are very rare because ROC can look optimistic when negatives dominate. Accuracy is only trustworthy on balanced classes. For regression, RMSE penalizes large errors more than MAE does.
+
+</details>
+
+- [ ] I can explain the difference between a shadow variant and a production variant used for A/B testing.
+<details>
+<summary>Explanation</summary>
+
+A shadow variant receives a copy of live requests, but its responses are only logged and are never returned to the caller, so users carry no risk. Production variants with traffic weights return their own responses to real users, so they measure real business outcomes but expose users to the candidate model. Shadow tests validate technical behavior (latency, errors, prediction differences) before an A/B test or rollout.
+
+</details>
+
+- [ ] I know what a Model Monitor baseline is and which monitor types exist.
+<details>
+<summary>Explanation</summary>
+
+A baseline is the statistics and constraints computed from training data (or ground truth quality metrics) that live traffic is compared against. The four monitor types are data quality, model quality, bias drift, and feature attribution drift. Model quality needs ground truth labels, which often arrive late, while data quality needs none.
+
+</details>
+
+- [ ] I can match BLEU, ROUGE, and BERTScore to their tasks and limitations.
+<details>
+<summary>Explanation</summary>
+
+BLEU is precision-oriented n-gram overlap, traditionally used for translation. ROUGE is recall-oriented and traditionally used for summarization. Both are surface-level and penalize valid paraphrases. BERTScore compares contextual embeddings, so it rewards semantically equivalent wording. None of them verify factual accuracy, so pair them with LLM-as-a-judge or human review for factuality and tone.
+
+</details>
+
+- [ ] I understand when to use automatic evaluation, LLM-as-a-judge, and human evaluation in Amazon Bedrock, and the biases of an LLM judge.
+<details>
+<summary>Explanation</summary>
+
+Automatic metrics are cheap and repeatable but need references. LLM-as-a-judge scales rubric-based scoring without human effort, but suffers from position, verbosity, and self-preference bias, so swap answer order, use a judge from a different model family, and validate against human samples. Human evaluation is slowest and costliest but best for tone, brand voice, and nuanced judgment. Most mature programs combine all three.
+
+</details>
+
+- [ ] I can diagnose whether a RAG failure comes from retrieval or generation and name the right remedies.
+<details>
+<summary>Explanation</summary>
+
+Run retrieve-only evaluation to score context relevance and coverage, and retrieve-and-generate evaluation to score correctness and faithfulness. Poor retrieval is fixed with better chunking, metadata filters, hybrid search, reranking, or a different embedding model. If correct context is retrieved but ignored or contradicted, the issue lies in the prompt or the generator. Fine-tuning the generator never fixes missing context.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/06-sagemaker-training-tuning-customization" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 06: Training, Tuning & Customizing Models with SageMaker AI
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/08-deployment-targets-inference-fm-hosting-agents" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 08: Deployment Targets, Inference Strategies, FM Hosting & Agent Deployment →
+  </a>
+</div>

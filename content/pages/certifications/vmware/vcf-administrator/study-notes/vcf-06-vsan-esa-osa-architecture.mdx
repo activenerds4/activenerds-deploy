@@ -1,0 +1,297 @@
+---
+title: "Module 06: vSAN Express Storage Architecture (ESA) vs OSA"
+description: "Single-tier NVMe architecture, log-structured filesystem (LFS), snapshot engine, 25GbE+ network requirements, ReadyNode specs."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF Administrator Study Guide"
+trackSlug: "/certifications/vmware/vcf-administrator"
+moduleNumber: 6
+totalModules: 18
+layout: "article"
+---
+
+> **Instructor note:** Version-specific limits (device counts, ReadyNode profiles, supported features per VCF release) change between releases. Treat the numbers below as the exam-level mental model and confirm exact figures against the VMware Compatibility Guide and the release notes for your VCF version.
+
+---
+
+## 1. Learning Objectives
+
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: vSAN Express Storage Architecture (ESA) vs Original (OSA)">
+
+VCF 5.x and VCF 9 provide two distinct vSAN architectures:
+
+| Feature | vSAN OSA (Original) | vSAN ESA (Express) |
+|---|---|---|
+| **Drive Layout** | Disk Groups (1 Cache SSD + 1-7 Capacity Disks) | Single storage pool of NVMe drives; **no cache tier** |
+| **Write Flow** | Writes hit cache SSD, destaged later to capacity | Log-structured filesystem writes directly to NVMe in parallel |
+| **RAID-5/6 Overhead** | Significant CPU/write amplification penalty | Fast-path distributed logging; RAID-5 delivers RAID-1 speed |
+| **Snapshots** | Tree-based redirection (performance degradation) | Lookup-based redirect-on-write with near-zero latency impact |
+| **Network Requirement** | 10 GbE minimum, 25 GbE recommended | **25 GbE mandatory**, 100 GbE recommended |
+
+**Exam Rule:** vSAN ESA requires certified **vSAN ReadyNodes** equipped exclusively with approved NVMe drives. Mixing SAS/SATA drives into an ESA pool is unsupported.
+
+</AccordionItem>
+
+</AccordionGroup>
+
+
+After this module you should be able to:
+
+- Explain the two vSAN architectures: **Original Storage Architecture (OSA)** and **Express Storage Architecture (ESA)**.
+- Compare disk groups (OSA) with storage pools (ESA).
+- Identify hardware and network requirements for ESA.
+- Describe how the architecture choice is made in VCF (management domain, workload domains, SDDC Manager).
+- Select the right architecture and storage policy for a given scenario.
+
+---
+
+## 2. vSAN in VCF: Context
+
+- vSAN is the **principal storage** for the VCF **management domain**.
+- **VI workload domains** can use vSAN, VMFS on FC, NFS, or vVols as principal storage. vSAN gives the tightest lifecycle integration with SDDC Manager.
+- Both OSA and ESA are managed through vCenter and consumed through **Storage Policy Based Management (SPBM)**.
+- The architecture is a **cluster-level decision made when the cluster is created** (via SDDC Manager workflow or deployment parameters). There is **no in-place conversion** between OSA and ESA. Moving between them means building a new cluster and migrating workloads (for example with vMotion/Storage vMotion).
+- SDDC Manager and vSphere Lifecycle Manager (vLCM) use **cluster images** and hardware compatibility checks. ESA clusters depend on certified ESA ReadyNodes and device firmware/driver combinations.
+
+---
+
+## 3. Architectural Differences
+
+### 3.1 Original Storage Architecture (OSA)
+
+- **Two-tier model:** every disk group has **one cache device** and **one to seven capacity devices**.
+- Cache tier:
+  - **Hybrid:** flash cache acts as read cache and write buffer (roughly 70% read / 30% write), capacity is magnetic disk.
+  - **All-flash:** cache is used only as a **write buffer**. Capacity is flash.
+- Data services such as **deduplication and compression** operate at **disk-group** level and are **all-flash only**. They are a cluster-wide setting, not per-VM.
+- **RAID-5/6 erasure coding** is available only on **all-flash** OSA.
+- Failure domain: the **disk group**. Losing the cache device takes the entire disk group offline and triggers rebuilds of all its components.
+- Supports a broad hardware range (SATA/SAS/NVMe, 1 GbE for hybrid, 10 GbE minimum for all-flash).
+
+### 3.2 Express Storage Architecture (ESA)
+
+- **Single-tier model:** no dedicated cache device. Every device contributes to capacity **and** performance.
+- Designed for **NVMe** flash and modern multi-core CPUs and high-speed networks.
+- New log-structured filesystem and optimized data path with an **I/O performance leg and capacity leg** for erasure-coded objects, so RAID-5/6 gets near-RAID-1 performance.
+- **Adaptive RAID-5:** the policy automatically picks **2+1** (smaller clusters, roughly 3 to 5 hosts) or **4+1** (larger clusters, 6+ hosts) layouts as the cluster grows.
+- **RAID-6** (4+2) needs enough hosts (6 or more).
+- **Compression is per-object, policy-driven** (enabled by default, can be turned off via the storage policy). **No deduplication** in ESA.
+- **Native, scalable snapshots** with minimal performance penalty.
+- **Encryption:** data-at-rest encryption is applied at the cluster level; plan it at **cluster creation** (verify current behavior for your version). Data-in-transit encryption is also supported.
+- Failure domain: the **individual device**. A single NVMe failure only affects data on that device.
+
+### 3.3 Side-by-Side Comparison
+
+| Feature | OSA | ESA |
+|---|---|---|
+| Storage organization | **Disk groups** (cache + capacity) | **Storage pool** (all devices contribute) |
+| Cache tier | Required (1 per disk group) | **None** |
+| Device types | Flash or magnetic (hybrid), SATA/SAS/NVMe | **NVMe TLC flash only**, ESA-certified |
+| Hybrid (magnetic) support | Yes | **No** (all-flash NVMe only) |
+| Max groups/devices per host | Up to 5 disk groups, 1 cache + up to 7 capacity each | Single storage pool, up to 24 devices (check release notes) |
+| Compression | Per disk group, cluster-wide, all-flash only | **Per object via storage policy** |
+| Deduplication | Yes (all-flash), cluster-wide | **No** |
+| Erasure coding | RAID-5/6, all-flash only | RAID-5/6 with **adaptive RAID-5**, near-RAID-1 performance |
+| Snapshots | Redo-log (vmfsSparse style) based | **Native, scalable** |
+| Failure domain | Disk group | **Single device** |
+| Minimum network | 1 GbE hybrid, 10 GbE all-flash | **10 GbE minimum**, 25 GbE or higher recommended |
+| In-place conversion | Not supported to ESA | Not supported to OSA |
+| Hardware compatibility | vSAN HCL / ReadyNodes | **ESA ReadyNodes** (certified profiles) |
+
+---
+
+## 4. Disk Groups (OSA)
+
+- A **disk group** = **1 cache device + 1 to 7 capacity devices**.
+- A host can have **up to 5 disk groups**, so up to **5 cache + 35 capacity devices**.
+- **Why multiple disk groups?** More cache, smaller failure domains, more parallelism.
+- **Failure behavior:**
+  - Capacity device fails: only that device's components are rebuilt (in a deduplicated disk group, the whole disk group is affected).
+  - Cache device fails: the **entire disk group** is unavailable and its data must resync.
+- **Sizing rule of thumb (all-flash):** write buffer is capped (600 GB effective), so extra cache capacity beyond that does not improve write buffering but can extend endurance.
+- **Management tasks:** claim disks as cache/capacity, create/remove disk groups, evacuate data using maintenance mode options (**Ensure accessibility**, **Full data migration**, **No data migration**).
+
+---
+
+## 5. Storage Pools (ESA)
+
+- A **storage pool** is the set of NVMe devices on a host that vSAN claims. Each device is a performance and capacity contributor.
+- **No cache/capacity role assignment.** You simply claim devices.
+- **Benefits:**
+  - Better capacity efficiency (no devices wasted as cache).
+  - Smaller failure impact (device-level).
+  - Higher throughput and lower latency, particularly for RAID-5/6.
+- **Operational considerations:**
+  - Add capacity by adding **devices** or **hosts**.
+  - Uniform hosts and devices are recommended for predictable performance.
+  - Rebuilds and resyncs are far faster than OSA on similar hardware because of the device-level domain and optimized resync.
+- **Related options** (verify availability for your VCF release): vSAN **ESA stretched clusters**, **2-node** clusters, and **vSAN Max** (disaggregated storage).
+
+---
+
+## 6. ESA Hardware Requirements
+
+Use **vSAN ESA ReadyNodes** and the **VMware Compatibility Guide**. Do not build ESA clusters from arbitrary hardware.
+
+| Component        | Requirement                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| Storage devices  | **NVMe TLC**, listed as ESA-certified (mixed-use endurance class), no SATA/SAS, no magnetic     |
+| CPU              | Modern multi-core server CPUs sized to the ESA ReadyNode profile                                |
+| Memory           | Sized to the ReadyNode profile (typically substantially higher than OSA-era minimums)           |
+| Network          | **Minimum 10 GbE**, **25 GbE or faster recommended** for production, redundant uplinks          |
+| Controller       | Typically no RAID controller in the data path; NVMe devices are presented directly (verify HCL) |
+| Firmware/drivers | Must match the HCL entry; managed through vLCM/cluster images in VCF                            |
+| Hosts            | Per vSAN rules; adaptive RAID-5 (2+1) works from **3 hosts**; RAID-6 needs **6 hosts**          |
+
+**ReadyNode profiles** (for example ESA-AF-0, AF-2, AF-4, and larger) define minimum CPU, memory, device count, and network. AF-0 is the entry profile at 10 GbE. Higher profiles assume 25 GbE or higher. Confirm exact specs in the compatibility guide.
+
+---
+
+## 7. Storage Policies (SPBM) Behavior to Know
+
+- **Failures to tolerate (FTT) and RAID level:**
+  - RAID-1 mirroring: FTT=1 (2 copies), FTT=2 (3 copies).
+  - RAID-5 (FTT=1) and RAID-6 (FTT=2) erasure coding.
+  - ESA gives RAID-5/6 close to RAID-1 performance, so RAID-5/6 is a sensible default for most workloads.
+  - OSA RAID-5/6 has a write-performance cost and requires all-flash.
+- **Host count minimums:** RAID-1 FTT=1 needs 3 hosts, RAID-5 (OSA) needs 4, RAID-6 needs 6. ESA adaptive RAID-5 starts at 3 hosts.
+- **Compression:** OSA is cluster-wide (with dedupe), ESA is policy-based per object.
+- **Space reservation:** thin by default; thick provisioning via object space reservation.
+- **Force provisioning, stripe width, IOPS limits** remain available.
+
+---
+
+## 8. Architecture Choice in VCF
+
+| Scenario | Guidance |
+|---|---|
+| New builds with NVMe ReadyNodes | **ESA** for better performance, efficiency, and snapshots |
+| Existing hardware (SATA/SAS, hybrid) | **OSA** (hardware not eligible for ESA) |
+| Need deduplication | **OSA** (all-flash) |
+| Need hybrid (magnetic capacity) | **OSA** |
+| Want per-VM compression control | **ESA** |
+| Migrating OSA to ESA | New ESA cluster plus workload migration (no in-place conversion) |
+
+In SDDC Manager workflows (create workload domain, add cluster), the **vSAN architecture is chosen at creation**. Make sure the host commissioning pool (hosts commissioned with the matching storage type and network profile) aligns with that choice.
+
+---
+
+## 9. Exam Tips
+
+1. **ESA = NVMe, single-tier, storage pool. OSA = disk groups, cache + capacity.** If a question mentions a "cache device," it is OSA.
+2. **No hybrid in ESA.** Magnetic disks or SATA/SAS devices point to OSA.
+3. **Deduplication is OSA-only.** ESA offers compression only, and it is policy-based.
+4. **You cannot convert OSA to ESA in place.** The answer is a new cluster and migration.
+5. **Failure domain:** disk group (OSA) vs device (ESA). Cache device failure in OSA is the big blast-radius event.
+6. **Adaptive RAID-5** is an ESA concept (2+1 and 4+1).
+7. **Network:** 10 GbE is the floor for ESA (and for OSA all-flash). 25 GbE is the recommendation for ESA production.
+8. **The choice is per cluster.** A VCF instance can contain both OSA and ESA clusters in different domains or clusters. Do not assume one architecture for the whole environment.
+9. **ReadyNodes and the HCL** are the deciding factor for ESA support. Unsupported hardware is not a valid design.
+10. **Watch for "management domain" wording.** vSAN is the principal storage for it. Check your VCF version for which architectures are supported there.
+
+---
+
+## 10. Quick Review Checklist
+
+- [ ] I can draw an OSA disk group and an ESA storage pool.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can list at least five differences between OSA and ESA.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know which data services are OSA-only (dedupe) and which are ESA-only (policy-based compression, native snapshots, adaptive RAID-5).
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know ESA hardware requirements (NVMe, ReadyNode, 10/25 GbE).
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know the architecture cannot be converted in place.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can pick OSA or ESA for a given scenario.
+<details>
+<summary>Explanation</summary>
+
+</details>
+---
+
+## 11. Practice Questions
+
+### Question 1
+
+An administrator is planning a new VCF workload domain using servers with SATA SSD capacity drives and one NVMe drive for caching. The design requires deduplication to maximize usable capacity. Which vSAN architecture should be used?
+
+- A. vSAN ESA, because it is the newest architecture
+- B. vSAN OSA all-flash, with the NVMe as the cache device and SATA SSDs as capacity
+- C. vSAN ESA, with the NVMe device as cache
+- D. vSAN OSA hybrid, with the SATA SSDs as cache
+
+**Answer: B**
+
+**Explanation:** ESA requires ESA-certified NVMe devices only and does not use a cache tier, so SATA SSD capacity drives rule it out (A and C). ESA also does not support deduplication. OSA all-flash supports a dedicated cache device with flash capacity devices and supports deduplication and compression at the disk-group level. Option D is wrong because hybrid uses **magnetic** capacity devices and does not support dedupe.
+
+---
+
+### Question 2
+
+A host in a vSAN OSA cluster loses its cache device. Which statement describes the impact?
+
+- A. Only the data on the failed cache device is lost, and the disk group continues to serve I/O
+- B. The entire disk group becomes unavailable, and its components are rebuilt elsewhere according to the storage policy
+- C. The host leaves the cluster and all of its disk groups fail
+- D. Only the read cache is lost, and the writes are redirected to the capacity devices
+
+**Answer: B**
+
+**Explanation:** In OSA, the **disk group** is the failure domain. The cache device fronts all capacity devices in its disk group, so a cache failure takes the whole disk group offline. vSAN rebuilds the affected components on other disk groups or hosts if the policy and resources allow. The host and its other disk groups are not affected (C). The disk group does not keep operating without its cache (A and D). By contrast, in ESA the failure domain is the individual device.
+
+---
+
+### Question 3
+
+An organization wants to move an existing VCF workload domain cluster from vSAN OSA to vSAN ESA. The existing hosts are new NVMe ESA ReadyNodes that were deployed as OSA. What is the supported approach?
+
+- A. Enable ESA in the vSAN cluster settings, then restart the hosts
+- B. Convert each disk group to a storage pool using the vSphere Client
+- C. Create a new ESA cluster, then migrate the workloads and decommission the OSA cluster
+- D. Upgrade vSAN through vLCM, which automatically converts the architecture
+
+**Answer: C**
+
+**Explanation:** There is **no in-place conversion** between OSA and ESA. The architecture is selected when the cluster is created. The supported path is to build a new ESA cluster (hosts or capacity must be available, with hardware that is ESA-certified and correctly commissioned in SDDC Manager), migrate the VMs with vMotion/Storage vMotion, and retire the old cluster. Settings changes (A), disk group conversion (B), and a lifecycle upgrade (D) do not convert architectures.
+
+---
+
+## 12. Further Study
+
+- VMware Compatibility Guide: vSAN ESA ReadyNodes and device certification
+- vSAN Planning and Deployment documentation (ESA and OSA sections)
+- VCF documentation: Create a workload domain / Add a cluster with vSAN
+- Hands-on: compare storage policy behavior (RAID-1, RAID-5, RAID-6) on an ESA and an OSA cluster in a lab
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vcf-administrator/study-notes/vcf-05-vcenter-esxi-config" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Module 05: vCenter Server & ESXi Configuration in VCF
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VCF Administrator Track
+  </a>
+  <a href="/certifications/vmware/vcf-administrator/study-notes/vcf-07-vsan-spbm-policies" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 07: vSAN Storage Policy Based Management (SPBM) →
+  </a>
+</div>

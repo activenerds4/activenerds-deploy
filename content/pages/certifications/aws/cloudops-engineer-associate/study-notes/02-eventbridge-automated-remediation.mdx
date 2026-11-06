@@ -1,0 +1,171 @@
+---
+title: "Module 02: EventBridge Routing & Automated Remediation Runbooks"
+description: "Event buses, rules, input transformers, DLQs, troubleshooting rules, Systems Manager Automation runbooks, and alarm-to-remediation patterns."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 2
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 1.2 (Skills 1.2.1–1.2.3): analyzing metrics and automating remediation, EventBridge routing and troubleshooting, and Systems Manager Automation runbooks.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 1.2 (Domain 1, 22%)">
+Version 1.1 of the guide replaced "AWS User Notifications and auto scaling" in Skill 1.2.1 with **Kiro** and **AWS DevOps Agent**, and added EventBridge to Skill 3.2.2. The core tested pattern is unchanged: **detect (metric, event, rule) then route (EventBridge/SNS) then act (Lambda, SSM Automation)**.
+</Callout>
+
+---
+
+## 1. EventBridge Fundamentals
+
+| Component | Purpose |
+|---|---|
+| Event bus | Default (AWS service events in this Region), custom (your apps), partner (SaaS) |
+| Rule | Event pattern (JSON match) or schedule; up to **5 targets** per rule |
+| Target | Lambda, SNS, SQS, Step Functions, SSM Automation, Kinesis, another bus, API destination, and more |
+| Input transformer | Reshape or **enrich** the event before delivery (map fields into a template) |
+| Archive and replay | Store events and re-send them to a bus for debugging or recovery |
+| Dead-letter queue | SQS queue per target for events that fail delivery after retries |
+
+Retries default to **24 hours or 185 attempts**, whichever comes first. Event size limit is **256 KB**.
+
+```
+ AWS service event ---+
+ CloudWatch alarm ----+--> Event bus --> Rule (pattern) --> Input transformer --> Target
+ Custom app PutEvents-+                       |                                     |
+                                              +--> no match: dropped                +--> failure --> DLQ (SQS)
+```
+
+```json
+{
+  "source": ["aws.ec2"],
+  "detail-type": ["EC2 Instance State-change Notification"],
+  "detail": { "state": ["stopped", "terminated"] }
+}
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Troubleshooting a rule that never fires">
+
+Work through in order:
+
+1. **Right bus and Region?** Default-bus rules only see events from the same account and Region. Cross-account needs the target bus's resource policy to allow the sender.
+2. **Pattern mismatch.** Matching is **case-sensitive** and exact on values; arrays are "any of". Test with the sandbox or `aws events test-event-pattern`.
+3. **Rule state.** Disabled rules do nothing.
+4. **Target permissions.** Lambda, SNS, SQS, and S3-style targets use the **target's resource policy**. Step Functions, SSM Automation, Kinesis, ECS and similar targets use an **IAM role** on the target.
+5. **Metrics.** `TriggeredRules` up but `FailedInvocations` up means delivery problem; `TriggeredRules` flat means pattern or source problem. Use a DLQ to capture failures.
+6. **Schedule rules** use UTC cron and have minute-level granularity; one-time or timezone-aware needs go to **EventBridge Scheduler**.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Systems Manager Automation Runbooks
+
+Automation executes **runbooks** (SSM documents of type `Automation`) made of steps.
+
+| Action | Use |
+|---|---|
+| `aws:executeAwsApi` | Call any AWS API |
+| `aws:executeScript` | Run inline Python or PowerShell |
+| `aws:runCommand` | Run a command document on instances |
+| `aws:changeInstanceState` | Start, stop, terminate |
+| `aws:waitForAwsResourceProperty` | Poll until a property reaches a value |
+| `aws:branch` / `aws:approve` | Conditional logic and manual approval |
+| `aws:invokeLambdaFunction` | Call a Lambda function |
+
+* **Predefined runbooks** include `AWS-RestartEC2Instance`, `AWS-StopEC2Instance`, `AWS-DisablePublicAccessForSecurityGroup`, `AWS-EnableS3BucketEncryption`, `AWS-UpdateLinuxAmi`.
+* **Execution role:** pass `AutomationAssumeRole`; without it the runbook runs with the caller's permissions.
+* **Scale controls:** targets by tag or resource group, `MaxConcurrency`, `MaxErrors`; multi-account/multi-Region execution is supported.
+* **Triggers:** console or CLI, EventBridge target, Config remediation action, maintenance window, State Manager association, alarm via EventBridge.
+
+```bash
+aws ssm start-automation-execution \
+  --document-name AWS-RestartEC2Instance \
+  --parameters "InstanceId=i-0abc1234567890def,AutomationAssumeRole=arn:aws:iam::111122223333:role/SSMAutomationRole"
+
+aws ssm get-automation-execution --automation-execution-id <id> \
+  --query 'AutomationExecution.[AutomationExecutionStatus,FailureMessage]'
+```
+
+---
+
+## 3. Remediation Patterns
+
+| Trigger | Path | Action |
+|---|---|---|
+| EC2 `StatusCheckFailed_System` | Alarm | EC2 **recover** action (same instance ID, IP, EBS) |
+| High queue depth | Alarm | Auto Scaling policy |
+| Security group opened to 0.0.0.0/0 | Config rule | Remediation action runs `AWS-DisablePublicAccessForSecurityGroup` |
+| Instance stopped unexpectedly | EventBridge | Lambda or Automation restarts it, SNS notifies |
+| Disk nearly full | Alarm (agent metric) | Automation extends volume and filesystem |
+| Console API anomaly | CloudTrail via EventBridge | Notify security, quarantine role |
+
+<Callout variant="tip" title="AWS DevOps Agent and Kiro">
+The guide names **AWS DevOps Agent** (AI-driven incident investigation and operational assistance) and **Kiro** (agentic development tooling) as services in scope for analysis and remediation. They are new, and this guide does not specify depth. Know their purpose at a high level (assist with investigating telemetry and automating fixes) and check the current AWS documentation for exact capabilities before your exam, because they change quickly.
+</Callout>
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Writing a cron-driven script on EC2 to poll for events when an **EventBridge rule** is the managed answer.
+- **Trap 2:** Forgetting that **Lambda and SNS targets need a resource policy**, whereas Step Functions and SSM targets need an **IAM role**.
+- **Trap 3:** Using SSH to fix a fleet when an **Automation runbook** or Run Command with a tag target is expected.
+- **Trap 4:** Expecting events from another Region to hit the default bus; forward them to a bus in the target Region.
+- **Trap 5:** Assuming retries are unlimited. After 24 hours or 185 attempts, events are dropped unless a DLQ is configured.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can diagnose an EventBridge rule that matches in the test tool but the Lambda function never runs.
+<details>
+<summary>Explanation</summary>
+
+Check the Lambda **resource-based policy** allows `events.amazonaws.com` with the rule ARN as source. Check the `FailedInvocations` metric, add an SQS DLQ to the target to capture the error, and confirm the rule and function are in the same Region.
+
+</details>
+
+- [ ] I know how to automatically revert a security group opened to the world.
+<details>
+<summary>Explanation</summary>
+
+Use an AWS Config managed rule (for example `restricted-ssh`) with an **automatic remediation action** that runs the SSM Automation runbook `AWS-DisablePublicAccessForSecurityGroup`, with an `AutomationAssumeRole` that can modify security groups. Alternatively route the CloudTrail event through EventBridge to Lambda.
+
+</details>
+
+- [ ] I can limit blast radius when running an Automation runbook across many instances.
+<details>
+<summary>Explanation</summary>
+
+Target by tag or resource group and set `MaxConcurrency` (for example 10% or a fixed number) and `MaxErrors` so the execution stops after a number of failures. Use rate control mode and, if required, `aws:approve` steps.
+
+</details>
+
+- [ ] I understand which events EventBridge enriches versus filters.
+<details>
+<summary>Explanation</summary>
+
+Event patterns **filter** (decide whether the rule matches). Input transformers **enrich or reshape** the payload sent to the target. Heavier enrichment calling external data uses EventBridge Pipes or a Lambda target.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/01-cloudwatch-monitoring-logging-alarms" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 01: CloudWatch Metrics, Logs, Agent, Alarms & Dashboards
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/03-compute-and-ebs-performance" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 03: EC2, Compute Optimizer & EBS Performance Optimization →
+  </a>
+</div>

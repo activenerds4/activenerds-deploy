@@ -1,0 +1,206 @@
+---
+title: "Module 11: Monitoring, Logging & Troubleshooting Data Pipelines"
+description: "CloudWatch metrics, alarms and Logs, Logs Insights, CloudTrail, SNS alerting, Glue and EMR troubleshooting, and log analytics with Athena and OpenSearch."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 11
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 3.3: extracting logs for audits, deploying logging and monitoring for auditability and traceability, alerts, CloudTrail, CloudWatch Logs, performance troubleshooting for Glue and EMR, and log analysis with Athena, EMR, OpenSearch Service, and CloudWatch Logs Insights (Skills 3.3.1–3.3.8).
+
+<Callout variant="info" title="Exam Blueprint Focus: Observability">
+Match the **signal** to the service: **metrics** (CloudWatch), **application logs** (CloudWatch Logs), **API activity** (CloudTrail), **configuration state** (Config). Then match the **analysis tool** to the volume and query style.
+</Callout>
+
+---
+
+## 1. Observability Services
+
+| Need | Service | Notes |
+|---|---|---|
+| Numeric metrics, alarms, dashboards | **Amazon CloudWatch** | Standard 1-minute (some 5-minute), high-resolution 1-second custom metrics, composite alarms, anomaly detection |
+| App/service logs | **CloudWatch Logs** | Log groups/streams, retention, metric filters, subscription filters, Logs Insights, Live Tail, export to S3 |
+| Who called which API | **AWS CloudTrail** | Management events (default, 90-day Event history), data events (S3 object, Lambda invoke, DynamoDB item), Insights events; trails to S3; **CloudTrail Lake** |
+| Resource configuration history | **AWS Config** | Rules, conformance packs, configuration timeline |
+| Scheduled and event-driven reactions | **EventBridge** | Glue/EMR/Step Functions state changes |
+| Notifications | **SNS** | Alarm actions, email/SMS/Lambda/ChatOps |
+| Dashboards on metrics/logs | **CloudWatch dashboards, Managed Grafana** | Grafana for multi-source dashboards |
+| Search/analytics on logs at scale | **OpenSearch Service**, **Athena**, **EMR** | See section 4 |
+
+```
+ Glue / EMR / Lambda / Redshift / MSK
+        |  metrics                      |  logs                          |  API calls
+        v                               v                                v
+  CloudWatch Metrics ----> Alarm   CloudWatch Logs ---> metric filter   CloudTrail ---> S3 / CloudTrail Lake
+        |                  |            |  subscription filter              |             |
+        v                  v            v                                   v             v
+   Dashboards          SNS topic   Firehose/Lambda/OpenSearch        EventBridge      Athena queries
+```
+
+---
+
+## 2. CloudWatch Logs for Application Data (Skill 3.3.7)
+
+* **Structure:** log group (retention, KMS encryption, data protection policy) → log streams → events.
+* **Retention:** default never expire; set 1 day to 10 years. Cost control = set retention + export to S3.
+* **Metric filters** convert log patterns into metrics (for example, count of `ERROR`) for alarms.
+* **Subscription filters** stream logs in near real time to Kinesis Data Streams, Firehose, or Lambda (and cross-account via destinations).
+* **Export** to S3 (`CreateExportTask`, batch, up to ~12 hours delay) or stream via Firehose.
+* **Agent:** CloudWatch agent (EC2/on-prem, custom metrics) and the Fluent Bit/FireLens for containers; Lambda, Glue, EMR (with cluster logging), and ECS send logs natively.
+* **Log classes:** Standard vs Infrequent Access (cheaper ingestion, fewer features).
+* **Configuration and automation:** define log groups, retention, and filters via IaC; enable **Glue continuous logging** (`--enable-continuous-cloudwatch-log`) and **Spark UI logs to S3** (`--enable-spark-ui`, `--spark-event-logs-path`).
+
+```bash
+aws logs put-retention-policy --log-group-name /aws-glue/jobs/output --retention-in-days 30
+aws logs put-metric-filter --log-group-name /aws-glue/jobs/error \
+  --filter-name ErrorCount --filter-pattern "ERROR" \
+  --metric-transformations metricName=GlueErrors,metricNamespace=DataPipeline,metricValue=1
+aws cloudwatch put-metric-alarm --alarm-name glue-errors --namespace DataPipeline --metric-name GlueErrors \
+  --statistic Sum --period 300 --evaluation-periods 1 --threshold 1 --comparison-operator GreaterThanOrEqualToThreshold \
+  --alarm-actions arn:aws:sns:us-east-1:111122223333:pipeline-alerts
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: CloudWatch Logs Insights queries (Skill 3.3.8)">
+
+Purpose-built query language for ad hoc analysis across one or more log groups. Also supports **OpenSearch PPL and SQL** query modes.
+
+```
+fields @timestamp, @message
+| filter @message like /ERROR/
+| stats count(*) as errors by bin(5m)
+| sort errors desc
+| limit 20
+```
+
+Priced per GB scanned. Use for troubleshooting recent data; for long-term or very large-scale analysis export to S3 and use Athena.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: CloudTrail events, trails, and tracking API calls (Skill 3.3.5)">
+
+* **Management events** (control plane: `CreateBucket`, `StartJobRun`) are logged by default in **Event history** (90 days, free). **Data events** (S3 `GetObject`/`PutObject`, Lambda `Invoke`, DynamoDB item operations) and **Insights** events (unusual API rate/error) must be enabled and are billed.
+* A **trail** delivers events to S3 (and optionally CloudWatch Logs), can be multi-Region, organization-wide, with **log file integrity validation** (SHA-256 digest files) and SSE-KMS.
+* Query with **Athena** (CloudTrail table DDL / partition projection), **CloudTrail Lake** (managed event data store with SQL, up to 7+ years retention options), or CloudWatch Logs Insights.
+* Typical questions: "Who deleted this object / changed this IAM policy / started this Glue job?" → CloudTrail.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Troubleshooting Glue and EMR performance (Skills 3.3.4, 3.3.6)">
+
+**AWS Glue**
+* **Metrics** (`glue.driver.*`, `glue.ALL.jvm.heap.usage`, `glue.ALL.system.cpuSystemLoad`, `numberAllExecutors`), job run insights, **Spark UI** (stages, skewed tasks, shuffle), **profiling/CloudWatch metrics**.
+* Symptoms → fixes: OOM → larger worker type/repartition/avoid `collect`; under-utilized workers → enable auto scaling; long tail tasks → skew; many small files → `groupFiles`; slow reads → pushdown predicates, bounded executions; job stuck in connection → network/SG/endpoint; **Glue job retries** and timeouts.
+
+**Amazon EMR**
+* **Logs:** cluster log URI in S3 (step logs `stderr`/`stdout`, `controller`, YARN containers), **Spark History Server**, **YARN ResourceManager UI**, **Ganglia** (older) / CloudWatch metrics (`YARNMemoryAvailablePercentage`, `HDFSUtilization`, `ContainerPending`).
+* **Fixes:** right-size executors/memory overhead, enable **managed scaling**, use instance fleets and Spot for task nodes (core nodes On-Demand), prefer S3 + EMRFS with consistent layout, fix skew, increase `spark.sql.shuffle.partitions`, avoid too many small files.
+* **Step failures** → check step `stderr`, bootstrap action logs, IAM instance profile/service role, S3 permissions.
+
+**Other**
+* **Redshift:** `STL_`/`SVL_`/`SYS_QUERY_HISTORY`, Advisor, Query Monitoring Rules, WLM queue wait.
+* **Kinesis:** `GetRecords.IteratorAgeMilliseconds` (consumer lag), `WriteProvisionedThroughputExceeded`.
+* **Lambda:** `Errors`, `Throttles`, `Duration`, `ConcurrentExecutions`, `IteratorAge` (stream sources).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Notifications and Alerting (Skill 3.3.3)
+
+* **CloudWatch alarm → SNS → email/SMS/Lambda/ChatOps.** Use composite alarms to reduce noise and **anomaly detection** alarms for dynamic thresholds.
+* **EventBridge rules** on service state changes (Glue job `FAILED`, Step Functions `FAILED`/`TIMED_OUT`, EMR step failure) → SNS/SQS/Lambda.
+* **SQS DLQs** with alarms on `ApproximateNumberOfMessagesVisible`.
+* **AWS Chatbot / Amazon Q Developer in chat applications** to deliver alerts in Slack/Teams.
+
+---
+
+## 4. Analyzing Logs at Scale (Skills 3.3.1, 3.3.2, 3.3.8)
+
+| Tool | Use when | Notes |
+|---|---|---|
+| **CloudWatch Logs Insights** | Recent, interactive troubleshooting in CloudWatch | Per-GB scanned; no infrastructure |
+| **Athena** | Cheap SQL over logs in S3 (CloudTrail, ALB, VPC Flow, S3 access logs) | Partition by date, use projection, Parquet conversion |
+| **Amazon OpenSearch Service** | Full-text search, dashboards (OpenSearch Dashboards), near-real-time log analytics | Ingest via Firehose, subscription filters, OpenSearch Ingestion; use UltraWarm/cold tiers for cost |
+| **Amazon EMR** | Very large volume, custom processing (Spark on terabytes of logs) | Transient clusters, Spot |
+| **Glue** | Convert/clean logs to Parquet | Scheduled ETL |
+
+**Extract logs for audits (Skill 3.3.1):** export CloudWatch Logs to S3, deliver CloudTrail to S3/CloudTrail Lake, use S3 Object Lock for immutable retention, and query with Athena.
+
+**Deploy logging and monitoring for traceability (Skill 3.3.2):** enable CloudTrail org trails, service logs (S3 access logs, VPC Flow Logs, ELB logs, Glue/EMR logs), consistent correlation IDs, structured JSON logging, tags, and central log archive accounts.
+
+---
+
+## 5. Common Traps and Watchouts
+
+* **"Who changed it / who called this API?"** → CloudTrail, not CloudWatch.
+* **"Metric from log text"** → metric filter.
+* **"Stream logs to OpenSearch/S3 in near real time"** → subscription filter (to Firehose/Lambda).
+* **"Retain years of logs cheaply and query occasionally"** → S3 (Glacier tiers) + Athena, not CloudWatch Logs storage.
+* **CloudTrail data events are off by default.**
+* **CloudWatch Logs retention defaults to never expire,** a hidden cost.
+* **Consumer lag on Kinesis** = `IteratorAgeMilliseconds`.
+* **Do not troubleshoot slow Spark by only adding workers;** check skew and small files first.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can pick CloudWatch, CloudTrail, or Config for a given question.
+<details>
+<summary>Explanation</summary>
+
+CloudWatch: metrics, logs, alarms. CloudTrail: API activity (who/what/when/where). Config: resource configuration history and compliance rules.
+
+</details>
+
+- [ ] I can build an alerting path from a log pattern or service event to a notification.
+<details>
+<summary>Explanation</summary>
+
+Log pattern → metric filter → CloudWatch alarm → SNS. Service event (Glue job FAILED) → EventBridge rule → SNS/SQS/Lambda.
+
+</details>
+
+- [ ] I can diagnose slow or failing Glue and EMR jobs.
+<details>
+<summary>Explanation</summary>
+
+Check metrics, Spark UI, and logs for skew, small files, memory pressure, networking, and permissions. Fix with partitioning, worker sizing, auto/managed scaling, pushdown predicates, and Spot for task nodes.
+
+</details>
+
+- [ ] I can choose a log analysis tool for scale and cost.
+<details>
+<summary>Explanation</summary>
+
+Logs Insights for quick recent queries; Athena over S3 for cheap long-term SQL; OpenSearch for interactive search and dashboards; EMR for massive custom processing.
+
+</details>
+
+- [ ] I can enable and query CloudTrail data events and CloudTrail Lake.
+<details>
+<summary>Explanation</summary>
+
+Configure event selectors on a trail (or event data store) for S3/Lambda/DynamoDB data events, deliver to S3/CloudWatch Logs, and query with SQL in CloudTrail Lake or Athena. Enable log file integrity validation for audit.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/10-automating-and-analyzing-data-athena-quicksight" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 10: Automating & Analyzing Data: Athena, Redshift SQL, DataBrew & Quick
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/12-data-quality-sampling-skew" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 12: Data Quality: Glue Data Quality, DataBrew Rules, Sampling & Skew →
+  </a>
+</div>

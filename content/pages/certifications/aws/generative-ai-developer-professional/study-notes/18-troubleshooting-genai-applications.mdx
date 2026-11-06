@@ -1,0 +1,201 @@
+---
+title: "Module 18: Troubleshooting GenAI Applications"
+description: "Context overflow, integration errors, prompt regressions, retrieval failures, and prompt maintenance issues (Task 5.2)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 18
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 5.2 (Skills 5.2.1 - 5.2.5): content handling and context overflow, FM integration issues, prompt engineering problems, retrieval system issues, and prompt maintenance.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 5, Task 5.2">
+Troubleshooting questions give you a **symptom plus evidence** (an error code, a truncated answer, a drop in quality after a change) and ask for the **root cause or best fix**. Build a habit: classify the failure layer first (input, retrieval, prompt, model, integration, output), then pick the tool.
+</Callout>
+
+---
+
+## 1. A Layered Troubleshooting Method
+
+```
+Symptom --> which layer?
+  [Client/API] errors, timeouts, auth        --> Skill 5.2.2
+  [Input/context] truncation, overflow       --> Skill 5.2.1
+  [Retrieval] irrelevant or missing context  --> Skill 5.2.4
+  [Prompt] inconsistent or wrong format      --> Skills 5.2.3, 5.2.5
+  [Model] hallucination, refusal, drift      --> evaluation (Module 17) + monitoring (Module 16)
+```
+
+Start with logs and traces: invocation logs, CloudWatch Logs Insights, and X-Ray (Modules 11 and 16).
+
+---
+
+## 2. Content Handling Issues (Skill 5.2.1)
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `ValidationException` about input length | Prompt plus history plus retrieved context exceeds the context window | Count tokens, truncate, summarize history, retrieve fewer chunks |
+| Answer cuts off mid-sentence | `maxTokens` reached (check `stopReason` equals `max_tokens`) | Raise limit within budget or request concise output |
+| Model ignores information in the middle of a long prompt | Long-context attention weakness ("lost in the middle") | Put key instructions and facts at the start or end, reduce context, rerank |
+| Large documents fail processing | Document exceeds model input | Dynamic chunking, map-reduce summarization |
+| Missing content after ingestion | Parser dropped tables/images or truncated at chunk limit | Review parsing strategy, use a multimodal or advanced parser |
+
+**Diagnostics:** log input token counts per request; compare against the model's context window; inspect `stopReason` and `usage`; replay the failing request with a token counter.
+
+```python
+r = brt.converse(modelId=MID, messages=msgs, inferenceConfig={"maxTokens": 500})
+if r["stopReason"] == "max_tokens":
+    log.warning("truncated", extra={"out": r["usage"]["outputTokens"]})
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Dynamic chunking and map-reduce for oversized input">
+
+When a document exceeds the context window, split it into chunks sized to fit (with overlap), process each chunk independently (summarize or extract) in parallel with a Step Functions Map state, then run a final "reduce" call that combines the partial results. For question answering, retrieve only relevant chunks rather than reading everything. Truncation errors disappear but you now pay for multiple calls, so apply it only where full-document processing is required.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. FM Integration Issues (Skill 5.2.2)
+
+| Error / symptom | Meaning | Resolution |
+|---|---|---|
+| `AccessDeniedException` | IAM lacks permission, model access not granted, or a policy/SCP blocks the model | Check IAM action and resource ARNs (including inference profile and underlying model ARNs), enable model access, review SCPs |
+| `ValidationException` | Malformed request, unsupported parameter, wrong body schema, input too long | Validate against the model's request schema; use Converse for portability |
+| `ThrottlingException` | Rate or token quota exceeded | Backoff with jitter, quota increase, cross-Region inference, provisioned throughput |
+| `ModelTimeoutException` | Model took too long | Lower output size, stream, retry |
+| `ModelNotReadyException` | Model is loading or scaling | Retry with backoff |
+| `ResourceNotFoundException` | Wrong model ID or Region | Verify the model ID, Region availability, and inference profile |
+| `ServiceQuotaExceededException` | Account limit | Request increase |
+| Gateway 504 while Lambda succeeds | Integration timeout shorter than generation | Stream or use async pattern |
+| Works in one Region, fails in another | Model not available in that Region | Use an inference profile or choose a supported Region |
+
+**Method:** read the exact error code, check request validation, confirm Region and model ID, inspect IAM with CloudTrail and the IAM policy simulator, and examine responses and `stopReason`.
+
+---
+
+## 4. Prompt Engineering Problems (Skill 5.2.3)
+
+| Symptom | Diagnosis | Remedy |
+|---|---|---|
+| Inconsistent output format | Ambiguous format instruction | Explicit schema, examples, structured tool-use output, schema validation and retry |
+| Ignores constraints | Instruction buried or conflicting | Reorder, simplify, put constraints in the system prompt, test variants |
+| Different answers for the same question | High temperature or underspecified prompt | Lower temperature, tighten instructions, add examples |
+| Quality dropped after change | No regression testing | Compare versions on the golden dataset, revert via prompt version |
+| Over-refusal | Safety wording or guardrail threshold too strict | Adjust guardrail strength, clarify legitimate use in context |
+
+**Tools:** prompt testing frameworks (golden dataset runners), **version comparison** using Bedrock Prompt Management variants and versions, and **systematic refinement**: change one variable at a time and measure.
+
+---
+
+## 5. Retrieval System Issues (Skill 5.2.4)
+
+| Symptom | Probable cause | Remedy |
+|---|---|---|
+| Relevant document never retrieved | Poor chunking, wrong embedding model, content never ingested, filter too strict | Verify ingestion job status, check chunk content, review metadata filters, evaluate alternative embeddings |
+| Right doc retrieved but low rank | No reranker, weak scoring | Add reranker, hybrid search |
+| Exact term queries fail | Pure semantic search | Add keyword (hybrid) search |
+| Quality degraded over time | **Embedding or data drift**, stale index | Monitor retrieval metrics, refresh data, re-embed when the model changes |
+| Empty or zero results | Dimension mismatch, wrong index/alias, permissions | Check embedding dimension equals index mapping; check vector store access policies |
+| Slow search | Unoptimized index, too many results, cold caches | Tune HNSW, shards, replicas; reduce k; query preprocessing |
+| Contradictory or outdated answers | Multiple versions of the same document | Version metadata, deletion handling, recency filter |
+
+**Embedding quality diagnostics:** compute similarity between known related and unrelated pairs; inspect nearest neighbors for sample queries; visualize clusters; compare candidate embedding models on a labeled query set. **Vectorization issues:** wrong dimensions, unnormalized vectors when the index expects normalized, truncated input exceeding the embedding model limit.
+
+```
+Retrieval triage
+ 1 Is the content in the index? (ingestion job status, document count)
+ 2 Is the chunk well-formed? (inspect text, size, metadata)
+ 3 Does vector search return it for a paraphrase? (embedding/index config)
+ 4 Does a keyword query return it? (hybrid need)
+ 5 Is it ranked in top-k? (reranker, k, filters)
+```
+
+---
+
+## 6. Prompt Maintenance Issues (Skill 5.2.5)
+
+Prompts degrade as products, data, and models change.
+
+| Issue | Tooling |
+|---|---|
+| Prompt confusion (conflicting or bloated instructions) | Template testing and **CloudWatch Logs** analysis of failing prompts and responses |
+| Prompt observability | **X-Ray** pipelines tracing prompt assembly, retrieval, and model call as subsegments with template version annotations |
+| Format inconsistencies after updates | **Schema validation** on outputs, alarms on validation failure rate |
+| Template sprawl | Centralize in Prompt Management, retire unused variants |
+| Model version change breaks prompts | Re-run the regression suite before switching; pin model versions |
+| Systematic refinement | Maintain a change log, A/B test, and measure against baselines |
+
+```python
+from aws_xray_sdk.core import xray_recorder
+with xray_recorder.in_subsegment("prompt_assembly") as seg:
+    seg.put_annotation("template_version", "7")
+    seg.put_metadata("ctx_tokens", ctx_tokens)
+```
+
+---
+
+## 7. Exam Traps & Common Distractors
+
+- **Trap 1:** Blaming the model for a failure caused by retrieval, truncation, or an integration error. Identify the layer first.
+- **Trap 2:** Raising `maxTokens` to fix an input-length `ValidationException`.
+- **Trap 3:** Rewriting the prompt when retrieved context is missing.
+- **Trap 4:** Ignoring embedding dimension or model mismatch after a model change.
+- **Trap 5:** Fixing a gateway timeout by increasing Lambda timeout alone.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can tell input overflow from output truncation.
+<details>
+<summary>Explanation</summary>
+
+Input overflow produces a request-level ValidationException because tokens exceed the context window; fix by reducing input. Output truncation returns a normal response with stopReason max_tokens; fix by adjusting the output limit or requesting concise answers.
+
+</details>
+
+- [ ] I can map common Bedrock error codes to causes.
+<details>
+<summary>Explanation</summary>
+
+AccessDenied: IAM, model access, or SCP. Validation: bad schema or oversize input. Throttling: quotas, resolved with backoff, quota increases, cross-Region, or provisioned throughput. ModelTimeout: long generation. ResourceNotFound: wrong model ID or Region. ServiceQuotaExceeded: account limit.
+
+</details>
+
+- [ ] I can troubleshoot a RAG system that returns irrelevant context.
+<details>
+<summary>Explanation</summary>
+
+Confirm ingestion and chunk content, check filters and embedding dimensions, test paraphrase and keyword queries, add hybrid search or reranking, tune chunking, and monitor for drift. Verify retrieval separately from generation.
+
+</details>
+
+- [ ] I can set up prompt observability.
+<details>
+<summary>Explanation</summary>
+
+Instrument prompt assembly, retrieval, and model calls with X-Ray subsegments annotated by template version, log prompts and outputs under redaction rules, track schema validation failures, and compare versions on a golden dataset.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/17-evaluation-systems-llm-as-judge-rag-agents" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 17: Evaluation Systems: Model, RAG, Agent & Deployment Validation
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    ✓ Complete: Back to Study Guide Hub →
+  </a>
+</div>

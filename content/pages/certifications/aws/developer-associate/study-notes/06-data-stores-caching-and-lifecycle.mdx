@@ -1,0 +1,229 @@
+---
+title: "Module 06: Choosing Data Stores: S3, RDS, Aurora, ElastiCache & Data Lifecycles"
+description: "Access-pattern-driven store selection, S3 storage classes and lifecycle rules, multipart uploads, RDS Proxy, ElastiCache strategies, and retention."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 6
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Development with AWS Services
+
+<Callout variant="info" title="Exam Focus: Development with AWS Services (Skills 1.3.1, 1.3.2, 1.3.3)">
+Pick the right data store for an access pattern, apply a caching strategy that fits it, and manage data lifecycles (S3 Lifecycle, TTL, retention). Architecture design is out of scope, but **recognizing the best-fit store from a short scenario is not**.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Start From the Access Pattern, Not the Technology">
+
+Ask four questions in order: (1) **What is the shape of the data** (key-value, relational with joins, objects/blobs, documents to search)? (2) **What are the read and write patterns** (point lookups, range queries, ad hoc SQL, full-text search)? (3) **What latency and scale** are required? (4) **What consistency and transaction guarantees** are needed?
+
+* **Primary Trade-off:** Managed simplicity and horizontal scale (DynamoDB, S3) vs relational flexibility (RDS, Aurora).
+* **Exam Trap:** Do not choose a relational database when the scenario describes simple key lookups at massive scale with single-digit-millisecond latency, and do not choose DynamoDB when it describes complex joins and ad hoc SQL reporting.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Data Store Selection Table
+
+| Access Pattern | Best Fit | Why |
+|---|---|---|
+| Key-value or document lookups, massive scale, millisecond latency, serverless | **DynamoDB** | Partitioned, auto-scaling, TTL, streams |
+| Relational model, joins, transactions, existing SQL apps | **RDS** or **Aurora** | ACID, SQL, indexes |
+| Highest-performance relational with MySQL/PostgreSQL compatibility | **Aurora** | Shared distributed storage, up to 15 read replicas, fast failover |
+| Sub-millisecond reads of hot data, sessions, leaderboards | **ElastiCache** | In-memory |
+| Objects, media, logs, backups, data lake, static assets | **S3** | Durable, cheap, unlimited objects up to 5 TB each |
+| SQL over files in S3 without loading them | **Athena** | Serverless query on S3 |
+| Full-text search, log analytics, faceted search | **OpenSearch Service** | Inverted indexes |
+| Shared POSIX file system across many instances or Lambda | **EFS** | NFS, elastic |
+| Block volume for a single EC2 instance | **EBS** | Low-latency block storage |
+| Long-term cold archive | **S3 Glacier classes** | Lowest storage cost |
+
+---
+
+## 2. Amazon S3 for Developers
+
+* **Strong read-after-write consistency** for all PUTs, overwrites, and deletes. (Old advice about eventual consistency for overwrites is obsolete.)
+* **Performance:** at least **3,500 PUT/COPY/POST/DELETE and 5,500 GET/HEAD requests per second per prefix**; spread across prefixes to scale. Use **byte-range fetches** for parallel downloads and **S3 Transfer Acceleration** for long-distance uploads.
+* **Multipart upload:** recommended above ~100 MB, **required above 5 GB**; max object 5 TB, up to 10,000 parts, part size 5 MiB to 5 GiB. Add a lifecycle rule to **abort incomplete multipart uploads** or they keep costing money.
+* **Versioning** protects against overwrites and deletes (a delete adds a **delete marker**). **Object Lock** (WORM) provides retention and legal holds.
+* **Encryption:** all new objects are encrypted with SSE-S3 by default (Module 09).
+* **Access:** bucket policies, IAM, presigned URLs (Module 07), Block Public Access, CORS for browser access.
+
+### Storage Classes
+
+| Class | Retrieval | Min Duration | Use |
+|---|---|---|---|
+| **Standard** | Immediate | None | Active data |
+| **Intelligent-Tiering** | Immediate (auto-moves by access pattern) | None | Unknown or changing access |
+| **Standard-IA** | Immediate, retrieval fee | 30 days | Infrequent, multi-AZ |
+| **One Zone-IA** | Immediate, retrieval fee | 30 days | Re-creatable, single AZ |
+| **Glacier Instant Retrieval** | Milliseconds | 90 days | Rare access, instant need |
+| **Glacier Flexible Retrieval** | Minutes to hours | 90 days | Archives |
+| **Glacier Deep Archive** | Hours (typically up to 12 to 48) | 180 days | Long-term compliance |
+
+### S3 Lifecycle Rules (Skill 1.3.1)
+
+Rules are scoped by prefix, tags, or object size and apply two kinds of actions: **Transition** (move to a cheaper class) and **Expiration** (delete). You can target **noncurrent versions** separately and clean up **expired delete markers** and **incomplete multipart uploads**.
+
+```json
+{
+  "Rules": [{
+    "ID": "logs-tiering",
+    "Status": "Enabled",
+    "Filter": { "Prefix": "logs/" },
+    "Transitions": [
+      { "Days": 30, "StorageClass": "STANDARD_IA" },
+      { "Days": 90, "StorageClass": "GLACIER" }
+    ],
+    "Expiration": { "Days": 365 },
+    "NoncurrentVersionExpiration": { "NoncurrentDays": 30 },
+    "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+  }]
+}
+```
+
+```bash
+aws s3api put-bucket-lifecycle-configuration --bucket my-bucket --lifecycle-configuration file://lifecycle.json
+```
+
+---
+
+## 3. Relational Databases: RDS and Aurora
+
+| Feature | Multi-AZ | Read Replicas |
+|---|---|---|
+| Purpose | **High availability and failover** | **Read scaling** (and cross-Region DR) |
+| Replication | Synchronous to a standby | Asynchronous |
+| Standby serves reads? | No (classic Multi-AZ instance deployment) | Yes |
+| Failover | Automatic (DNS endpoint flips) | Manual promotion |
+
+* **Aurora:** storage replicated six ways across three AZs; up to **15 replicas**; **cluster (writer) endpoint**, **reader endpoint** (load-balances replicas), and custom endpoints; **Aurora Serverless v2** scales capacity automatically.
+* **Automated backups:** retention 1 to 35 days with point-in-time restore; snapshots are manual and persist until deleted.
+* **RDS Proxy:** pools and shares database connections, essential for **Lambda** (thousands of concurrent environments can exhaust `max_connections`). It also supports IAM authentication and Secrets Manager credentials, and reduces failover time.
+* **Authentication:** username and password (store in **Secrets Manager** with managed rotation) or **IAM database authentication** (short-lived tokens).
+* **Encryption:** KMS at rest (must be chosen at creation; to encrypt an existing unencrypted instance, snapshot, copy encrypted, restore), TLS in transit.
+* **Parameter groups** hold engine settings; **option groups** add engine features.
+
+---
+
+## 4. Amazon ElastiCache and Caching Strategies (Skill 1.3.3)
+
+| Engine | Strengths | Choose When |
+|---|---|---|
+| **Redis OSS / Valkey** | Rich data types (sorted sets, hashes, lists), replication, **Multi-AZ failover**, persistence, pub/sub, backup/restore | Leaderboards, sessions, queues, anything needing durability or HA |
+| **Memcached** | Simple, **multi-threaded**, horizontal sharding, no persistence or replication | Simple object caching where loss is acceptable |
+
+ElastiCache lives **inside your VPC** (no public endpoint); Lambda and other clients must reach it through VPC networking.
+
+| Strategy | How It Works | Pros | Cons |
+|---|---|---|---|
+| **Lazy loading (cache-aside)** | Read cache; on miss read DB then write to cache | Only caches requested data; cache failure is survivable | Miss penalty; stale data until TTL |
+| **Write-through** | Write to DB and cache together | Cache always fresh | Write latency; caches data never read |
+| **TTL** | Expire entries after a time | Bounds staleness; frees memory | Needs sensible values |
+
+Combine **lazy loading + TTL** (+ write-through for hot data) in practice. Beware **thundering herd** (many misses at once when a hot key expires): add jittered TTLs.
+
+```python
+def get_user(uid):
+    cached = redis.get(f"user:{uid}")
+    if cached:
+        return json.loads(cached)
+    user = db.query_user(uid)                    # cache miss
+    redis.setex(f"user:{uid}", 300, json.dumps(user))   # TTL 300 s
+    return user
+```
+
+**Pick the cache to match the store:** DynamoDB reads → **DAX** (API-compatible, no app logic); relational or arbitrary computed results → **ElastiCache**; static or API responses at the edge → **CloudFront** or API Gateway cache. Module 16 compares them in depth.
+
+---
+
+## 5. Data Lifecycle and Retention Cheat Sheet
+
+| Service | Mechanism | Default or Limit |
+|---|---|---|
+| DynamoDB | **TTL** attribute (epoch seconds) | Deleted free, typically within ~48 hours of expiry |
+| S3 | **Lifecycle rules**, Object Lock retention | Rules by prefix, tag, or size |
+| SQS | Message retention period | 4 days default, 1 minute to 14 days |
+| Kinesis Data Streams | Retention | 24 hours default, up to 365 days |
+| DynamoDB Streams | Fixed | 24 hours |
+| CloudWatch Logs | Log group retention | **Never expires by default**; set it |
+| RDS | Backup retention | 1 to 35 days |
+| ECR | Lifecycle policies | Expire images by age or count (Module 11) |
+| Secrets Manager | Version staging labels, deletion recovery window | 7 to 30 days |
+
+---
+
+## 6. Common Exam Traps and Scenario Distractors
+
+* "Reduce storage cost for data accessed unpredictably" → **S3 Intelligent-Tiering**.
+* "Logs must be kept 7 years but rarely read" → lifecycle to **Glacier Deep Archive** (check retrieval time tolerance).
+* "Standby replica improves read performance" → **false**; use **read replicas** (or Aurora readers).
+* "Lambda exhausts RDS connections during a spike" → **RDS Proxy**.
+* "Upload a 12 GB file reliably" → **multipart upload** (required above 5 GB).
+* "Cache must survive node failure and support sorted sets" → **Redis/Valkey**, not Memcached.
+* "Orphaned multipart upload parts inflate the bill" → lifecycle **AbortIncompleteMultipartUpload**.
+* "Sessions that should disappear after 30 minutes with no cleanup code" → DynamoDB **TTL** or ElastiCache **TTL**.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] An e-commerce site needs sub-millisecond reads for product pages backed by RDS, with minimal stale data after price changes. Which caching approach?
+<details>
+<summary>Explanation</summary>
+
+**ElastiCache** with **lazy loading plus write-through** (or invalidate on write) and a modest TTL as a safety net.
+
+</details>
+- [ ] A reporting app overloads the primary RDS instance with heavy read queries. What is the most direct fix?
+<details>
+<summary>Explanation</summary>
+
+Add **read replicas** (or Aurora readers) and direct reporting to the reader endpoint. Multi-AZ standbys do not serve read traffic in the classic deployment.
+
+</details>
+- [ ] Objects in a bucket are read frequently for 30 days, then almost never, but must stay instantly retrievable. Which lifecycle?
+<details>
+<summary>Explanation</summary>
+
+Transition from Standard to **Standard-IA** (or **Glacier Instant Retrieval**) after 30 days. Flexible Retrieval or Deep Archive would not be instant.
+
+</details>
+- [ ] A function that writes to Aurora fails with "too many connections" during traffic bursts. Fix?
+<details>
+<summary>Explanation</summary>
+
+Put **RDS Proxy** between Lambda and the database to pool connections, and reuse connections outside the handler.
+
+</details>
+- [ ] Which is true about S3 consistency today?
+<details>
+<summary>Explanation</summary>
+
+S3 provides **strong read-after-write consistency** for object PUTs, overwrites, deletes, and list operations. No application workaround is needed.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/05-amazon-dynamodb" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 05: Amazon DynamoDB: Keys, Capacity Math, Indexes & Streams
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/07-iam-sts-and-programmatic-access" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 07: IAM Policies, STS, Programmatic Access & Presigned URLs →
+  </a>
+</div>

@@ -1,0 +1,223 @@
+---
+title: "Module 02: AWS Lambda Development, Configuration & Event Handling"
+description: "Execution lifecycle, memory and timeout limits, VPC access, event source mappings, destinations, DLQs, layers, and concurrency controls."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 2
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Development with AWS Services
+
+<Callout variant="info" title="Exam Focus: Development with AWS Services (Task 1.2)">
+Task 1.2 skills 1.2.1 to 1.2.4: VPC access, configuration (memory, concurrency, timeout, runtime, handler, layers, extensions), event lifecycles and error handling (destinations, DLQs), and integrations with event source mappings. Lambda is the single most tested compute service on DVA exams, and **performance tuning of Lambda now lives in Domain 4** (Module 16).
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Execution Environment Lifecycle and Why Code Placement Matters">
+
+Lambda runs your code in an isolated **execution environment** with three phases:
+
+1. **Init:** start extensions, start the runtime, run your function's static code (everything outside the handler).
+2. **Invoke:** run the handler. The environment is then frozen and may be **reused** for later invocations (a warm start).
+3. **Shutdown:** the environment is terminated.
+
+A **cold start** is an invocation that must create a new environment and run Init. Put expensive, reusable work (SDK clients, DB connections, config loading) **outside the handler** so warm invocations skip it. Use `/tmp` for per-environment scratch space, but never assume it persists between environments.
+
+* **Failure Mode:** Variables outside the handler survive across warm invocations, so never store per-request or per-user data in globals.
+* **Exam Trap:** "Reduce latency from repeated initialization" → move client creation outside the handler. "Reduce cold starts for a latency-critical function" → provisioned concurrency (or SnapStart for supported runtimes).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Configuration Limits Worth Memorizing
+
+| Setting | Value | Notes |
+|---|---|---|
+| Memory | 128 MB to 10,240 MB | CPU and network scale **proportionally** with memory (about 1 vCPU at 1,769 MB) |
+| Timeout | Up to **900 seconds** (15 min), default 3 s | API Gateway still cuts sync calls at its own limit (Module 03) |
+| Ephemeral storage (`/tmp`) | 512 MB default, up to 10,240 MB | Billed above 512 MB |
+| Environment variables | 4 KB total | Encrypted at rest; use KMS CMK or Secrets Manager for secrets |
+| Deployment package (.zip) | 50 MB zipped (direct upload), 250 MB unzipped including layers | Larger: upload via S3 or use a container image |
+| Container image | Up to 10 GB | Image must implement the Lambda runtime interface (use AWS base images) |
+| Layers | Up to 5 per function | Count toward the 250 MB unzipped limit |
+| Synchronous payload | 6 MB request and response | Use S3 pointers for bigger data |
+| Asynchronous payload | 1 MB (older material says 256 KB) | Verify current quotas before the exam |
+| Default account concurrency | 1,000 concurrent executions per Region | Soft limit, can be raised |
+
+**Handler** format examples: `index.handler` (Node.js: file `index`, export `handler`), `app.lambda_handler` (Python). **Runtimes** are managed language versions; use a **container image** or **custom runtime** for anything else. **Architectures:** `x86_64` or `arm64` (Graviton, usually lower cost per unit of work).
+
+---
+
+## 2. Invocation Types and Error Behavior
+
+| Invocation | Who Calls | Retry Behavior | Where Errors Go |
+|---|---|---|---|
+| **Synchronous** (`RequestResponse`) | API Gateway, ALB, SDK default, Function URL | **None** by Lambda; the caller must retry | Returned to the caller |
+| **Asynchronous** (`Event`) | S3, SNS, EventBridge, CLI `--invocation-type Event` | Lambda retries **2 more times** (configurable 0 to 2); event can wait up to **6 hours** (configurable max event age) | **Destination** (on failure) or **DLQ** after retries exhausted |
+| **Poll-based** (event source mapping) | SQS, Kinesis, DynamoDB Streams, MSK | Depends on the source (see below) | Source-specific DLQ or on-failure destination |
+
+### Destinations vs Dead-Letter Queues (Async Only)
+
+| Feature | Destinations | DLQ (legacy) |
+|---|---|---|
+| Triggers | **On success and on failure** | Failure only |
+| Targets | SQS, SNS, Lambda, EventBridge (and S3 for failures in newer features) | SQS or SNS |
+| Payload | Includes request, response, error context | Original event only |
+| Recommendation | **Preferred** for new designs | Still supported |
+
+**Important:** destinations and the function-level DLQ apply to **asynchronous** invocations. For **SQS** event sources, configure the DLQ on the **source queue** (redrive policy), not on the Lambda function.
+
+```bash
+# Async invoke with a test payload (v2 CLI needs the binary format flag)
+aws lambda invoke --function-name my-fn --invocation-type Event \
+  --cli-binary-format raw-in-base64-out --payload '{"orderId":"123"}' out.json
+
+aws lambda put-function-event-invoke-config --function-name my-fn \
+  --maximum-retry-attempts 1 --maximum-event-age-in-seconds 3600 \
+  --destination-config '{"OnFailure":{"Destination":"arn:aws:sqs:us-east-1:111122223333:fn-failures"}}'
+```
+
+---
+
+## 3. Event Source Mappings (Polling Integrations)
+
+An **event source mapping (ESM)** is a Lambda-managed poller that reads from a source and invokes your function with a **batch**.
+
+| Source | Ordering | Failure Behavior | Key Settings |
+|---|---|---|---|
+| **SQS standard** | No ordering | Failed batch becomes visible again after the visibility timeout; after `maxReceiveCount` it goes to the **queue's DLQ** | Batch size (up to 10,000 with batch window), `ReportBatchItemFailures`, maximum concurrency |
+| **SQS FIFO** | Per message group | Failure blocks later messages in that group | Same |
+| **Kinesis / DynamoDB Streams** | **Per shard** | A failing batch is **retried until it succeeds or expires**, blocking that shard | `BisectBatchOnFunctionError`, `MaximumRetryAttempts`, `MaximumRecordAgeInSeconds`, on-failure destination, `ParallelizationFactor` (1 to 10) |
+
+**Rules of thumb**
+
+* Set the SQS **visibility timeout to at least 6 times the function timeout** so messages are not redelivered while still processing.
+* Use **partial batch responses** (`batchItemFailures`) so one bad record does not force the whole batch to retry.
+* Make handlers **idempotent**: sources deliver **at least once**.
+* **Event filtering** on the ESM drops unwanted records before invocation (and avoids charges).
+
+```python
+def handler(event, context):
+    failures = []
+    for record in event["Records"]:
+        try:
+            process(record["body"])
+        except Exception:
+            failures.append({"itemIdentifier": record["messageId"]})
+    return {"batchItemFailures": failures}      # requires ReportBatchItemFailures enabled
+```
+
+---
+
+## 4. Lambda in a VPC (Skill 1.2.1)
+
+By default a function runs in an AWS-managed network with internet access. To reach **private resources** (RDS, ElastiCache, internal services), attach the function to **subnets and security groups** in your VPC. Lambda creates shared elastic network interfaces (Hyperplane ENIs).
+
+```
+Function in private subnet ──> RDS / ElastiCache in the VPC           ✔
+Function in private subnet ──> Internet or public AWS endpoints       ✘ unless NAT gateway or VPC endpoint
+Function in PUBLIC subnet  ──> Internet                               ✘ (no public IP is assigned to Lambda ENIs)
+```
+
+* Execution role needs the VPC permissions (managed policy `AWSLambdaVPCAccessExecutionRole`).
+* For AWS APIs (S3, DynamoDB, Secrets Manager), prefer **VPC endpoints** (gateway for S3 and DynamoDB, interface/PrivateLink for most others) over NAT where possible.
+* Use **at least two subnets in different AZs** for resilience.
+* Connect to relational databases through **RDS Proxy** to pool connections (Module 06 and 16).
+
+---
+
+## 5. Layers, Extensions, Versions, Aliases, and URLs
+
+* **Layers:** shared libraries or runtime helpers extracted to `/opt`. They reduce package size and let you update a dependency in one place, but you must **publish a new layer version and update functions** to adopt it.
+* **Extensions:** run alongside your code. **Internal** extensions run inside the runtime process; **external** extensions are separate processes and can continue during shutdown (used for monitoring, secrets caching, AppConfig).
+* **Versions** are immutable snapshots; `$LATEST` is mutable. **Aliases** are named pointers (`prod`, `dev`) that support **weighted traffic shifting** between two versions for canary releases.
+* **Function URLs** give a built-in HTTPS endpoint with `AWS_IAM` or `NONE` auth; they are simpler than API Gateway but lack its feature set.
+* **SnapStart** (supported runtimes) snapshots an initialized environment to cut cold-start latency.
+* **Resource-based policy** controls **who may invoke** the function (for example S3 or another account); the **execution role** controls **what the function may call**.
+
+---
+
+## 6. Concurrency Controls
+
+| Control | What It Does | Cost | Note |
+|---|---|---|---|
+| **Unreserved** (default) | Shares the account pool | Free | Noisy neighbors can starve each other |
+| **Reserved concurrency** | **Guarantees and caps** a function's slice of the pool | Free | Setting it to **0** throttles all invocations (kill switch) |
+| **Provisioned concurrency** | Keeps environments **pre-initialized** | Billed while configured | Applies to a **version or alias**, not `$LATEST` |
+
+Scaling rate is limited (new execution environments are added in bursts per function), so extremely spiky traffic may see throttles (**HTTP 429 / `TooManyRequestsException`**) even under the account limit. Throttled async invocations are retried; throttled sync invocations return the error to the caller. Deep tuning is covered in Module 16.
+
+---
+
+## 7. Common Exam Traps and Scenario Distractors
+
+* "Function in a VPC cannot call DynamoDB or Secrets Manager" → add a VPC endpoint or NAT gateway; moving it to a public subnet does nothing.
+* "Messages processed twice" → at-least-once delivery; make the handler idempotent and raise the visibility timeout.
+* "Poison message blocks the Kinesis shard" → bisect batch, limit retries and record age, add an on-failure destination.
+* "Capture failed async events with the original payload and error details" → **destination on failure** (more detail than a DLQ).
+* "Guarantee capacity for a critical function and cap a noisy one" → reserved concurrency (provisioned concurrency is for latency, not for capping).
+* "Share one library across 20 functions" → layer. "Package exceeds limits or needs 3 GB of ML dependencies" → container image.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A function is attached to private subnets and now times out calling the Secrets Manager API. What are two valid fixes?
+<details>
+<summary>Explanation</summary>
+
+Create an **interface VPC endpoint** for Secrets Manager, or route the private subnet through a **NAT gateway** in a public subnet. Lambda ENIs never receive public IPs, so a public subnet alone does not help.
+
+</details>
+- [ ] SQS messages are being processed twice while the function is still running. What setting is wrong?
+<details>
+<summary>Explanation</summary>
+
+The queue's **visibility timeout** is shorter than the function's processing time. Set it to at least six times the function timeout, and ensure idempotent processing.
+
+</details>
+- [ ] You need to know when an async invocation fails after retries, including the error message. Which feature?
+<details>
+<summary>Explanation</summary>
+
+A **Lambda destination (on failure)**. It includes the request context and error details. A DLQ only keeps the original event.
+
+</details>
+- [ ] Which concurrency setting reduces cold-start latency for the `prod` alias?
+<details>
+<summary>Explanation</summary>
+
+**Provisioned concurrency** configured on the alias (or version). Reserved concurrency guarantees and caps capacity but does not pre-initialize environments.
+
+</details>
+- [ ] A Kinesis-triggered function keeps failing on one malformed record and the stream falls behind. What do you configure?
+<details>
+<summary>Explanation</summary>
+
+Enable **BisectBatchOnFunctionError**, set **MaximumRetryAttempts** and **MaximumRecordAgeInSeconds**, and add an **on-failure destination** so bad records are parked and the shard keeps moving. Watch the `IteratorAge` metric.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/01-developing-on-aws-sdks-resilience-ai-tools" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 01: Developing on AWS: SDKs, Resilience Patterns & AI-Assisted Development
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/03-amazon-api-gateway" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 03: Amazon API Gateway: REST vs HTTP APIs, Integrations & Validation →
+  </a>
+</div>

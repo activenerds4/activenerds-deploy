@@ -57,13 +57,20 @@ function buildBreadcrumbs(segments: string[]) {
       .join(" ");
 
     if (seg.toLowerCase() === "vcf") label = "VCF";
-    if (seg.toLowerCase() === "vks-tanzu") label = "VKS Tanzu";
     if (seg.toLowerCase() === "vmware") label = "VMware";
-    if (seg.toLowerCase() === "certs-central") label = "Certs Central";
+    if (seg.toLowerCase() === "certifications") label = "Certifications";
     if (seg.toLowerCase() === "study-notes") label = "Study Notes";
-    if (seg.toLowerCase() === "vcf9-architect") label = "VCF 9.0 Architect";
-    if (seg.toLowerCase() === "vcf-administrator") label = "VCF Administrator";
+    if (seg.toLowerCase() === "mock-tests") label = "Mock Tests";
+    if (seg.toLowerCase() === "flash-cards") label = "Flash Cards";
+    if (seg.toLowerCase() === "vcf9-architect") label = "Cloud Foundation Architect (2V0-13.25)";
+    if (seg.toLowerCase() === "vcf-administrator") label = "Cloud Foundation Administrator (2V0-17.25)";
+    if (seg.toLowerCase() === "vks-tanzu") label = "VCF vSphere Kubernetes Service (3V0-24.25)";
     if (seg.toLowerCase() === "learning") label = "Deep Learning";
+    if (seg.toLowerCase() === "aws") label = "AWS";
+    if (seg.toLowerCase() === "kubernetes") label = "Kubernetes";
+    if (seg.toLowerCase() === "ai-ml") label = "AI & ML";
+    if (seg.toLowerCase() === "hashicorp") label = "HashiCorp";
+    if (seg.toLowerCase() === "azure") label = "Azure";
 
     return { label, path };
   });
@@ -108,7 +115,7 @@ const MdxSubPage = () => {
     if (pageData.frontmatter.layout === "article") return true;
     if (pageData.frontmatter.layout === "hub") return false;
 
-    // In certs-central study notes: if it has 5 or more path segments, it is a module article
+    // In certification study notes: if it has 5 or more path segments, it is a module article
     const segments = slug.split("/").filter(Boolean);
     if (segments.includes("study-notes") && segments.length >= 5) {
       return true;
@@ -122,14 +129,14 @@ const MdxSubPage = () => {
     if (segments.length >= 2) {
       const parentPath = "/" + segments.slice(0, segments.length - 1).join("/");
       const trackFolder = segments[segments.length - 2];
-      let name = "Study Notes";
-      if (trackFolder === "vcf-administrator") name = "VCF Administrator Track";
-      if (trackFolder === "vcf9-architect") name = "VCF 9.0 Architect Track";
-      if (trackFolder === "vks-tanzu") name = "Kubernetes (VKS Tanzu) Track";
+      let name = "Certification Track";
+      if (trackFolder === "vcf-administrator") name = "Cloud Foundation Administrator (2V0-17.25) Track";
+      if (trackFolder === "vcf9-architect") name = "Cloud Foundation Architect (2V0-13.25) Track";
+      if (trackFolder === "vks-tanzu") name = "VCF vSphere Kubernetes Service (3V0-24.25) Track";
       if (pageData?.frontmatter.track) name = pageData.frontmatter.track;
       return { path: parentPath, name };
     }
-    return { path: "/learning/certs-central/vmware/study-notes", name: "Study Notes Hub" };
+    return { path: "/certifications", name: "Certifications Hub" };
   }, [pageData, slug]);
 
   // Extract headings from the rendered article after MDX compiles
@@ -282,7 +289,7 @@ const MdxSubPage = () => {
                       {pageData.frontmatter.author ?? "ActiveNerds Cloud Architecture Team"}
                     </span>
                     <span>•</span>
-                    <span>VMware VCF 9 Exam Prep</span>
+                    <span>{pageData.frontmatter.track ?? "Technical Certification Guide"}</span>
                     <span>•</span>
                     <span>Updated {pageData.frontmatter.date ?? "2026-10-31"}</span>
                   </div>
@@ -290,7 +297,7 @@ const MdxSubPage = () => {
 
                 {/* Rendered Article Content */}
                 <div ref={articleRef} className="prose-article text-lg leading-relaxed mt-6">
-                  <MdxRenderer body={pageData.content} slug={slug} />
+                  <MdxRenderer key={slug} body={pageData.content} slug={slug} />
                 </div>
               </div>
             </div>
@@ -339,7 +346,11 @@ const MdxSubPage = () => {
 
             <div className="space-y-2 relative z-10">
               <div className="inline-flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-wider text-primary">
-                <span>Certs Central • VMware Cloud Foundation</span>
+                <span>
+                  {pageData.frontmatter.category
+                    ? `Certifications • ${pageData.frontmatter.category.toUpperCase()}`
+                    : "Technical Certifications"}
+                </span>
               </div>
               <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-foreground">
                 {pageData.frontmatter.title}
@@ -354,7 +365,7 @@ const MdxSubPage = () => {
 
           {/* Full Width MDX Content (Tiles, Lists, Comparison Tables) */}
           <div className="w-full">
-            <MdxRenderer body={pageData.content} slug={slug} />
+            <MdxRenderer key={slug} body={pageData.content} slug={slug} />
           </div>
         </Container>
       </div>

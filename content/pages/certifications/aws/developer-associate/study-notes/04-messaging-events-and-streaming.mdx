@@ -1,0 +1,227 @@
+---
+title: "Module 04: Messaging, Event-Driven Patterns & Streaming: SQS, SNS, EventBridge, Step Functions, Kinesis"
+description: "Decoupling with SQS, SNS fan-out, EventBridge rules, Step Functions workflows, S3 events, Kinesis Data Streams, and Data Firehose."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 4
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Development with AWS Services
+
+<Callout variant="info" title="Exam Focus: Development with AWS Services (Skills 1.1.1, 1.1.2, 1.1.6, 1.1.8) and Optimization (4.3.3)">
+Choosing among **SQS, SNS, EventBridge, Step Functions, Kinesis, and Data Firehose** is one of the most common scenario patterns on the exam. Memorize the defaults and limits below, and learn the decision table at the end.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Queue vs Topic vs Bus vs Stream">
+
+* **Queue (SQS):** one logical consumer group pulls messages; each message is processed by one consumer, then deleted. Buffers load.
+* **Topic (SNS):** pushes each message to **all** subscribers. No storage for slow consumers (pair with SQS).
+* **Event bus (EventBridge):** routes events by **content-based rules** to many targets; integrates AWS services, SaaS partners, and other accounts.
+* **Stream (Kinesis Data Streams):** an ordered, replayable log. Multiple consumers read independently within the retention window.
+
+* **Exam Trap:** "Multiple consumers must **replay** the same records" → Kinesis (or Kafka), not SQS or SNS. "Process each order exactly once in order per customer" → SQS **FIFO** with message groups.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Amazon SQS
+
+| Property | Standard Queue | FIFO Queue |
+|---|---|---|
+| Throughput | Nearly unlimited | 300 msg/s per API action (3,000 with batching); high-throughput mode raises this |
+| Ordering | Best effort | **Strict** within a **message group ID** |
+| Delivery | **At least once** (duplicates possible) | **Exactly-once processing** via deduplication (5-minute window) |
+| Name | Any | Must end in `.fifo` |
+
+**Key settings**
+
+* **Visibility timeout:** default **30 s**, range 0 to 12 hours. A received message is hidden while processing. If not deleted in time, it reappears. Extend with `ChangeMessageVisibility`.
+* **Retention:** default **4 days**, 1 minute to **14 days**.
+* **Long polling:** `WaitTimeSeconds` up to **20** cuts empty responses and cost. Short polling returns immediately (possibly empty).
+* **Delay queue / per-message delay:** up to 15 minutes.
+* **Message size:** historically 256 KiB (newer limits are higher; verify current quotas). For larger payloads use the **claim-check pattern**: store in S3 and send a pointer (the SQS Extended Client Library does this).
+* **Dead-letter queue:** set `maxReceiveCount`; a FIFO queue needs a FIFO DLQ. Use **DLQ redrive** to move messages back after fixing the bug.
+* **Batching:** `SendMessageBatch` and `DeleteMessageBatch` handle up to **10** messages per call.
+* **Encryption:** SSE-SQS (default) or SSE-KMS.
+
+```python
+sqs = boto3.client("sqs")
+resp = sqs.receive_message(QueueUrl=url, MaxNumberOfMessages=10, WaitTimeSeconds=20)
+for m in resp.get("Messages", []):
+    handle(m["Body"])
+    sqs.delete_message(QueueUrl=url, ReceiptHandle=m["ReceiptHandle"])   # delete only after success
+```
+
+---
+
+## 2. Amazon SNS
+
+* **Pub/sub topics** push to subscribers: SQS, Lambda, HTTP/S, email, SMS, mobile push, and Data Firehose.
+* **Fan-out pattern:** SNS topic to multiple **SQS queues**. Each downstream system gets its own durable queue, retries independently, and can fail without affecting others.
+* **Message filtering:** a **subscription filter policy** (matches message attributes, or the payload) delivers only relevant messages, which removes consumer-side filtering code.
+* **FIFO topics** preserve order and dedupe, and can fan out only to **SQS FIFO** queues.
+* **Raw message delivery** strips the SNS JSON envelope for SQS/HTTP subscribers.
+* **Delivery retries and subscription DLQs:** attach an SQS DLQ to a subscription to capture undeliverable messages.
+* **Access:** the SQS queue policy must allow `sns.amazonaws.com` to `SendMessage` from your topic ARN.
+
+```json
+{ "eventType": ["order_placed"], "amount": [{ "numeric": [">", 100] }] }
+```
+
+---
+
+## 3. Amazon EventBridge
+
+* **Event buses:** default (AWS service events), custom (your apps), partner (SaaS). Rules use **event patterns** to match and route to up to 5 targets per rule (Lambda, SQS, SNS, Step Functions, Kinesis, API destinations, and more).
+* **Input transformers** reshape the event before the target receives it.
+* **Scheduling:** **EventBridge Scheduler** (one-time and recurring, time zones, large scale) supersedes simple scheduled rules for new designs.
+* **Archive and replay** events to reprocess history. **Schema registry** discovers event shapes.
+* **Reliability:** per-target **retry policy** (default up to 24 hours or 185 attempts) and optional **DLQ** for undeliverable events.
+* **EventBridge Pipes** connect a source (SQS, Kinesis, DynamoDB Streams) to a target with optional filtering and enrichment, without glue code.
+* **Cross-account and cross-Region** delivery by targeting another bus (needs a resource policy).
+
+```json
+{
+  "source": ["aws.s3"],
+  "detail-type": ["Object Created"],
+  "detail": { "bucket": { "name": ["uploads-prod"] }, "object": { "key": [{ "suffix": ".csv" }] } }
+}
+```
+
+**SNS vs EventBridge:** choose **SNS** for very high-throughput simple fan-out and mobile/SMS/email delivery; choose **EventBridge** for content-based routing, SaaS and AWS-service events, schedules, schema management, and replay.
+
+---
+
+## 4. S3 Event Notifications
+
+S3 can emit events (`s3:ObjectCreated:*`, `s3:ObjectRemoved:*`, restore, lifecycle events) to **Lambda, SQS, SNS, or EventBridge**. Filter by **prefix and suffix**. Delivery is **at least once**, so make consumers idempotent. The destination's **resource policy** must allow S3 to publish or invoke (SQS queue policy, SNS topic policy, or Lambda resource-based policy). Sending to **EventBridge** unlocks advanced filtering and many targets.
+
+**Trap:** writing the processed output back to the **same prefix** that triggers the function creates an infinite loop. Use separate prefixes or buckets.
+
+---
+
+## 5. AWS Step Functions
+
+| Feature | Standard Workflow | Express Workflow |
+|---|---|---|
+| Max duration | Up to **1 year** | Up to **5 minutes** |
+| Execution semantics | **Exactly-once** workflow execution | At-least-once (async) or at-most-once (sync) |
+| History | Full execution history, visual debugging | Logged to CloudWatch Logs |
+| Best for | Long-running, auditable, human-approval flows | High-volume, short event processing |
+
+**State types:** `Task`, `Choice`, `Parallel`, `Map`, `Wait`, `Pass`, `Succeed`, `Fail`. Use **Retry** (with `IntervalSeconds`, `BackoffRate`, `MaxAttempts`) and **Catch** for error handling instead of hand-written loops.
+
+**Service integration patterns:** *Request Response* (call and continue), *Run a Job* (`.sync`: wait for completion, such as ECS or Glue), *Wait for Callback* (`.waitForTaskToken`: pause until your code calls `SendTaskSuccess`, ideal for **human approval**).
+
+**Use Step Functions (orchestration)** when the sequence, branching, retries, and state must be explicit. **Use events (choreography)** when services should react independently.
+
+---
+
+## 6. Streaming: Kinesis Data Streams and Amazon Data Firehose (Skill 1.1.6)
+
+### Kinesis Data Streams (KDS)
+
+* **Shard** capacity: **write 1 MB/s or 1,000 records/s**; **read 2 MB/s** (shared across standard consumers). **Enhanced fan-out** gives each registered consumer a dedicated **2 MB/s per shard** over push (HTTP/2).
+* **Capacity modes:** provisioned (you manage shards) or **on-demand** (auto-scales).
+* **Partition key** determines the shard. A low-cardinality or "hot" key overloads one shard and causes `ProvisionedThroughputExceededException`. Order is guaranteed **per shard**.
+* **Retention:** 24 hours default, extendable up to **365 days**. Record size up to **1 MB**.
+* **Producers:** SDK `PutRecord(s)`, Kinesis Producer Library (batching, aggregation), agents. **Consumers:** Kinesis Client Library (checkpointing in DynamoDB), Lambda event source mapping, Managed Service for Apache Flink.
+* **Resharding:** split a hot shard or merge cold shards (provisioned mode).
+
+### Amazon Data Firehose
+
+* Fully managed **delivery** (not a replayable log) to **S3, Redshift, OpenSearch Service, Splunk, HTTP endpoints**, and more.
+* **Buffering** by size and time controls delivery latency ("near real time").
+* Optional **Lambda transformation**, format conversion (JSON to Parquet/ORC), compression, and dynamic partitioning in S3.
+* Can read from a Kinesis stream, accept direct `PutRecord` calls, or take CloudWatch Logs subscriptions.
+
+### Quick Chooser
+
+| Need | Pick |
+|---|---|
+| Buffer work, decouple producer and consumer, retry per message | **SQS** |
+| One event, many independent subscribers | **SNS** (with SQS queues) |
+| Route by event content, react to AWS or SaaS events, schedule | **EventBridge** |
+| Ordered, replayable, multiple consumers, real-time analytics | **Kinesis Data Streams** |
+| Load streaming data into S3, Redshift, or OpenSearch with no consumer code | **Data Firehose** |
+| Multi-step process with branching, retries, approvals | **Step Functions** |
+| Query data in S3 using SQL | **Amazon Athena** |
+| Search and log analytics at scale | **Amazon OpenSearch Service** |
+
+---
+
+## 7. Common Exam Traps and Scenario Distractors
+
+* "Orders processed out of order" → **FIFO queue with message group ID** (Standard queues do not guarantee order).
+* "Consumer takes longer than expected and messages are duplicated" → raise **visibility timeout**.
+* "Reduce cost of empty receives" → **long polling**.
+* "Message exceeds queue size limit" → store in **S3** and send a pointer.
+* "Hot shard / throttled producers on Kinesis" → better **partition key distribution**, more shards, or on-demand mode.
+* "Load clickstream into S3 as Parquet with minimal code" → **Data Firehose** with format conversion.
+* "Wait for a human to approve, then continue" → Step Functions **callback pattern** (`.waitForTaskToken`).
+* "S3 upload should trigger multiple independent processes" → S3 to **EventBridge** or S3 to SNS to multiple SQS queues.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A photo-upload service must resize images, update a database, and notify a user, each independently and without one failure blocking the others. Which design?
+<details>
+<summary>Explanation</summary>
+
+S3 event notification to an **SNS topic** (or EventBridge) with an **SQS queue per task**, each consumed by its own Lambda. Failures isolate to one queue, each with its own DLQ.
+
+</details>
+- [ ] Your SQS consumer sometimes needs 5 minutes per message, but the same message is delivered to a second worker after 30 seconds. What do you change?
+<details>
+<summary>Explanation</summary>
+
+Increase the **visibility timeout** (or extend it dynamically with `ChangeMessageVisibility`) beyond the maximum processing time.
+
+</details>
+- [ ] Three analytics applications must each read the same clickstream records independently and be able to reprocess the last 3 days. Which service?
+<details>
+<summary>Explanation</summary>
+
+**Kinesis Data Streams** with retention extended to at least 3 days. Consider **enhanced fan-out** for dedicated throughput per consumer.
+
+</details>
+- [ ] A workflow needs a manager's approval before charging a card. Which Step Functions feature?
+<details>
+<summary>Explanation</summary>
+
+A **Standard** workflow with the **`.waitForTaskToken`** callback pattern. The task pauses until your approval system calls `SendTaskSuccess` or `SendTaskFailure`.
+
+</details>
+- [ ] A Lambda function triggered by S3 `ObjectCreated` keeps running forever and costs spike. Why?
+<details>
+<summary>Explanation</summary>
+
+It writes its output to the same bucket and prefix that triggers it, creating a recursive loop. Use a different prefix or bucket and configure prefix and suffix filters.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/03-amazon-api-gateway" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 03: Amazon API Gateway: REST vs HTTP APIs, Integrations & Validation
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/05-amazon-dynamodb" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 05: Amazon DynamoDB: Keys, Capacity Math, Indexes & Streams →
+  </a>
+</div>

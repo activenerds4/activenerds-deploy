@@ -1,0 +1,203 @@
+---
+title: "Module 04: Multi-Account Governance: Organizations, Control Tower, SCPs & RAM"
+description: "Account structure, SCP evaluation, Control Tower controls, delegated administrators, resource sharing and centralized logging."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 4
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Account structure, SCP evaluation, Control Tower controls, delegated administrators, resource sharing and centralized logging.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 1.4 Multi-Account AWS Environment">
+Questions test account structure (OU design), preventive vs detective governance, SCP semantics, central logging and event notification, resource sharing without duplication, and delegated administration so the management account stays clean.
+</Callout>
+
+---
+
+## 1. Organizations Building Blocks
+
+| Construct | Purpose | Exam nuance |
+|---|---|---|
+| Management account | Creates the organization, consolidated billing | Keep it nearly empty; SCPs do NOT apply to it |
+| Organizational Units (OUs) | Group accounts; policies inherit down the tree | Design by security/compliance boundary (prod, non-prod, sandbox, security, infrastructure), not by org chart |
+| Service control policies (SCPs) | Maximum available permissions (guardrails) | Never grant permissions; affect all IAM users, roles and the root user in member accounts; do not affect service-linked roles |
+| Tag policies | Enforce tag key/value standards | Supports cost allocation consistency |
+| Backup policies | Org-wide AWS Backup plans | Central, consistent backups |
+| Declarative policies | Enforce baseline service configuration (for example block public AMI sharing) | Applied at org level regardless of API changes |
+| Delegated administrator | Member account administers a service for the org | Preferred over using the management account (GuardDuty, Security Hub, Config, IAM Access Analyzer, StackSets and others) |
+| Consolidated billing | One bill, shared Reserved Instance/Savings Plans discounts, volume pricing | See Module 14 |
+
+**Typical OU structure:**
+
+```
+Root
+ |-- Security OU      : Log Archive account, Audit/Security Tooling account
+ |-- Infrastructure OU: Network (TGW, DX), Shared Services (AD, DNS)
+ |-- Workloads OU
+ |     |-- Prod OU     : app accounts (strict SCPs)
+ |     |-- Non-Prod OU : dev/test accounts
+ |-- Sandbox OU       : experiments with budget guardrails
+ |-- Suspended OU     : closed accounts, deny-all SCP
+```
+
+## 2. SCP Evaluation Logic
+
+An action is allowed only if **every level** from the root to the account has an allow (the default `FullAWSAccess` SCP is attached to each node) AND the IAM identity/resource policy also allows it.
+
+```
+Effective permission = SCP intersection (root..OU..account) ∩ IAM permissions (∩ boundary ∩ session policy)
+```
+
+| Strategy | Description | When |
+|---|---|---|
+| Deny list (default) | Keep `FullAWSAccess`, add explicit Deny SCPs | Most common; easier to manage and less likely to break services |
+| Allow list | Remove `FullAWSAccess`, allow only listed services | Strict environments; every needed service must be explicitly listed at every level |
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyOutsideApprovedRegions",
+      "Effect": "Deny",
+      "NotAction": ["iam:*", "organizations:*", "route53:*", "cloudfront:*", "support:*", "sts:*"],
+      "Resource": "*",
+      "Condition": {"StringNotEquals": {"aws:RequestedRegion": ["us-east-1", "eu-west-1"]}}
+    },
+    {
+      "Sid": "ProtectSecurityBaseline",
+      "Effect": "Deny",
+      "Action": ["cloudtrail:StopLogging", "cloudtrail:DeleteTrail", "config:StopConfigurationRecorder", "guardduty:DisassociateFromMasterAccount"],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+<Callout variant="warning" title="Exam Trap: SCP Misconceptions">
+(1) An SCP allow does not grant access; IAM must also allow. (2) SCPs do not restrict the management account. (3) SCPs do not affect service-linked roles. (4) To stop an account's root user from doing something, an SCP is the only tool. (5) Resource-based policies can still grant access to principals in other accounts, but the SCP still applies to the calling account's principals.
+</Callout>
+
+## 3. AWS Control Tower
+
+Control Tower automates a **landing zone** following best practices on top of Organizations, IAM Identity Center, Config and CloudTrail.
+
+| Feature | Detail |
+|---|---|
+| Landing zone | Management, Log Archive and Audit accounts, home Region, organization trail, Config recorder |
+| Controls (formerly guardrails) | **Preventive** (implemented as SCPs), **Detective** (AWS Config rules), **Proactive** (CloudFormation Hooks that block non-compliant resources at deployment); mandatory, strongly recommended and elective categories |
+| Account Factory | Self-service, standardized account provisioning via Service Catalog; Account Factory for Terraform (AFT) for GitOps pipelines |
+| Customizations for Control Tower (CfCT) | Deploy additional CloudFormation/SCP customizations on lifecycle events |
+| Dashboard and drift detection | Detect changes outside Control Tower (for example moved accounts or modified SCPs) |
+
+**Control Tower vs plain Organizations:** pick Control Tower for a fast, governed landing zone with minimal operational effort; pick custom Organizations plus CloudFormation StackSets when you must build highly bespoke structures or the environment already exists (Control Tower can enroll existing accounts and OUs).
+
+```bash
+aws organizations create-account --email prod-app1@example.com --account-name prod-app1
+aws organizations move-account --account-id 111122223333 --source-parent-id r-ab12 --destination-parent-id ou-ab12-prod
+aws organizations enable-aws-service-access --service-principal guardduty.amazonaws.com
+aws organizations register-delegated-administrator --account-id 999988887777 --service-principal guardduty.amazonaws.com
+```
+
+## 4. Central Logging & Multi-Account Event Notification
+
+```
+ Member accounts                         Log Archive account              Security account
+ CloudTrail (org trail) ------------->   S3 (Object Lock, SSE-KMS)       Security Hub (aggregator)
+ Config (aggregator) ---------------->   Config aggregator               GuardDuty (delegated admin)
+ VPC Flow Logs, ALB logs ------------>   S3 buckets (central)            EventBridge -> SNS -> ticketing
+ CloudWatch Logs --subscription-----> Kinesis Data Firehose --> S3 / OpenSearch
+```
+
+- **Organization trail:** one CloudTrail trail for all accounts and Regions, delivered to a central S3 bucket in the Log Archive account; member accounts cannot disable or delete it. Enable log file validation and SSE-KMS.
+- **CloudWatch Logs:** cross-account log delivery through subscription filters to a destination (Kinesis Data Streams/Firehose) in a central account, or use CloudWatch cross-account observability (Observability Access Manager).
+- **EventBridge:** forward events from member-account default buses to a central event bus in another account (bus resource policy allows `events:PutEvents` from the organization via `aws:PrincipalOrgID`). Use for centralized notification, remediation and auditing.
+- **AWS Config aggregator:** aggregates configuration and compliance across accounts/Regions (organization-level with delegated administrator).
+- **Security Hub / GuardDuty / Macie / Inspector:** designate a delegated administrator account; auto-enable for new organization accounts.
+
+## 5. Resource Sharing with AWS RAM
+
+| Shareable (examples) | Typical purpose |
+|---|---|
+| VPC subnets | Participant accounts launch resources into centrally managed VPC subnets (owner controls network; participants manage their own resources) |
+| Transit Gateway | Hub shared to all accounts |
+| Route 53 Resolver rules | Central DNS forwarding |
+| License Manager configurations | Central license tracking |
+| AWS Private CA, Aurora DB clusters (cloning), others | Reduce duplication |
+
+Sharing within the organization can be enabled once (`enable-sharing-with-aws-organizations`) so shares to OUs or the whole org are accepted automatically. Prefer sharing over duplicating resources: less cost, central control.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Shared VPC vs Per-Account VPC with TGW">
+
+**Shared VPC subnets (RAM):** fewer VPCs, simpler routing, IP efficiency, central network team control; participants cannot modify subnets/route tables. Limits: blast radius of a single VPC, security groups can be referenced across participants in the same VPC, and some quotas are per VPC.
+**Per-account VPC + TGW:** stronger isolation and independent lifecycle at the cost of TGW processing charges and more routing. Choose shared VPCs when the stem emphasizes IP address conservation and central network management; choose per-account VPCs for strong isolation or autonomy.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Closing and Suspending Accounts, Billing Transfers">
+
+Suspended accounts are moved to a Suspended OU with a deny-all SCP to stop activity safely. Accounts can leave and join other organizations only after meeting standalone requirements (payment method, support plan). Account closure has a post-closure period; plan ahead for retained data and RI/Savings Plans sharing impacts.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 6. Common Traps & Distractors
+
+- "Prevent all accounts from disabling CloudTrail": SCP deny on `cloudtrail:StopLogging`/`DeleteTrail` plus an organization trail, not an IAM policy in each account.
+- "Grant developers access to services": SCP alone does nothing; IAM policy or Identity Center permission set is needed.
+- "Run security tooling from the management account": use a delegated administrator.
+- "Consistent tag keys across accounts": tag policy (and optionally SCP to require tags on create).
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can predict whether an action is allowed given SCPs at the root, OU and account levels.
+<details>
+<summary>Explanation</summary>
+
+Every level from root down to the account must allow the action (explicitly or via FullAWSAccess), no SCP may explicitly deny it, and IAM policies in the account must also allow it. The management account and service-linked roles are not restricted by SCPs.
+
+</details>
+
+- [ ] I can distinguish Control Tower preventive, detective and proactive controls.
+<details>
+<summary>Explanation</summary>
+
+Preventive controls are SCPs that block actions; detective controls are Config rules that report non-compliance after the fact; proactive controls are CloudFormation Hooks that block non-compliant resources before they are provisioned through CloudFormation.
+
+</details>
+
+- [ ] I can design central logging that members cannot tamper with.
+<details>
+<summary>Explanation</summary>
+
+Use an organization trail delivered to an S3 bucket in a dedicated Log Archive account with a restrictive bucket policy, SSE-KMS, log file validation and optionally S3 Object Lock; add SCPs denying trail and Config modification in member accounts.
+
+</details>
+
+- [ ] I can explain when to share a subnet through RAM instead of using TGW.
+<details>
+<summary>Explanation</summary>
+
+Share subnets when a central team owns the network and many accounts need to place workloads in the same VPC with minimal routing complexity and IP waste. Use separate VPCs with TGW when isolation, independent quotas or independent network ownership is required.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/03-hybrid-dns-privatelink-traffic-visibility" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 03: Hybrid DNS, PrivateLink, Endpoints & Network Traffic Visibility
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/05-identity-cross-account-access-kms-acm" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 05: Identity, Cross-Account Access, Federation & Encryption (KMS, ACM) →
+  </a>
+</div>

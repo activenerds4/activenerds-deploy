@@ -1,0 +1,168 @@
+---
+title: "EKS Auto Mode Meets Gateway API: A Practical Setup and Migration Guide"
+slug: eks-auto-mode-gateway-api-setup-migration
+description: "Amazon EKS Auto Mode now natively supports the Kubernetes Gateway API. Learn how to configure managed Gateways, deploy HTTPRoutes, and migrate legacy Ingress resources with zero downtime."
+date: "2026-11-04"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["aws", "eks", "gateway-api", "kubernetes", "networking"]
+featured: true
+relatedArticles: ["blue-green-deployment-kubernetes", "canary-deployment-strategies-kubernetes", "kubernetes-network-policies-tutorial", "cloud-security-best-practices-aws", "progressive-delivery-argo-rollouts"]
+image: https://cdn.activenerds.com/images/posts/eks-auto-mode-gateway-api-setup-migration.png
+imageAlt: "Amazon EKS Auto Mode with native Kubernetes Gateway API support — routing HTTPRoutes directly to managed Application Load Balancers"
+published: true
+---
+
+<Callout variant="tip" title="AWS What's New Integration">
+Amazon EKS Auto Mode has expanded its automated management plane to support the **Kubernetes Gateway API**. EKS Auto Mode now automatically provisions, tunes, and lifecycle-manages AWS Application Load Balancers (ALBs) directly from declarative `Gateway` and `HTTPRoute` resources, eliminating the need to install or maintain the standalone AWS Load Balancer Controller.
+</Callout>
+
+When AWS launched **Amazon EKS Auto Mode**, it automated worker node provisioning (via managed Karpenter), EBS CSI driver integration, and baseline cluster networking. However, application traffic ingress still required installing third-party ingress controllers or managing complex Helm charts for the AWS Load Balancer Controller.
+
+With native **Gateway API support in EKS Auto Mode**, AWS fulfills the promise of truly hands-off cluster infrastructure. Here is a practical walkthrough of how Gateway API operates in Auto Mode, how to configure your first `HTTPRoute`, and how to cleanly migrate from legacy `Ingress` objects.
+
+---
+
+## 1. What Changed in Auto Mode
+
+Prior to this update, running public or internal HTTP routing on EKS Auto Mode required deploying the AWS Load Balancer Controller DaemonSet/Deployment and managing IAM Roles for Service Accounts (IRSA) with extensive IAM policies.
+
+```
+Traditional Ingress on EKS:
+[ Ingress Manifest ] ---> [ AWS Load Balancer Controller Pods ] ---> [ AWS ALB API ]
+
+EKS Auto Mode Gateway API:
+[ Gateway + HTTPRoute ] ---> [ Managed AWS EKS Control Plane ] ---> [ AWS ALB API ]
+                              (No in-cluster controller pods to patch, scale, or monitor)
+```
+
+In EKS Auto Mode:
+- **Zero In-Cluster Controllers**: The translation from Gateway API objects to Application Load Balancers happens entirely within the managed EKS control plane.
+- **Built-in GatewayClass**: EKS Auto Mode clusters come pre-installed with the official `amazon-alb` GatewayClass.
+- **Automatic Multi-AZ Provisioning**: ALBs are provisioned dynamically across your cluster's VPC subnets with health checks aligned to your Kubernetes Service endpoints.
+
+---
+
+## 2. Gateway API vs Ingress in 60 Seconds
+
+The Kubernetes `Ingress` API (introduced in 2015) grouped hostnames, TLS certs, routing paths, and upstream service definitions into a single, flat resource. This caused severe organizational friction:
+
+| Capability | Legacy `Ingress` API | Modern `Gateway API` |
+|---|---|---|
+| **Role Separation** | Single monolithic object shared by platform team & developers. | Clear separation: `Gateway` (Infra team) vs `HTTPRoute` (App teams). |
+| **Advanced Routing** | Relied on unstandardized annotations (`alb.ingress.kubernetes.io/*`). | Native first-class fields: header matching, traffic splitting, URL rewrites. |
+| **Multi-Tenancy** | Fragile; path conflicts between namespaces difficult to enforce. | Namespaced `HTTPRoute` binds securely to shared central `Gateway`. |
+| **Canary / Weighting** | Required complex service meshes or proprietary controller tricks. | Native percentage-based traffic weights in `HTTPRoute.spec.rules.backendRefs`. |
+
+---
+
+## 3. Setting Up a Gateway and HTTPRoute on EKS Auto Mode
+
+Let's deploy a production-ready Gateway that automatically launches an internet-facing Application Load Balancer, followed by an `HTTPRoute` that performs traffic splitting.
+
+### Step 3.1: Deploy the Gateway
+
+Save the following manifest as `gateway.yaml`:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: public-alb-gateway
+  namespace: infrastructure
+  annotations:
+    # EKS Auto Mode recognizes standard ALB parameters
+    alb.networking.aws/scheme: internet-facing
+    alb.networking.aws/target-type: ip
+spec:
+  gatewayClassName: amazon-alb
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+```
+
+Apply the Gateway:
+
+```bash
+kubectl apply -f gateway.yaml
+kubectl get gateway public-alb-gateway -n infrastructure -w
+```
+
+Within 60–90 seconds, the managed control plane provisions the AWS ALB and updates the Gateway status with the public DNS endpoint (e.g., `k8s-infra-publical-xxxxxxxxxx.elb.us-east-1.amazonaws.com`).
+
+---
+
+### Step 3.2: Deploy an HTTPRoute with Traffic Splitting
+
+Now, developers in the `production` namespace can expose microservices without needing access to the `infrastructure` namespace or IAM permissions:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: checkout-service-route
+  namespace: production
+spec:
+  parentRefs:
+    - name: public-alb-gateway
+      namespace: infrastructure
+  hostnames:
+    - "api.activenerds.com"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v2/checkout
+      backendRefs:
+        # 90% production baseline
+        - name: checkout-service-v1
+          port: 8080
+          weight: 90
+        # 10% canary release
+        - name: checkout-service-v2
+          port: 8080
+          weight: 10
+```
+
+Apply the route:
+
+```bash
+kubectl apply -f httproute.yaml
+```
+
+The EKS control plane automatically configures the ALB target groups and weighted routing rules without restarting any pods or modifying cluster-level configurations.
+
+---
+
+## 4. Migrating Existing Ingress Resources
+
+If your workloads currently use `Ingress` manifests, follow this blue/green migration workflow:
+
+```
+[ Step 1: Deploy Gateway ] ──> [ Step 2: Bind Parallel HTTPRoute ] ──> [ Step 3: Shift DNS CNAME ] ──> [ Step 4: Decom Ingress ]
+```
+
+1. **Keep Ingress Active**: Leave your existing Ingress and ALB running handling production traffic.
+2. **Deploy Gateway & HTTPRoute**: Deploy the new Gateway and HTTPRoute targeting the identical upstream Services.
+3. **Validate HTTPRoute via Host Header**:
+   ```bash
+   curl -H "Host: api.activenerds.com" http://<NEW-GATEWAY-ALB-DNS>/v2/checkout/health
+   ```
+4. **Shift DNS in Amazon Route 53**: Update your Route 53 Alias record to point from the old Ingress ALB DNS name to the new Gateway ALB DNS name.
+5. **Delete Legacy Ingress**: Once DNS TTL expires and traffic ceases on the old ALB, delete the Ingress resource.
+
+---
+
+## 5. Gotchas and Current Limits
+
+Keep these architectural considerations in mind when planning your rollout:
+
+1. **Subnet Tagging**: Worker VPC subnets must still bear the standard AWS discovery tags (`kubernetes.io/role/elb: 1` for public subnets or `kubernetes.io/role/internal-elb: 1` for private subnets) so Auto Mode can identify valid AZs.
+2. **Cross-Namespace ParentRefs**: Ensure your `Gateway.spec.listeners[*].allowedRoutes` field permits connections from application namespaces. By default, some configurations only permit routes within the same namespace.
+3. **gRPC and WebSocket Support**: For WebSocket connections or gRPC streaming, verify that the ALB target group attributes specify the appropriate HTTP/2 protocol version annotations on the Gateway.
+
+By transitioning to the Gateway API on EKS Auto Mode, you eliminate the operational overhead of running in-cluster ingress controllers while equipping your engineering teams with modern, declarative traffic management.

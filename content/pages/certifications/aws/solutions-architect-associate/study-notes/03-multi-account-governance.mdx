@@ -1,0 +1,181 @@
+---
+title: "Module 03: Multi-Account Governance with Organizations, SCPs & Control Tower"
+description: "OUs, service control policies, Control Tower guardrails, AWS RAM, centralized logging, and resource policy conditions."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 3
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 1.1 (multi-account strategy) — AWS Organizations, OUs, service control policies, AWS Control Tower, AWS RAM, centralized logging and security services, multi-account billing
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1 — Security strategy for multiple AWS accounts">
+The blueprint names AWS Control Tower and service control policies explicitly. Expect scenarios such as "prevent any account in the organization from using unapproved Regions" or "set up a secure, governed multi-account environment quickly".
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: How SCPs actually behave">
+
+* SCPs define the **maximum available permissions** for member accounts and OUs; they never grant permissions on their own.
+* SCPs **do not affect the management account** (so keep workloads out of it).
+* SCPs affect all IAM users and roles in member accounts, **including the account root user**, but do not affect service-linked roles.
+* Effective permissions are the **intersection** of every SCP on the path from the organization root to the account, plus the identity policy.
+* Default AWS-managed `FullAWSAccess` SCP is attached at the root; if you remove it without a replacement allow, everything is denied (allow-list strategy). Most teams keep it and add deny SCPs (deny-list strategy).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Control Tower landing zone">
+
+Control Tower orchestrates Organizations, IAM Identity Center, CloudFormation StackSets, Config, and CloudTrail into a **landing zone**.
+
+* Creates a **Log Archive** account and an **Audit** account.
+* Provides **Account Factory** to provision new accounts with baseline settings.
+* **Controls (guardrails):** preventive controls are implemented with SCPs; detective controls are implemented with AWS Config rules; proactive controls use CloudFormation hooks.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Service | Role in multi-account design | Exam nuance |
+|---|---|---|
+| AWS Organizations | Account hierarchy, consolidated billing, SCPs, tag/backup policies | Organization-wide CloudTrail trail and delegated administrators |
+| Control Tower | Opinionated landing zone and governance | "Quickest" governed multi-account setup |
+| IAM Identity Center | Central workforce access to all accounts | Permission sets map to roles in each account |
+| AWS RAM | Share resources across accounts without copying | Subnets, Transit Gateway, Route 53 Resolver rules, License Manager configurations |
+| AWS CloudTrail (org trail) | One trail logging all member accounts to a central bucket | Protect log bucket with restricted access and log file validation |
+| AWS Config | Compliance evaluation and aggregators | Aggregator collects across accounts and Regions |
+| Security Hub / GuardDuty / Firewall Manager | Central security posture and policy enforcement | Delegate administration to a security account |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+Organization Root
+ |
+ +-- Management account (billing, Organizations; keep workloads out)
+ |
+ +-- OU: Security
+ |     +-- Log Archive account  <-- org CloudTrail, Config logs
+ |     +-- Audit / Security Tooling account (delegated admin for GuardDuty, Security Hub)
+ |
+ +-- OU: Workloads
+ |     +-- OU: Prod   (SCP: deny non-approved Regions, deny disabling CloudTrail)
+ |     +-- OU: Dev    (SCP: restrict expensive instance types)
+ |
+ +-- OU: Sandbox      (SCP: deny all but low-cost services; budget alerts)
+```
+
+**Why multiple accounts?** Accounts are the strongest isolation boundary for blast radius, IAM, quotas, and billing. They enable workload separation (prod versus dev), compliance scoping, and per-team cost visibility.
+
+**Consolidated billing:** one bill for the organization, shared volume discounts, and sharing of Reserved Instance and Savings Plans benefits across accounts.
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyOutsideApprovedRegions",
+      "Effect": "Deny",
+      "NotAction": ["iam:*", "organizations:*", "route53:*", "cloudfront:*", "support:*"],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": { "aws:RequestedRegion": ["us-east-1", "us-west-2"] }
+      }
+    },
+    {
+      "Sid": "ProtectCloudTrail",
+      "Effect": "Deny",
+      "Action": ["cloudtrail:StopLogging", "cloudtrail:DeleteTrail"],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+```bash
+# Create an OU and attach an SCP
+aws organizations create-organizational-unit --parent-id r-examplerootid --name Prod
+aws organizations create-policy --name DenyRegions --type SERVICE_CONTROL_POLICY \
+  --description "Region guardrail" --content file://deny-regions.json
+aws organizations attach-policy --policy-id p-examplepolicy --target-id ou-exampleouid
+
+# Share a subnet with another account via RAM
+aws ram create-resource-share --name shared-subnets \
+  --resource-arns arn:aws:ec2:us-east-1:111111111111:subnet/subnet-0abc \
+  --principals 222222222222
+```
+
+**Resource policy condition:** `aws:PrincipalOrgID` in a bucket or key policy grants access to any principal in your organization without enumerating account IDs, which scales as accounts are added.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Using IAM policies in each account to enforce an organization-wide restriction. SCPs are the correct central control.
+- **Trap 2:** Expecting an SCP to restrict the management account. It does not.
+- **Trap 3:** Thinking an SCP allow grants access. A user still needs an identity policy.
+- **Trap 4:** Building a custom multi-account framework when Control Tower meets the stated need with less effort.
+- **Trap 5:** Duplicating shared VPC resources into every account instead of sharing them with AWS RAM.
+- **Trap 6:** Running workloads or storing logs in the management account instead of dedicated accounts.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can explain why an SCP alone cannot give a user access.
+<details>
+<summary>Explanation</summary>
+
+SCPs set the permission ceiling for accounts. The principal still needs an identity-based or resource-based policy that grants the action, and the SCP must also allow it. If either is missing, access is denied.
+
+</details>
+
+- [ ] I can design an OU structure and guardrails for prod, dev, and sandbox accounts.
+<details>
+<summary>Explanation</summary>
+
+Place accounts in OUs by function or environment, attach deny-list SCPs at the OU level (region restrictions, protecting CloudTrail and Config, blocking leaving the organization), and use a security OU with Log Archive and Audit accounts. Keep the management account free of workloads.
+
+</details>
+
+- [ ] I can describe what Control Tower sets up and when to choose it.
+<details>
+<summary>Explanation</summary>
+
+Control Tower creates a landing zone with Organizations, Identity Center, a Log Archive account, an Audit account, preventive guardrails (SCPs), detective guardrails (Config), and Account Factory. Choose it when the requirement is a quickly established, best-practice, governed multi-account environment.
+
+</details>
+
+- [ ] I can pick AWS RAM for sharing resources and aws:PrincipalOrgID for policy scoping.
+<details>
+<summary>Explanation</summary>
+
+RAM shares resources such as VPC subnets and Transit Gateways with accounts or OUs without duplication. The aws:PrincipalOrgID condition key lets resource policies trust everyone in the organization, automatically including new accounts.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/02-iam-sts-identity-federation" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 02: IAM, STS & Identity Federation
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/04-vpc-network-security" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 04: VPC Architecture & Network Security Controls →
+  </a>
+</div>

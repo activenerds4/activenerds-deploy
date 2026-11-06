@@ -1,0 +1,348 @@
+---
+title: "Module 12: Monitoring Inference & Performance: Model Monitor, Drift, A/B Testing & GenAI Observability"
+description: "Task 4.1: CloudWatch generative AI observability, Bedrock evaluations, SageMaker Model Monitor (data quality, model quality, bias, explainability drift), A/B testing, agent monitoring (coordination failures, truncated streaming, tool failures)."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 12
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Domain 4, Task 4.1 - skills 4.1.1 (production model performance with CloudWatch generative AI observability, Bedrock Model Evaluation and drift pipelines), 4.1.2 (workflow anomaly and error detection), 4.1.3 (data distribution changes), 4.1.4 (A/B testing), 4.1.5 (agent performance and coordination) and 4.1.6 (AI-specific monitoring for FMs).
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 4.1 (Skills 4.1.1 - 4.1.6)">
+Domain 4 is 24% of scored content, and Task 4.1 is where monitoring vocabulary is tested. Know the four Model Monitor monitor types and what each one needs as input (especially that model quality needs ground-truth labels), the difference between data drift and concept drift, how production variants support A/B tests, and which signals reveal GenAI and agent problems (token metrics, invocation logs, traces, stop reasons, tool errors). Skills 4.1.5 and 4.1.6 are new in MLA-C02.
+</Callout>
+
+---
+
+## 1. What Can Go Wrong in Production?
+
+| Failure | Meaning | Detect with |
+|---|---|---|
+| Data quality issue | Missing values, wrong types, new columns, out-of-range values | Model Monitor data quality, Glue Data Quality on upstream data |
+| Data drift (covariate shift) | Input feature distribution moves away from training data | Model Monitor data quality baseline comparison, statistical tests |
+| Concept drift | The relationship between inputs and the target changes | Model Monitor model quality (needs ground truth) |
+| Prediction drift | Output distribution changes | Compare captured outputs with baseline |
+| Bias drift | Fairness metrics degrade on live traffic | Model Monitor bias drift (SageMaker Clarify) |
+| Explainability drift | Feature importance ranking changes | Model Monitor feature attribution drift (SHAP-based) |
+| Infrastructure problem | Latency, errors, saturation | CloudWatch endpoint and instance metrics |
+| GenAI quality or safety regression | Hallucination, toxicity, refusals, cost spikes | Bedrock evaluations, invocation logging, CloudWatch GenAI observability |
+
+```
+   Clients -> Endpoint -> Predictions
+                |             |
+          Data capture (S3)   +--> CloudWatch metrics (latency, errors, GPU, CPU)
+                |
+   Scheduled monitoring job (Processing) compares capture vs baseline
+                |
+   S3 reports (statistics, constraint_violations) + CloudWatch metrics
+                |
+        CloudWatch alarm -> EventBridge -> SNS / Lambda / Pipeline (retrain)
+```
+
+---
+
+## 2. Skills 4.1.1 and 4.1.3: SageMaker Model Monitor
+
+Model Monitor has four monitor types, each with a **baseline** (statistics and constraints computed from reference data) and a **schedule** (a processing job that analyses captured traffic).
+
+| Monitor | Needs | What it detects | Typical violations |
+|---|---|---|---|
+| Data quality | Training or validation dataset for baseline; captured inputs | Data type errors, missing/extra columns, completeness, categorical values, distribution drift | data_type_check, completeness_check, baseline_drift_check, missing_column_check |
+| Model quality | Captured predictions **plus ground-truth labels** in S3 (merged by an inference ID) | Regression, binary classification or multiclass metric degradation (accuracy, precision, recall, F1, AUC, RMSE, etc.) | Metric below baseline threshold |
+| Bias drift | Captured data, Clarify bias configuration (ground truth optional for some metrics) | Change in bias metrics such as DPPL or DI relative to baseline | Bias metric drift |
+| Feature attribution (explainability) drift | Clarify explainability configuration | Change in SHAP-based feature importance ranking (reported with an NDCG-style score) | Attribution drift |
+
+### Step 1: Enable data capture on the endpoint
+
+```python
+import boto3
+sm = boto3.client("sagemaker")
+sm.create_endpoint_config(
+    EndpointConfigName="churn-config-v8",
+    ProductionVariants=[{"VariantName": "AllTraffic", "ModelName": "churn-model-v8",
+                         "InstanceType": "ml.m5.xlarge", "InitialInstanceCount": 2}],
+    DataCaptureConfig={
+        "EnableCapture": True,
+        "InitialSamplingPercentage": 100,            # lower to cut S3 cost at high volume
+        "DestinationS3Uri": "s3://ml-monitor/capture/churn/",
+        "CaptureOptions": [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
+    },
+)
+```
+
+### Step 2: Create a baseline and a schedule
+
+```python
+from sagemaker.model_monitor import DefaultModelMonitor, CronExpressionGenerator
+from sagemaker.model_monitor.dataset_format import DatasetFormat
+
+monitor = DefaultModelMonitor(role=ROLE_ARN, instance_count=1,
+                              instance_type="ml.m5.xlarge", max_runtime_in_seconds=1800)
+
+monitor.suggest_baseline(
+    baseline_dataset="s3://ml-monitor/baseline/train.csv",
+    dataset_format=DatasetFormat.csv(header=True),
+    output_s3_uri="s3://ml-monitor/baseline/results/",
+)   # produces statistics.json and constraints.json
+
+monitor.create_monitoring_schedule(
+    monitor_schedule_name="churn-data-quality",
+    endpoint_input="churn-prod",
+    output_s3_uri="s3://ml-monitor/reports/",
+    statistics=monitor.baseline_statistics(),
+    constraints=monitor.suggested_constraints(),
+    schedule_cron_expression=CronExpressionGenerator.hourly(),
+    enable_cloudwatch_metrics=True,
+)
+```
+
+Each run writes `constraint_violations.json` and statistics to S3 and, when enabled, emits metrics to CloudWatch. Create a **CloudWatch alarm** on those metrics, then route the alarm through EventBridge to SNS, a Lambda function or a SageMaker pipeline for retraining (Module 10).
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why model quality monitoring lags">
+
+Ground truth (did the customer actually churn?) arrives days or weeks after the prediction. Model quality monitoring therefore needs a labeling process: store labels in S3 with an `inferenceId` that matches the captured request, and the merge job joins them before computing metrics. Because of this delay, data quality and drift monitors are your **early warning**, while model quality is the **confirmation**. If labels are unavailable, you can only infer problems from drift in inputs and predictions.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Drift detection mechanics and statistics">
+
+Drift checks compare the distribution of a live feature with the baseline distribution. Common techniques are the Kolmogorov-Smirnov test and Population Stability Index for numeric features, chi-squared or distance-based comparisons for categorical features, and divergence measures such as KL or Jensen-Shannon. Model Monitor automates distribution comparison against baseline constraints and flags features that exceed the configured thresholds. Tune thresholds carefully: too tight causes alarm fatigue from normal seasonal variation, too loose misses real shifts.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Batch inference and custom monitors">
+
+Model Monitor can also analyse batch transform data, and you can bring your own container for a **custom monitoring schedule** (for example, custom business-rule checks) when the built-in monitor types do not cover the need. Monitoring jobs are ordinary processing jobs and run on instances you size, so they have a cost.
+
+</AccordionItem>
+</AccordionGroup>
+
+<Callout variant="warning" title="Exam Trap: Model quality needs labels">
+If the question says "ground truth is not available" or "labels arrive months later", Model Monitor model quality cannot compute metrics yet. The right answer is data quality / drift monitoring (or a manual labeling workflow such as Ground Truth) as the interim signal. Likewise, bias drift and explainability drift require a Clarify configuration; they are not automatic.
+</Callout>
+
+---
+
+## 3. Skill 4.1.2: Monitoring Workflows for Anomalies and Errors
+
+Monitoring covers the whole workflow, not just the endpoint: ingestion, transformation, training and inference.
+
+| Layer | What to watch | AWS tooling |
+|---|---|---|
+| Endpoint | Invocations, Invocation4XXErrors, Invocation5XXErrors, ModelLatency, OverheadLatency, CPUUtilization, MemoryUtilization, GPUUtilization, DiskUtilization | CloudWatch metrics (endpoint and instance namespaces), alarms, dashboards |
+| Logs | Container stdout/stderr, inference exceptions | CloudWatch Logs for the endpoint, metric filters, Logs Insights |
+| Pipelines and jobs | Step failures, retries, duration | SageMaker Pipelines execution events, Step Functions execution metrics, EventBridge rules on job state changes |
+| Data processing | Glue job failures, data quality rule failures | AWS Glue Data Quality, Glue job events through EventBridge, CloudWatch |
+| Lambda and API layers | Errors, throttles, duration, iterator age | CloudWatch Lambda metrics, X-Ray traces |
+| Anomalies | Unusual traffic or latency without a fixed threshold | CloudWatch anomaly detection alarms, metric math |
+
+```python
+import boto3
+cw = boto3.client("cloudwatch")
+cw.put_metric_alarm(
+    AlarmName="churn-prod-5xx",
+    Namespace="AWS/SageMaker", MetricName="Invocation5XXErrors",
+    Dimensions=[{"Name": "EndpointName", "Value": "churn-prod"},
+                {"Name": "VariantName", "Value": "AllTraffic"}],
+    Statistic="Sum", Period=60, EvaluationPeriods=3, Threshold=5,
+    ComparisonOperator="GreaterThanOrEqualToThreshold",
+    TreatMissingData="notBreaching",
+    AlarmActions=["arn:aws:sns:us-east-1:111122223333:ml-oncall"],
+)
+```
+
+<Callout variant="tip" title="Latency decomposition">
+ModelLatency is time inside the container; OverheadLatency is SageMaker's own overhead (routing, request/response handling). A rise in ModelLatency points to the model, payload or instance; a rise in OverheadLatency points to platform or network factors. Memorize this distinction because it appears in troubleshooting scenarios.
+</Callout>
+
+---
+
+## 4. Skill 4.1.4: Monitoring with A/B Testing
+
+SageMaker supports multiple **production variants** behind one endpoint, each with its own model, instance type and count, and a weight that controls traffic share.
+
+```python
+sm.create_endpoint_config(
+    EndpointConfigName="churn-ab-config",
+    ProductionVariants=[
+        {"VariantName": "ModelA", "ModelName": "churn-model-v7", "InstanceType": "ml.m5.xlarge",
+         "InitialInstanceCount": 2, "InitialVariantWeight": 0.9},
+        {"VariantName": "ModelB", "ModelName": "churn-model-v8", "InstanceType": "ml.m5.xlarge",
+         "InitialInstanceCount": 1, "InitialVariantWeight": 0.1},
+    ],
+)
+
+# Shift traffic later without redeploying
+sm.update_endpoint_weights_and_capacities(
+    EndpointName="churn-prod",
+    DesiredWeightsAndCapacities=[
+        {"VariantName": "ModelA", "DesiredWeight": 0.5},
+        {"VariantName": "ModelB", "DesiredWeight": 0.5},
+    ],
+)
+
+# Force a request to a variant (testing, debugging)
+runtime.invoke_endpoint(EndpointName="churn-prod", TargetVariant="ModelB",
+                        ContentType="text/csv", Body=payload)
+```
+
+| Technique | Users see the result? | Purpose | How |
+|---|---|---|---|
+| A/B test with production variants | Yes, by weight | Compare business or model metrics on live traffic | Weighted variants, per-variant CloudWatch metrics (VariantName dimension) |
+| Shadow test | No, responses discarded | Compare latency and predictions safely | Shadow variants receive a copy of traffic |
+| Canary deployment | Yes, small percentage | Safe rollout with rollback | Deployment guardrails (Module 10) |
+
+Compare per-variant `Invocations`, `ModelLatency`, error metrics and, most importantly, a **business metric** (conversion, retention) computed from your own data. Statistical significance needs enough traffic and time; do not call a winner after a few requests.
+
+---
+
+## 5. Skills 4.1.1 and 4.1.6: GenAI Observability and Foundation Model Monitoring
+
+### Signals available for Amazon Bedrock
+
+* **CloudWatch runtime metrics** in the Bedrock namespace: Invocations, InvocationLatency, InputTokenCount, OutputTokenCount, InvocationClientErrors, InvocationServerErrors and InvocationThrottles, with the model ID as a dimension. Token metrics double as cost signals.
+* **Model invocation logging:** disabled by default; enable it to deliver request and response payload metadata to CloudWatch Logs and/or S3 for audit, debugging and quality analysis. Protect these logs because prompts can contain sensitive data.
+* **Amazon CloudWatch generative AI observability:** curated dashboards and views for model invocations and agents, including latency, token usage, errors and traces, with end-to-end tracing across components built on OpenTelemetry-compatible instrumentation and AWS X-Ray.
+* **Bedrock Guardrails metrics:** counts of interventions and blocked content, useful for safety monitoring.
+
+```python
+import boto3
+br = boto3.client("bedrock")
+br.put_model_invocation_logging_configuration(loggingConfig={
+    "cloudWatchConfig": {"logGroupName": "/bedrock/invocations", "roleArn": LOG_ROLE_ARN},
+    "s3Config": {"bucketName": "ml-bedrock-logs", "keyPrefix": "invocations/"},
+    "textDataDeliveryEnabled": True,
+    "imageDataDeliveryEnabled": False,
+    "embeddingDataDeliveryEnabled": False,
+})
+```
+
+### Continuous quality monitoring
+
+Run **Amazon Bedrock Evaluations** on a schedule (or on a sample of production prompts exported from invocation logs) with programmatic metrics, model-as-a-judge or human review, and alert when scores drop. Evaluate RAG separately: retrieval relevance and context coverage, plus faithfulness of the answer to retrieved context (Module 7). Track drift in *inputs* too: changing user topics, language mix and prompt length can degrade a stable model.
+
+| GenAI symptom | Likely signal | Action |
+|---|---|---|
+| Cost spike | OutputTokenCount or InputTokenCount rising | Review prompts, caps, caching, model choice (Module 13) |
+| Throttling | InvocationThrottles | Request quota increase, retries with backoff, Provisioned Throughput, cross-Region inference |
+| Quality regression | Judge scores or human ratings fall after a prompt or model change | Roll back prompt version or model (Module 11) |
+| Unsafe outputs | Guardrail interventions rising | Tighten guardrail policies, investigate prompt injection |
+| Slow responses | InvocationLatency or time to first token | Smaller model, shorter output, streaming, latency-optimized inference |
+
+---
+
+## 6. Skill 4.1.5: Monitoring and Automating Agent Performance and Coordination
+
+Agents add failure modes beyond a single model call because they plan, call tools and may collaborate with other agents.
+
+| Failure mode | What it looks like | Detection | Automated response |
+|---|---|---|---|
+| Coordination failure | Supervisor and collaborator agents loop, time out, or hand off incorrectly | Traces showing repeated steps, high step counts, session duration alarms | Cap iterations/timeouts, alarm on step count, route to fallback or human |
+| Truncated streaming | Response stream ends early; client never receives the completion or stop event, or output stops at the max token limit | Missing final stop event, stop reason indicating max tokens, client-side error logs | Retry with backoff, raise max tokens, fall back to non-streaming, alarm on rate |
+| Tool failure | Action group Lambda errors, timeouts, throttles, schema validation errors, downstream API failures | Lambda Errors and Throttles metrics, X-Ray traces, agent trace events | Retry policies, circuit breaker, DLQ, return a graceful message, page on-call |
+| Knowledge base failure | Empty or irrelevant retrieval | Retrieval metrics, evaluation scores | Refresh ingestion, tune chunking and retrieval (Modules 3 and 11) |
+
+Practical instrumentation:
+
+* Turn on **agent tracing** (`enableTrace=True` in `InvokeAgent`) to see reasoning steps, tool calls, knowledge base lookups and guardrail actions for each session. Do not leave full traces enabled indiscriminately in production if they contain sensitive data.
+* Use **Amazon Bedrock AgentCore Observability** (and CloudWatch generative AI observability) for session-level metrics, latency, token usage, error rates and distributed traces across tools.
+* Wire alarms to **EventBridge, SNS and Lambda** so detection triggers remediation: restart, rollback the alias to the previous agent version (Module 11), or reduce traffic.
+
+```
+ Agent session -> trace events / OpenTelemetry spans
+        |                |
+        v                v
+ CloudWatch metrics   X-Ray / GenAI observability traces
+        |
+   Alarm: error rate, p95 latency, step count, tool failures
+        |
+ EventBridge -> Lambda remediation / SNS page / alias rollback
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Reading a stop reason correctly">
+
+Model responses end with a stop reason. A normal completion differs from hitting the output token limit or being stopped by a guardrail. When streaming, a dropped connection produces no final stop event at all. Monitoring the *distribution* of stop reasons across requests reveals configuration mistakes: a sudden rise in max-token stops after a prompt change means answers are being cut off and the token limit or the prompt needs adjustment.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Designing resilient tool calls for agents">
+
+Action-group Lambda functions should be idempotent, return structured errors the model can reason about, enforce timeouts shorter than the agent's, and emit custom metrics (success, validation failure, downstream error). Use retries with exponential backoff for transient errors, DLQs for asynchronous follow-ups, and X-Ray to find the slow downstream dependency. Without these, one flaky API appears as a vague "agent is unreliable" complaint.
+
+</AccordionItem>
+</AccordionGroup>
+
+<Callout variant="warning" title="Exam Trap: Do not confuse monitoring tools">
+CloudTrail records API calls (who did what), not model quality. Model Monitor targets SageMaker endpoints and batch transform, not Bedrock FMs. For Bedrock FMs and agents use CloudWatch (metrics, invocation logs, generative AI observability), Bedrock Evaluations and AgentCore Observability. For a quick safety net on any endpoint, a CloudWatch alarm on 5XX errors plus a rollback alarm in the deployment configuration is the lowest-effort answer.
+</Callout>
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can name the four Model Monitor monitor types and the input each requires.
+<details>
+<summary>Explanation</summary>
+
+Data quality needs a baseline from training data and captured inputs. Model quality needs captured predictions and ground-truth labels merged by inference ID. Bias drift needs a Clarify bias configuration against captured data. Feature attribution drift needs a Clarify explainability configuration. Each uses a baseline, a monitoring schedule, S3 reports and CloudWatch metrics that can drive alarms.
+
+</details>
+
+- [ ] I can distinguish data drift from concept drift and say which monitor reveals each first.
+<details>
+<summary>Explanation</summary>
+
+Data drift is a change in input distributions and can be detected immediately by the data quality monitor without labels. Concept drift is a change in the input-to-target relationship and shows up as falling model quality metrics, which require delayed ground-truth labels. Data drift is the early warning; model quality drop is the confirmation.
+
+</details>
+
+- [ ] I can set up an automated retraining signal from monitoring results.
+<details>
+<summary>Explanation</summary>
+
+Enable data capture, create a baseline and a schedule with CloudWatch metrics enabled, create a CloudWatch alarm on the violation metric, and route the alarm state change through EventBridge to Lambda or directly to a SageMaker pipeline execution. The pipeline retrains, evaluates, and registers the model for approval; it should not auto-deploy without a quality gate.
+
+</details>
+
+- [ ] I can design an A/B test with production variants and interpret per-variant metrics.
+<details>
+<summary>Explanation</summary>
+
+Create an endpoint config with two production variants and initial weights such as 0.9 and 0.1, then adjust with UpdateEndpointWeightsAndCapacities. CloudWatch publishes metrics per VariantName, so compare latency and errors, plus a business metric from your own data. TargetVariant forces requests to one variant for debugging. Shadow variants receive mirrored traffic without exposing results to users.
+
+</details>
+
+- [ ] I know which signals monitor Bedrock FMs and what each reveals.
+<details>
+<summary>Explanation</summary>
+
+CloudWatch Bedrock metrics show invocations, latency, token counts, client and server errors and throttles. Invocation logging (off by default) captures request and response data for audit and analysis. CloudWatch generative AI observability gives curated dashboards and traces. Bedrock Evaluations track quality over time, and Guardrails metrics show safety interventions. Token counts are also the main cost signal.
+
+</details>
+
+- [ ] I can identify and automate responses to agent coordination failures, truncated streaming and tool failures.
+<details>
+<summary>Explanation</summary>
+
+Coordination failures appear as looping or excessive steps and are caught with traces, step-count and duration alarms, plus iteration caps. Truncated streaming shows as a missing final stop event or a max-token stop reason; respond with retries, a higher token limit or non-streaming fallback. Tool failures appear as Lambda errors, throttles or schema errors; respond with retries and backoff, idempotent handlers, DLQs and graceful messages. Alarms feed EventBridge, SNS and Lambda, and a bad release can be undone by moving the agent alias back to the previous version.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/11-genaiops-prompts-agents-rag-pipelines" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 11: GenAIOps: Prompt Management, Agent Pipelines, Fine-tuned Model Versioning & RAG Refresh
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/13-cost-performance-optimization" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 13: Optimizing ML and AI Infrastructure Cost & Performance →
+  </a>
+</div>

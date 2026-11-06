@@ -1,0 +1,238 @@
+---
+title: "Module 09: Data Modeling, Schema Evolution, Open Table Formats & Vector Indexes"
+description: "Redshift and DynamoDB schema design, partitioning and compression, schema conversion with DMS, Apache Iceberg and S3 Tables, lineage, HNSW/IVF, and Bedrock knowledge bases."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 9
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 2.4 and Skills 2.1.7–2.1.8: schema design for Redshift, DynamoDB, and Lake Formation; schema evolution; schema conversion with DMS; Apache Iceberg and S3 Tables; lineage; indexing, partitioning, and compression; vector indexes (HNSW, IVF) and vectorization with Bedrock knowledge bases (Skills 2.4.1–2.4.6).
+
+<Callout variant="info" title="Exam Blueprint Focus: Modeling & New v1.1 Topics">
+Version 1.1 added **open table formats (Iceberg)**, **vector index types**, and **vectorization concepts**. Note that **AWS SCT** was removed from the in-scope *service* list in v1.1, yet Skill 2.4.3 still names it alongside **AWS DMS Schema Conversion**, so know what both do.
+</Callout>
+
+---
+
+## 1. Schema Design by Store (Skill 2.4.1)
+
+<AccordionGroup type="single">
+<AccordionItem title="Redshift: dimensional modeling, distribution, and sort keys">
+
+* **Star schema:** central fact table (measures, foreign keys) + denormalized dimension tables. Snowflake normalizes dimensions (more joins).
+* **Distribution:** `KEY` on the join column of two large tables (co-located joins, avoid skew), `ALL` for small dimensions, `EVEN` when no clear join key, `AUTO` lets Redshift choose and adjust.
+* **Sort keys:** compound for filter prefix queries (most common), interleaved for multiple equal-weight filter columns, `AUTO` for adaptive. Zone maps skip blocks.
+* **Encoding/compression:** `ENCODE AUTO`; columnar storage compresses by column.
+* **Constraints** (PK/FK/unique) are informational only; they aren't enforced but the optimizer uses them.
+* **Semi-structured:** `SUPER` data type with PartiQL.
+
+</AccordionItem>
+<AccordionItem title="DynamoDB: access-pattern-first modeling">
+
+* Start from **queries**, then design keys. Prefer a **single table** with overloaded PK/SK when entities are accessed together (`PK=CUSTOMER#123`, `SK=ORDER#2026-11-05#987`).
+* **Hot partition prevention:** high-cardinality partition keys, write sharding with random suffixes for hot keys.
+* **GSIs** for alternate access patterns; **sparse indexes** to index a subset; **item size limit 400 KB**, so store large payloads in S3 with a pointer.
+* **Streams + Lambda** for derived tables; **TTL** for expiry.
+* No joins or ad hoc aggregation: export to S3 (point-in-time export) for analytics with Athena.
+
+</AccordionItem>
+<AccordionItem title="Lake Formation / data lake layout">
+
+* **Zones:** raw (immutable), cleansed/curated (Parquet, partitioned), consumption/serving (marts, aggregates). A "medallion" bronze/silver/gold naming is equivalent.
+* **Layout:** `s3://lake/<zone>/<domain>/<table>/year=YYYY/month=MM/day=DD/`.
+* **Register S3 locations** with Lake Formation, define databases/tables in the Glue Data Catalog, grant permissions at the table/column/row level (Module 13).
+* **Governed access and tag-based control (LF-tags)** scale better than per-table grants.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Partitioning, Indexing, Compression, and Optimization (Skill 2.4.5)
+
+| Technique | What it does | Guidance |
+|---|---|---|
+| **Partitioning (S3/Athena/Glue)** | Splits data into folders by key for pruning | Partition on commonly filtered, low-to-medium-cardinality columns (date, region); avoid too many tiny partitions |
+| **Bucketing** | Hash-distributes rows into fixed files | Helps joins/filters on high-cardinality columns |
+| **Columnar formats** | Parquet/ORC | Column pruning, predicate pushdown, built-in stats |
+| **Compression** | Snappy (fast), ZSTD (balanced), GZIP (smaller, slower, not splittable for text) | Parquet/ORC split regardless; **gzip CSV is not splittable** |
+| **File sizing** | 128 MB–1 GB | Compact small files (Glue, Athena `OPTIMIZE`, Iceberg compaction, S3 Tables automatic) |
+| **Indexing (RDS/Aurora)** | B-tree and others for selective lookups | Index frequent predicates; too many indexes slow writes |
+| **Redshift** | Sort/dist keys, `VACUUM`, `ANALYZE` (mostly automatic), materialized views | Use `AUTO` features |
+| **DynamoDB** | GSIs, LSIs, key design | Index for access patterns, mind write amplification |
+
+```sql
+-- Athena CTAS: partitioned, compressed Parquet
+CREATE TABLE curated.orders
+WITH (format='PARQUET', write_compression='ZSTD',
+      partitioned_by=ARRAY['order_date'],
+      external_location='s3://lake/curated/orders/') AS
+SELECT order_id, customer_id, amount, order_date FROM raw.orders_csv;
+```
+
+---
+
+## 3. Schema Evolution and Changing Data Characteristics (Skills 2.4.2, 2.4.3)
+
+* **Evolution types:** add column (safe), drop column, rename, change type (risky), reorder.
+* **Format support:** **Avro** and **Parquet** handle additive changes well; CSV is positional and fragile. Parquet columns are matched by name or index depending on engine (Athena `parquet.column-access` / `orc.column-access` property).
+* **Glue:** crawlers update table schemas (policy); **Schema Registry** enforces compatibility (BACKWARD, FORWARD, FULL) for streaming; DynamicFrame `ResolveChoice` handles mixed types.
+* **Iceberg:** schema evolution is metadata-only (add, drop, rename, reorder, widen types) with column IDs; no rewrite needed.
+* **Redshift:** `ALTER TABLE ADD COLUMN` is fast; changing types is limited (e.g., widening `VARCHAR`); otherwise deep copy.
+* **Characteristics drift** (volume spikes, new cardinality, skew): re-evaluate partition keys, dist keys, shard count, and compute sizing.
+* **Schema conversion (Skill 2.4.3):** **AWS DMS Schema Conversion** assesses and converts schema and code objects (tables, views, stored procedures) from a source engine (Oracle, SQL Server) to a target (Aurora PostgreSQL, Redshift), with an assessment report listing manual actions. Then **AWS DMS** moves the data. The **AWS Schema Conversion Tool (SCT)** is the older standalone desktop equivalent; it is still named in Skill 2.4.3 even though it was dropped from the in-scope service list.
+
+---
+
+## 4. Apache Iceberg and S3 Tables (Skill 2.1.7)
+
+An **open table format** adds a metadata layer (manifest lists, manifests, snapshots) on top of Parquet files in S3, providing **ACID transactions**, **schema evolution**, **hidden partitioning and partition evolution**, **time travel**, and **row-level deletes** (`MERGE INTO`, `UPDATE`, `DELETE`).
+
+```
+ Catalog (Glue Data Catalog / S3 Tables) --> metadata.json
+                                                |
+                                  snapshot -> manifest list -> manifests -> data files (Parquet)
+```
+
+| Capability | Athena (Iceberg) | Glue / EMR Spark | Redshift | S3 Tables |
+|---|---|---|---|---|
+| Create/query | Yes (`TBLPROPERTIES ('table_type'='ICEBERG')`) | Yes | Query via Spectrum/auto-mount | Yes, through integrated engines |
+| MERGE / row-level delete | Yes | Yes | Read focus | Yes |
+| Maintenance | `OPTIMIZE`, `VACUUM` | Compaction procedures | n/a | **Automatic** compaction, snapshot expiry, unreferenced file removal |
+
+```sql
+CREATE TABLE lake.orders_ice (order_id bigint, status string, ts timestamp)
+PARTITIONED BY (day(ts))
+LOCATION 's3://lake/iceberg/orders/'
+TBLPROPERTIES ('table_type'='ICEBERG');
+
+MERGE INTO lake.orders_ice t USING staging.updates s ON t.order_id = s.order_id
+WHEN MATCHED THEN UPDATE SET status = s.status
+WHEN NOT MATCHED THEN INSERT *;
+
+SELECT * FROM lake.orders_ice FOR TIMESTAMP AS OF (current_timestamp - interval '1' day);
+```
+
+**Amazon S3 Tables** are a purpose-built table bucket type that stores Iceberg tables with automated maintenance and tight integration with the Glue Data Catalog, Athena, Redshift, EMR, and Lake Formation. Choose Iceberg on regular S3 for flexibility; choose S3 Tables to reduce maintenance.
+
+---
+
+## 5. Lineage (Skill 2.4.4)
+
+**Data lineage** records where data came from and how it was transformed: for impact analysis, debugging, and audit.
+
+* **Amazon SageMaker ML Lineage Tracking** records artifacts, actions, contexts, and associations for ML workflows (datasets → training jobs → models).
+* **Amazon SageMaker Catalog** captures dataset lineage (including OpenLineage-compatible events from Glue and Redshift jobs) and shows upstream/downstream graphs.
+* Complement with **Glue Data Catalog** table properties, **CloudTrail** for API activity, and tagging standards.
+
+---
+
+## 6. Vector Indexes and Vectorization (Skills 2.1.8, 2.4.6)
+
+**Vectorization** converts text, images, or other data into **embeddings** (high-dimensional numeric vectors) using an embedding model (for example, Amazon Titan Text Embeddings on Bedrock). Similar meaning → nearby vectors. Similarity metrics: cosine, Euclidean (L2), inner product.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: HNSW vs IVF index types">
+
+| Index | How it works | Strengths | Trade-offs |
+|---|---|---|---|
+| **Exact (flat / brute force)** | Compare to every vector | 100% recall | Slow at scale |
+| **HNSW (Hierarchical Navigable Small World)** | Multi-layer proximity graph; greedy descent from sparse top layer to dense bottom layer | High recall and low latency, good for dynamic data | Higher memory use and slower index build; parameters `m`, `ef_construction`, `ef_search` |
+| **IVF (Inverted File, IVFFlat)** | Cluster vectors with k-means into lists; search only nearest `probes` lists | Lower memory, faster build | Needs training data first; recall depends on lists/probes; weaker with changing data |
+
+* **Aurora PostgreSQL with `pgvector`** supports `ivfflat` and `hnsw` indexes: `CREATE INDEX ON docs USING hnsw (embedding vector_cosine_ops);`
+* **Amazon OpenSearch Service/Serverless** supports k-NN with HNSW and IVF (Faiss, Lucene, NMSLIB engines).
+* **MemoryDB** supports vector search (FLAT and HNSW) for low-latency use.
+* Other stores: DocumentDB, Neptune Analytics, S3 Vectors.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Bedrock Knowledge Bases (RAG)">
+
+A **knowledge base** automates retrieval-augmented generation: it ingests documents from S3 (and other sources), **chunks** them, creates **embeddings** with a chosen model, stores them in a **vector store** (OpenSearch Serverless, Aurora PostgreSQL, Pinecone, Redis Enterprise Cloud, MongoDB Atlas, S3 Vectors), then `Retrieve` / `RetrieveAndGenerate` fetch relevant chunks to ground a foundation model's answer.
+
+```
+ S3 docs --> chunk --> embedding model --> vector store (HNSW/IVF)
+ Question --> embed --> nearest-neighbor search --> top-k chunks --> LLM prompt --> grounded answer
+```
+
+Data engineer responsibilities: keep sources synced, choose chunking, manage metadata filters and permissions, monitor ingestion jobs, control cost.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 7. Common Traps and Watchouts
+
+* **"Update or delete individual records in the lake"** → Iceberg (or Delta/Hudi), not rewriting CSVs.
+* **"Reduce table maintenance overhead for Iceberg"** → S3 Tables.
+* **"Convert Oracle schema to Aurora PostgreSQL"** → DMS Schema Conversion, then DMS for data.
+* **Too many partitions** (for example partitioning by user ID) create small files and slow queries.
+* **Gzip CSV isn't splittable;** use Parquet.
+* **DynamoDB is modeled by access patterns,** not normalized relations.
+* **HNSW = graph, accuracy and speed, more memory; IVF = clusters, less memory, needs training.**
+* **Foreign key constraints in Redshift are not enforced.**
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose Redshift distribution and sort keys for a star schema.
+<details>
+<summary>Explanation</summary>
+
+`KEY` on the shared join column of large fact/dimension pairs, `ALL` for small dimensions, `EVEN` if no join pattern, `AUTO` by default. Compound sort key on the most common filter columns (often date).
+
+</details>
+
+- [ ] I can design a DynamoDB model from access patterns and avoid hot partitions.
+<details>
+<summary>Explanation</summary>
+
+List queries first, design PK/SK and GSIs to serve them, use high-cardinality keys or write sharding, store large blobs in S3, use TTL and Streams as needed.
+
+</details>
+
+- [ ] I can explain Iceberg's benefits and when to use S3 Tables.
+<details>
+<summary>Explanation</summary>
+
+ACID, schema/partition evolution, time travel, row-level changes, and engine interoperability. S3 Tables automates compaction, snapshot expiry, and cleanup, lowering operational effort.
+
+</details>
+
+- [ ] I can describe how schema evolution is handled across formats and tools.
+<details>
+<summary>Explanation</summary>
+
+Avro/Parquet/Iceberg handle additive changes; CSV is fragile. Glue crawler policies, Schema Registry compatibility modes, DynamicFrame `ResolveChoice`, Iceberg metadata-only evolution, and Redshift `ALTER TABLE` each address different layers.
+
+</details>
+
+- [ ] I can compare HNSW and IVF and explain vectorization.
+<details>
+<summary>Explanation</summary>
+
+Embeddings turn data into vectors; similarity search finds nearest neighbors. HNSW (graph) gives high recall/low latency with higher memory; IVF (clusters) uses less memory with tunable probes and needs training. Aurora pgvector, OpenSearch, MemoryDB, and Bedrock knowledge bases use these.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/08-data-lifecycle-retention-resiliency" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 08: Data Lifecycle: S3 Tiering, Retention, TTL, COPY/UNLOAD & Resiliency
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/10-automating-and-analyzing-data-athena-quicksight" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 10: Automating & Analyzing Data: Athena, Redshift SQL, DataBrew & Quick →
+  </a>
+</div>

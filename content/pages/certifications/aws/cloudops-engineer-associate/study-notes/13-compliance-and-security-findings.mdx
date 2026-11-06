@@ -1,0 +1,146 @@
+---
+title: "Module 13: Compliance Enforcement & Security Findings Remediation"
+description: "AWS Config rules and conformance packs, Security Hub, GuardDuty, Inspector, Trusted Advisor, Health Dashboard, and automated remediation."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 13
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Skills 4.1.4, 4.1.5, 4.2.5: Trusted Advisor remediation, enforcing compliance and continuous monitoring, and acting on findings from Security Hub, GuardDuty, Config, Inspector, and AWS Security Agent.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 4.1 and 4.2 (Domain 4, 16%)">
+v1.1 added **Config conformance packs** (Skill 4.1.5) and **AWS Security Agent** (Skill 4.2.5), and AWS Health Dashboard joined the in-scope list. The exam asks you to **configure reports and remediate**, not to author the compliance framework itself.
+</Callout>
+
+---
+
+## 1. Service Roles at a Glance
+
+| Service | Question it answers | Key facts |
+|---|---|---|
+| **AWS Config** | Is my resource configuration compliant, and what changed? | Recorder keeps configuration history; **managed and custom rules**; **conformance packs** bundle rules and remediation; **aggregators** for multi-account/Region; remediation via SSM Automation |
+| **Security Hub** | One place for security findings and standards posture | Aggregates findings (ASFF) from GuardDuty, Inspector, Macie, Config and others; standards such as AWS Foundational Security Best Practices, CIS, PCI DSS; cross-Region aggregation; delegated admin |
+| **GuardDuty** | Is there malicious or anomalous activity? | Analyzes CloudTrail, VPC Flow Logs, DNS logs; protection plans for S3, EKS, Lambda, RDS, malware; severity ranked findings; suppression rules |
+| **Inspector** | Where are the vulnerabilities? | Continuous scanning of **EC2, ECR images, Lambda functions**; needs SSM agent for EC2; risk score |
+| **Trusted Advisor** | Best-practice checks across cost, performance, security, fault tolerance, quotas | Core checks for all plans (for example public S3 buckets, unrestricted security groups, root MFA, public snapshots); full set requires Business/Enterprise support |
+| **Macie** | Sensitive data in S3? | Module 12 |
+| **AWS Security Agent** | AI-assisted application security (design, code, and penetration-test style reviews) | New on the blueprint |
+| **Health Dashboard** | Is an AWS service or my resources affected by AWS events? | Account-specific events, EventBridge integration |
+
+```
+ CloudTrail / Flow Logs / DNS --> GuardDuty --+
+ EC2, ECR, Lambda ------------> Inspector ----+--> Security Hub --> EventBridge --> Lambda / SSM Automation / SNS / ticketing
+ Config rules / conformance packs ------------+
+ S3 data ---------------------> Macie --------+
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Config rules, conformance packs, and remediation">
+
+* **Rule triggers:** configuration change or **periodic** (1, 3, 6, 12, 24 hours). Compliance results: `COMPLIANT`, `NON_COMPLIANT`, `NOT_APPLICABLE`, `INSUFFICIENT_DATA`.
+* **Managed rule examples:** `s3-bucket-public-read-prohibited`, `encrypted-volumes`, `restricted-ssh`, `required-tags`, `iam-root-access-key-check`, `rds-instance-public-access-check`. **Custom rules** use Lambda or Guard.
+* **Conformance packs** deploy a collection of rules and remediation actions as a single unit (YAML template) to an account or organization, and report pack-level compliance (for example operational best practices for a standard).
+* **Remediation:** manual or **automatic** runbook execution with retries; needs an automation role. Config does not **prevent** changes; it detects, so combine with **SCPs/IAM** for prevention.
+* **Region and service restrictions** (Skill 4.1.5): prevent with SCP `aws:RequestedRegion` conditions; detect drift or unapproved services with Config rules and aggregators.
+* Prerequisite for Security Hub standards: **Config recording enabled**.
+
+</AccordionItem>
+</AccordionGroup>
+
+```bash
+aws configservice put-config-rule --config-rule '{"ConfigRuleName":"s3-no-public-read",
+  "Source":{"Owner":"AWS","SourceIdentifier":"S3_BUCKET_PUBLIC_READ_PROHIBITED"}}'
+aws configservice put-remediation-configurations --remediation-configurations '[{
+  "ConfigRuleName":"restricted-ssh","TargetType":"SSM_DOCUMENT",
+  "TargetId":"AWS-DisablePublicAccessForSecurityGroup","Automatic":true,
+  "MaximumAutomaticAttempts":3,"RetryAttemptSeconds":60,
+  "Parameters":{"AutomationAssumeRole":{"StaticValue":{"Values":["arn:aws:iam::111122223333:role/ConfigRemediation"]}},
+  "GroupId":{"ResourceValue":{"Value":"RESOURCE_ID"}}}}]'
+aws guardduty list-findings --detector-id <id> --finding-criteria '{"Criterion":{"severity":{"Gte":7}}}'
+```
+
+---
+
+## 2. Working Findings to Closure
+
+| Finding | Typical remediation |
+|---|---|
+| GuardDuty `UnauthorizedAccess:EC2/SSHBruteForce` | Restrict security group, isolate instance, rotate credentials; automate via EventBridge |
+| GuardDuty credential exfiltration (instance role used from outside) | Revoke role sessions (deny policy with token issue time), rotate, investigate CloudTrail |
+| Inspector critical CVE on EC2 | Patch with Patch Manager, rebuild AMI via Image Builder, redeploy |
+| Inspector ECR image vulnerability | Rebuild base image, set scan-on-push, block deployment |
+| Config `s3-bucket-public-read-prohibited` | Enable S3 Block Public Access, remediate through runbook |
+| Trusted Advisor: security group unrestricted port | Restrict CIDR; alerts on check status changes via EventBridge |
+| Security Hub failed control | Follow the control's remediation steps; suppress with documented exceptions |
+
+Reports: Security Hub insights and dashboards, Config aggregator compliance dashboards, Inspector coverage reports, GuardDuty findings export to S3, Trusted Advisor organizational view.
+
+<Callout variant="tip" title="AWS Security Agent">
+It is listed in Skill 4.2.5 with the established findings services. I could not verify detailed capabilities beyond its role in AI-assisted application security testing and review, so check the current documentation and treat questions on it as scenario-matching (it produces findings you then remediate).
+</Callout>
+
+---
+
+## 3. Exam Traps & Common Distractors
+
+- **Trap 1:** Using Config to **block** a noncompliant action. Config detects; SCPs, IAM, or service controls prevent.
+- **Trap 2:** Enabling Security Hub standards without **Config** recording.
+- **Trap 3:** Confusing GuardDuty (threat detection from logs) with Inspector (vulnerability scanning) and Macie (sensitive data).
+- **Trap 4:** Expecting full Trusted Advisor checks on a Basic support plan.
+- **Trap 5:** Enabling security services in one Region only when the requirement is organization-wide coverage (use delegated admin and all Regions).
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can enforce and monitor an approved-Regions requirement.
+<details>
+<summary>Explanation</summary>
+
+Preventive: SCP denying actions when `aws:RequestedRegion` is not in the approved list (exempt global services). Detective: Config rules/aggregator and GuardDuty or CloudTrail alerts for activity in unapproved Regions.
+
+</details>
+
+- [ ] I can automatically fix a noncompliant resource and keep evidence.
+<details>
+<summary>Explanation</summary>
+
+Config rule plus automatic remediation with an SSM Automation runbook and role; Config retains compliance history and remediation execution details; Security Hub aggregates results.
+
+</details>
+
+- [ ] I can select the right service for a stated security question.
+<details>
+<summary>Explanation</summary>
+
+Unusual API calls or crypto-mining behavior: GuardDuty. Known CVEs on instances/images/functions: Inspector. Public S3 PII: Macie. Resource misconfiguration against rules: Config. Single pane for all: Security Hub.
+
+</details>
+
+- [ ] I understand how Trusted Advisor ties into automation.
+<details>
+<summary>Explanation</summary>
+
+Check status changes are events; route them with EventBridge to SNS, Lambda or a runbook. Core security checks are available on all support plans, with the complete check set on Business and above.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/12-encryption-secrets-and-data-protection" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 12: Encryption, Secrets & Data Classification
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/14-vpc-design-and-private-connectivity" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 14: VPC Design, Gateways & Private Connectivity →
+  </a>
+</div>

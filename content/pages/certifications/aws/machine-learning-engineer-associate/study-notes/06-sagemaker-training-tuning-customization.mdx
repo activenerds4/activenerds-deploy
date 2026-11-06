@@ -1,0 +1,431 @@
+---
+title: "Module 06: Training, Tuning & Customizing Models with SageMaker AI"
+description: "Task 2.2: built-in algorithms, script mode, AMT, early stopping, distributed training, overfitting/underfitting/catastrophic forgetting, ensembles, hyperparameters, prompt engineering vs fine-tuning, retrieval/embedding optimization."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 6
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Domain 2, Task 2.2 - skills 2.2.1 (built-in algorithms and common ML libraries), 2.2.2 (script mode with supported frameworks), 2.2.3 (hyperparameter optimization with Automatic Model Tuning), 2.2.4 (training time reduction), 2.2.5 (overfitting, underfitting, catastrophic forgetting), 2.2.6 (combining models), 2.2.7 (fundamental hyperparameters), 2.2.8 (customization techniques for AI solutions) and 2.2.9 (optimizing retrieval components and embedding models).
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 2.2 (Skills 2.2.1 - 2.2.9)">
+Domain 2 is 24% of scored content. Skills 2.2.1 to 2.2.7 are the classic SageMaker training toolbox and carry over from MLA-C01. Skills 2.2.8 (customization such as task-specific prompt engineering and fine-tuning) and 2.2.9 (optimize retrieval components and embedding models) are NEW in MLA-C02. Two items were REMOVED from Task 2.2: "reducing model size" (pruning, compression, data type changes) and the stand-alone "fine-tune with custom datasets (Bedrock, JumpStart)" bullet, which is now absorbed into 2.2.8. Expect scenario questions that ask you to pick the cheapest or fastest lever: a different tuning strategy, Spot, FastFile or Pipe mode, a regularization fix, a prompt change before a fine-tune, or a chunking and embedding change before touching the generator model.
+</Callout>
+
+---
+
+## 1. The Training Decision Map
+
+Before memorizing parameters, learn the order in which a good ML engineer reaches for levers. The exam rewards the cheapest lever that solves the stated problem.
+
+| Symptom in the question | First lever | Skill |
+|---|---|---|
+| Tabular or standard problem, no custom code wanted | Built-in algorithm (XGBoost, Linear Learner) | 2.2.1 |
+| Team already has PyTorch, TensorFlow, Hugging Face or scikit-learn code | Script mode on a framework container | 2.2.2 |
+| Model quality plateau, many hyperparameters | Automatic Model Tuning | 2.2.3 |
+| Training takes too long or costs too much | Early stopping, Spot, input mode, distributed training | 2.2.4 |
+| Train metric great, validation poor | Regularization, more data, early stopping | 2.2.5 |
+| Both train and validation metrics poor | More capacity, better features, train longer | 2.2.5 |
+| Fine-tuned LLM forgot general abilities | Lower learning rate, replay data, parameter-efficient tuning | 2.2.5 |
+| One model is not accurate or cheap enough | Ensemble, stacking or a model cascade | 2.2.6 |
+| Loss oscillates or diverges | Learning rate and batch size | 2.2.7 |
+| FM gives generic or wrongly formatted answers | Prompt engineering, then RAG, then fine-tuning | 2.2.8 |
+| RAG returns irrelevant chunks | Chunking, embedding model, hybrid search, reranking | 2.2.9 |
+
+```
+ Data in S3 ---> Training job (container + script + hyperparameters) ---> model.tar.gz in S3
+                      |                                                        |
+        Metrics via regex (stdout)                                   Model Registry / endpoint
+                      |
+        Automatic Model Tuning launches many such jobs and picks the best objective metric
+```
+
+---
+
+## 2. Skills 2.2.1 and 2.2.2: Built-in Algorithms, Libraries and Script Mode
+
+### Built-in algorithms (skill 2.2.1)
+
+SageMaker AI built-in algorithms are managed containers: you supply data, hyperparameters and instance settings, and you write no training code. Know the family each algorithm belongs to, because questions describe a problem and expect the algorithm name.
+
+| Problem type | Built-in algorithms | Exam nuance |
+|---|---|---|
+| Tabular classification and regression | XGBoost, Linear Learner, Factorization Machines, k-NN | XGBoost is the default strong choice for tabular data; Factorization Machines suit sparse data such as recommendations |
+| Clustering and dimensionality reduction | K-Means, PCA | Unsupervised; no labels |
+| Anomaly detection | Random Cut Forest, IP Insights | Random Cut Forest for numeric anomalies; IP Insights for suspicious IP and entity pairs |
+| Time series forecasting | DeepAR | Trains one model across many related series |
+| Text | BlazingText (Word2vec and text classification), Seq2Seq, LDA, NTM | LDA and NTM are topic models |
+| Embeddings of pairs | Object2Vec | General-purpose embedding of pairs of objects |
+| Computer vision | Image Classification, Object Detection, Semantic Segmentation | Support transfer learning from pretrained networks |
+
+"Common ML libraries" means the managed framework containers for scikit-learn, XGBoost, PyTorch, TensorFlow, Hugging Face and others, plus SageMaker JumpStart for pretrained and foundation models. A built-in algorithm is the right answer when the requirement is "least operational effort" and the problem fits one of the algorithms. It is the wrong answer when the team has existing training code or needs a custom loss or architecture.
+
+### Script mode (skill 2.2.2)
+
+In **script mode** you keep your own training script and SageMaker supplies a prebuilt framework container. You pass `entry_point` (your script), optionally `source_dir` (a folder with a `requirements.txt`), and SageMaker installs dependencies, downloads data from S3 into channel folders, runs the script, and uploads whatever the script saves to the model directory.
+
+```python
+from sagemaker.pytorch import PyTorch
+
+estimator = PyTorch(
+    entry_point="train.py",
+    source_dir="src",                       # may contain requirements.txt
+    role=ROLE_ARN,
+    framework_version="2.3",                # choose a version supported by SageMaker
+    py_version="py311",
+    instance_type="ml.g5.xlarge",
+    instance_count=1,
+    hyperparameters={"epochs": 10, "batch-size": 64, "lr": 0.001},
+    metric_definitions=[{"Name": "val:accuracy", "Regex": "val_acc=([0-9\\.]+)"}],
+    output_path="s3://ml-bucket/models/",
+)
+estimator.fit({"train": "s3://ml-bucket/data/train/", "validation": "s3://ml-bucket/data/val/"})
+```
+
+Inside `train.py`, hyperparameters arrive as command-line arguments. The script reads the standard environment variables: `SM_CHANNEL_TRAIN` and `SM_CHANNEL_VALIDATION` for input data, `SM_MODEL_DIR` for the model artifact, and `SM_OUTPUT_DATA_DIR` for other outputs. Anything written to `SM_MODEL_DIR` is packaged into `model.tar.gz` and written to S3.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: What actually happens when a training job starts">
+
+SageMaker provisions the requested instances, pulls the container image from Amazon ECR, mounts or streams the input channels, and runs the container with your script. Data location is controlled by the input mode (section 5). Metrics are scraped from the container logs by the regular expressions you define in `metric_definitions` (built-in algorithms emit their metrics automatically). On completion, SageMaker uploads the model directory to S3 and tears the instances down; you pay for the billable seconds of the job. A failure produces a `FailureReason` and CloudWatch logs under the training job log group.
+
+* **Operational implication:** if a tuning job cannot find its objective metric, the regex does not match the log line. This is the most common reason AMT jobs fail to rank results.
+* **Framework containers versus built-in algorithms:** with a framework container you own the code and the bugs; with a built-in algorithm you own only the data format and the hyperparameters.
+* **Exam implication:** script mode is the answer for "reuse existing PyTorch or TensorFlow code with minimal changes". Bringing a fully custom container is no longer a named skill in MLA-C02 (see Module 09), so prefer prebuilt containers in answers.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Training Jobs, Processing Jobs and Experiments">
+
+A training job is the unit that produces a model artifact and is what tuning, Spot, distributed training and checkpointing apply to. Processing jobs run preprocessing and evaluation scripts and are not tuned. SageMaker AI with MLflow and Experiments (Module 07) track runs, parameters and metrics so that tuning results can be compared reproducibly.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Skill 2.2.3: Automatic Model Tuning (AMT)
+
+AMT launches many training jobs with different hyperparameter values and keeps the combination with the best **objective metric**. You define the metric, the ranges, the strategy and the resource limits.
+
+| Strategy | How it picks the next combination | Parallelism | Use when |
+|---|---|---|---|
+| Bayesian (the default) | Builds a model of past results and balances exploration with exploitation | Works with some parallelism, but each batch of parallel jobs sees fewer results, so very high parallelism reduces its advantage | Few expensive jobs, continuous and integer ranges |
+| Random | Samples independently of earlier results | Excellent; can run at maximum concurrency | Quick broad exploration, large parallel budgets |
+| Grid | Tries every combination of the categorical values you list | Good | Small categorical search space; supports categorical hyperparameters only, and you do not set the maximum number of training jobs because it is the number of combinations |
+| Hyperband | Multi-fidelity: allocates more epochs to promising configurations and stops weak ones early | Scales to many parallel jobs | Iterative algorithms such as neural networks and XGBoost that report the metric each epoch or round |
+
+```python
+from sagemaker.tuner import HyperparameterTuner, ContinuousParameter, IntegerParameter, CategoricalParameter
+
+tuner = HyperparameterTuner(
+    estimator=estimator,
+    objective_metric_name="val:accuracy",
+    objective_type="Maximize",
+    metric_definitions=[{"Name": "val:accuracy", "Regex": "val_acc=([0-9\\.]+)"}],
+    hyperparameter_ranges={
+        "lr": ContinuousParameter(1e-5, 1e-1, scaling_type="Logarithmic"),
+        "batch-size": CategoricalParameter([32, 64, 128]),
+        "num-layers": IntegerParameter(2, 8),
+    },
+    strategy="Bayesian",
+    max_jobs=30,
+    max_parallel_jobs=3,
+    early_stopping_type="Auto",   # stops jobs unlikely to beat the best so far
+)
+tuner.fit({"train": "s3://ml-bucket/data/train/", "validation": "s3://ml-bucket/data/val/"})
+```
+
+Four details are tested repeatedly:
+
+* **Scaling type:** use `Logarithmic` for learning rates and regularization strengths that span orders of magnitude; `Linear` wastes samples.
+* **Hyperband and early stopping:** Hyperband has early stopping built in, so `TrainingJobEarlyStoppingType` must be `OFF` when `Strategy` is `Hyperband`. Do not combine them. Hyperband takes a `HyperbandStrategyConfig` with `MinResource` and `MaxResource`.
+* **Warm start:** a tuning job can reuse results from up to several **parent** tuning jobs. `IDENTICAL_DATA_AND_ALGORITHM` means same data and algorithm with possibly changed ranges; `TRANSFER_LEARNING` allows changed data and slightly changed algorithm settings. Use warm start when a previous search was cut short or the data was refreshed, instead of starting from scratch.
+* **Parallelism trade-off:** more `MaxParallelTrainingJobs` finishes sooner but gives Bayesian search less information per step.
+
+```json
+{
+  "HyperParameterTuningJobConfig": {
+    "Strategy": "Hyperband",
+    "HyperParameterTuningJobObjective": {"Type": "Maximize", "MetricName": "validation:accuracy"},
+    "ResourceLimits": {"MaxNumberOfTrainingJobs": 60, "MaxParallelTrainingJobs": 6},
+    "StrategyConfig": {"HyperbandStrategyConfig": {"MinResource": 1, "MaxResource": 20}},
+    "TrainingJobEarlyStoppingType": "OFF"
+  }
+}
+```
+
+<Callout variant="tip" title="Choosing a strategy in one line">
+Few jobs and expensive training: Bayesian. Many cheap jobs and lots of parallelism: Random. Small categorical grid you must cover exhaustively: Grid. Deep learning with per-epoch metrics and a desire to cut wasted epochs: Hyperband. Previous search exists: warm start.
+</Callout>
+
+---
+
+## 4. Skill 2.2.4: Training Time Reduction
+
+| Technique | What it does | Config | Exam nuance |
+|---|---|---|---|
+| Early stopping | Stops training when the validation metric stops improving | Framework callbacks or algorithm parameters; AMT `early_stopping_type="Auto"` stops whole tuning jobs that cannot beat the best | Saves time and also reduces overfitting |
+| Managed Spot training | Uses spare capacity at a discount | `use_spot_instances=True`, `max_run`, `max_wait` (at least `max_run`), `checkpoint_s3_uri` | Needs checkpointing to resume after interruption |
+| Input mode File | Downloads the full dataset to the instance before training | Default | Slow start on large data |
+| Input mode FastFile | Streams S3 objects on demand with file-system semantics | `input_mode="FastFile"` | Best default for large datasets when your code expects files |
+| Input mode Pipe | Streams data through a named pipe | `input_mode="Pipe"` | Sequential access, no local copy; common with RecordIO and built-in algorithms |
+| Distributed data parallel | Replicates the model on every GPU and splits the batches | SageMaker data parallelism library (SMDDP) or framework DDP | Use when the model fits on one GPU but the data is huge |
+| Distributed model parallel | Splits the model across GPUs | SageMaker model parallelism library, sharded data parallel, tensor parallelism | Use when the model does not fit in one GPU memory |
+| Warm pools | Keeps provisioned instances alive between jobs | `keep_alive_period_in_seconds` | Speeds up iterative experiments and tuning |
+
+```python
+estimator = PyTorch(
+    entry_point="train.py", role=ROLE_ARN, framework_version="2.3", py_version="py311",
+    instance_type="ml.p4d.24xlarge", instance_count=2,
+    distribution={"smdistributed": {"dataparallel": {"enabled": True}}},
+    use_spot_instances=True, max_run=7200, max_wait=10800,
+    checkpoint_s3_uri="s3://ml-bucket/checkpoints/run-42/",
+    input_mode="FastFile",
+)
+```
+
+```
+        DATA PARALLEL                           MODEL PARALLEL
+   +---------+   +---------+            +---------------------------+
+   | GPU 0   |   | GPU 1   |            | Layers 1-12 | Layers 13-24 |
+   | full    |   | full    |            |   GPU 0     |    GPU 1     |
+   | model   |   | model   |            +---------------------------+
+   | batch A |   | batch B |             one model sharded across GPUs
+   +----+----+   +----+----+
+        +--- all-reduce gradients ---+
+```
+
+<Callout variant="warning" title="Exam Trap: Spot without checkpoints">
+"Reduce training cost by up to 90 percent with no code changes to restart" is wrong if the job runs for hours with no checkpoints: an interruption restarts from scratch. The correct design is Managed Spot training plus `checkpoint_s3_uri`, with the script loading the latest checkpoint at start. Also remember that `max_wait` must be greater than or equal to `max_run`.
+</Callout>
+
+---
+
+## 5. Skills 2.2.5 and 2.2.7: Generalization, Forgetting and Fundamental Hyperparameters
+
+### Diagnosing the fit (skill 2.2.5)
+
+| Condition | Signature | Fixes |
+|---|---|---|
+| Overfitting | Training loss keeps falling while validation loss rises; large gap | More or augmented data, early stopping, regularization (L1, L2, weight decay), dropout, smaller model, fewer epochs, cross-validation, feature selection |
+| Underfitting | Both training and validation loss are high | Bigger model, more or better features, train longer, lower regularization, higher learning rate if loss is flat |
+| Catastrophic forgetting | After fine-tuning on a narrow dataset the model loses earlier general skills | Lower learning rate, fewer epochs, mix replay data from the original distribution, parameter-efficient methods such as LoRA that leave base weights frozen, regularization toward the original weights |
+
+SageMaker Debugger built-in rules (for example overfitting and loss-not-decreasing style rules) can watch training tensors and alert or stop a job. Always evaluate on a held-out test set that tuning never saw; tuning on the validation set repeatedly can overfit the validation set itself.
+
+### Fundamental hyperparameters (skill 2.2.7)
+
+| Hyperparameter | Meaning | Too low | Too high |
+|---|---|---|---|
+| Epoch | One full pass through the training data | Underfitting | Overfitting, wasted cost |
+| Steps | Number of optimizer updates (steps per epoch is dataset size divided by batch size) | Underfit | Overfit, longer training |
+| Batch size | Samples per gradient update | Noisy gradients, slow wall-clock time | Memory errors, poorer generalization, may need a higher learning rate |
+| Learning rate | Size of each weight update | Very slow convergence, stuck | Divergence, oscillating loss, NaN values |
+
+A practical sequence: fix the batch size to what fits in GPU memory, tune the learning rate on a log scale first (it is usually the most sensitive), then tune epochs with early stopping, then regularization. When you double the batch size you often scale the learning rate up as well. For fine-tuning an FM, learning rates are typically far smaller than for training from scratch, which is also the main defence against catastrophic forgetting.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Reading loss curves like an examiner">
+
+Questions often describe a curve in words. Training loss falling and validation loss rising means overfitting, so add regularization or stop earlier. Both flat and high means underfitting or a learning rate that is too low. Loss jumping up and down or reaching NaN means the learning rate is too high or inputs are unscaled. A smooth decline that simply has not finished means train longer. Reducing model size by pruning or compression is no longer a named blueprint skill in MLA-C02, so do not pick it as the answer to a generalization problem.
+
+* **Operational implication:** log training and validation metrics every epoch so that early stopping and Hyperband have signals to act on.
+* **Imbalanced data:** accuracy hides overfitting to the majority class; use precision, recall, F1 or AUC and resample or weight classes (Module 03).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Catastrophic forgetting in LLM fine-tuning">
+
+Full fine-tuning updates every weight, so a narrow dataset can overwrite broad capability. Mitigations are layered: use a small learning rate and few epochs, blend a portion of general instruction data into the fine-tuning set, prefer parameter-efficient fine-tuning that trains small adapter matrices, and evaluate on both the new task and a general benchmark after each run. If general quality must be preserved at all costs, prefer RAG or prompt engineering, which do not modify weights.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 6. Skill 2.2.6: Combining Multiple Models
+
+| Pattern | How it works | Benefit | Cost or risk |
+|---|---|---|---|
+| Bagging (for example random forest) | Train many models on bootstrap samples and average | Reduces variance, helps overfitting | More compute at inference |
+| Boosting (for example XGBoost) | Train models sequentially, each correcting the previous errors | Reduces bias, strong tabular accuracy | Can overfit noisy data |
+| Stacking | A meta-model learns from the predictions of base models | Often the best accuracy | Complex pipeline, leakage risk if base predictions are not out-of-fold |
+| Voting or averaging | Combine outputs of diverse models | Simple and robust | Latency adds up |
+| Model cascade or routing | A small cheap model handles easy requests and escalates hard ones to a large model | Reduces cost and latency | Needs a good confidence signal or router; Amazon Bedrock also offers prompt routing between models of one family |
+| Distillation | A small student model learns from a large teacher | Cheap inference with close quality | Needs a distillation job and data (see section 7) |
+
+On SageMaker you can serve a chain of containers behind one endpoint with an **inference pipeline** (for example preprocessing, then model, then postprocessing), host many models behind a multi-model endpoint (Module 08), or orchestrate an ensemble with Step Functions or SageMaker Pipelines. When the requirement is "improve performance or reduce cost" (the wording of skill 2.2.6), accuracy-oriented answers are bagging, boosting or stacking, and cost-oriented answers are cascades, routing and distillation.
+
+---
+
+## 7. Skill 2.2.8: Customization Techniques for AI Solutions (NEW)
+
+Customize in this order: **prompt engineering, then RAG, then fine-tuning, then continued pre-training**. Each step costs more and is harder to reverse.
+
+| Technique | Changes weights? | Data needed | Best for | Exam nuance |
+|---|---|---|---|---|
+| Task-specific prompt engineering | No | A handful of examples | Format, tone, reasoning style, few-shot examples, system prompts | Cheapest and fastest; version prompts with Bedrock Prompt Management (Module 11) |
+| RAG | No | Documents | Fresh or private knowledge with citations | Knowledge changes often, so do not bake it into weights |
+| Supervised fine-tuning | Yes | Labeled prompt-response pairs | Consistent style, domain task behavior, specialized output format | Needs quality data; risk of forgetting |
+| Continued pre-training | Yes | Large unlabeled domain text | Domain vocabulary and language familiarity | Does not teach a task format by itself |
+| Distillation | Yes (student) | Prompts, optionally prompt-response pairs; a teacher model generates responses | Cheaper, faster model close to a large model on one use case | Teacher and student pairing and supported models are listed in the Bedrock docs |
+| Reinforcement fine-tuning | Yes | Prompts plus a reward function | Optimizing against a measurable reward | Newer option; know that it exists and uses a reward signal rather than labeled answers |
+
+Amazon Bedrock model customization runs as a job. The job needs training data in S3 (JSONL, with the exact record schema depending on the base model), an IAM role that can read the data and write the output, and hyperparameters passed as strings whose names depend on the base model.
+
+```python
+import boto3
+bedrock = boto3.client("bedrock")
+
+bedrock.create_model_customization_job(
+    jobName="support-ft-001",
+    customModelName="support-assistant-v1",
+    roleArn="arn:aws:iam::111122223333:role/BedrockCustomizationRole",
+    baseModelIdentifier="BASE_MODEL_ID_FROM_SUPPORTED_LIST",
+    customizationType="FINE_TUNING",          # or CONTINUED_PRE_TRAINING, DISTILLATION
+    trainingDataConfig={"s3Uri": "s3://ml-bucket/ft/train.jsonl"},
+    validationDataConfig={"validators": [{"s3Uri": "s3://ml-bucket/ft/val.jsonl"}]},
+    outputDataConfig={"s3Uri": "s3://ml-bucket/ft/output/"},
+    hyperParameters={"epochCount": "2", "batchSize": "8", "learningRate": "0.00001"},
+)
+```
+
+Hyperparameter names and allowed values vary by model, so confirm them for the chosen base model. Data preparation (prompt-response pair validation, deduplication, masking sensitive data) belongs to Domain 1 skill 1.2.9 and 1.3.6. In SageMaker AI you can alternatively fine-tune open models from JumpStart or with your own script mode job, usually with parameter-efficient methods, when you need control over hardware, frameworks or weights.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Fine-tune or not? A decision procedure">
+
+Ask four questions in order. First, can a better prompt with a few examples produce the result? If yes, stop. Second, is the gap about missing knowledge? Use RAG, because documents change and weights should not. Third, is the gap about behavior, style or a fixed output structure that prompts cannot hold reliably, or about cost and latency at volume? Fine-tune, or distill a large model into a smaller one. Fourth, is the domain language so unfamiliar that the base model misreads the text (specialist jargon, legal or medical corpora)? Consider continued pre-training on unlabeled domain text, then optionally fine-tune.
+
+* **Hidden cost:** a customized model usually needs hosting set-up that differs from on-demand base models. Check the current Bedrock documentation for how a given custom model is invoked (provisioned capacity or on-demand deployment depends on the model), and treat it as a monthly cost item.
+* **Governance:** log and version the training data, the job configuration and the resulting custom model so that results are reproducible (Module 11).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Prompt engineering techniques that appear in scenarios">
+
+Zero-shot (instruction only), few-shot (examples in the prompt), chain-of-thought (ask for step-by-step reasoning), role and system prompts (set persona and constraints), structured output instructions (JSON schema), and negative instructions are the standard toolkit. Inference parameters matter too: lower temperature for deterministic extraction, higher for creative text, and a maximum token limit to control cost. Prompt changes should be tested against a fixed evaluation set before release.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 8. Skill 2.2.9: Optimizing Retrieval Components and Embedding Models (NEW)
+
+RAG quality is limited by the weakest of three links: the chunks, the embeddings, and the retrieval strategy. Tune them before you blame or retrain the generator.
+
+| Component | Lever | Effect | Trade-off |
+|---|---|---|---|
+| Chunking | Chunk size and overlap | Small chunks give precise matches but lose context; large chunks keep context but dilute relevance | Re-ingest after any change |
+| Chunking | Hierarchical chunking (small child chunks retrieved, larger parent chunks returned) | Precise matching with richer context | Larger prompts |
+| Chunking | Semantic chunking | Splits on meaning boundaries | Extra processing cost at ingestion |
+| Embedding model | Choose a model suited to the language and domain; choose dimensions | More dimensions can improve recall but raise storage and latency | Changing the model means re-embedding the whole corpus, and the vector index dimension must match |
+| Embedding model | Fine-tune or select a domain-specific embedding model | Better semantic match for specialist jargon | Training effort |
+| Retrieval | Number of results (top-k) | Higher recall, lower precision, longer prompts | Token cost |
+| Retrieval | Hybrid search (semantic plus keyword) | Helps exact terms, codes and names that embeddings blur | Availability depends on the vector store |
+| Retrieval | Metadata filters | Restrict to the right document set, tenant or date | Needs metadata at ingestion |
+| Retrieval | Reranking | A second model reorders candidates by relevance | Added latency and cost |
+| Query | Query rewriting or decomposition | Handles vague or multi-part questions | Extra model call |
+
+```python
+import json, boto3
+brt = boto3.client("bedrock-runtime")
+resp = brt.invoke_model(
+    modelId="amazon.titan-embed-text-v2:0",
+    body=json.dumps({"inputText": "reset a forgotten password", "dimensions": 512, "normalize": True}),
+)
+vector = json.loads(resp["body"].read())["embedding"]
+```
+
+Diagnose with measurement, not intuition. Build a small set of questions with known relevant documents, then measure retrieval relevance and context coverage (Bedrock knowledge base evaluation, Module 07) and answer faithfulness. If the right chunk is absent from the retrieved set, fix chunking, embeddings or retrieval. If the right chunk is present but the answer is wrong, fix the prompt or the generator. Vector database provisioning and Knowledge Base setup are covered in Module 09 (skill 3.2.7).
+
+<Callout variant="warning" title="Exam Trap: Fine-tuning the LLM to fix retrieval">
+Scenario: "A RAG chatbot returns answers that miss product codes like XJ-4471. The team proposes fine-tuning the foundation model." Wrong: the generator never saw the right text, because semantic embeddings blur exact identifiers. Right: add hybrid search (keyword plus vector) where the vector store supports it, add metadata filters, and tune chunking. Scenario: "Answers are correct but in the wrong tone and JSON shape." Wrong: re-chunk the documents. Right: prompt engineering first, then fine-tune only if prompts cannot hold the format.
+</Callout>
+
+---
+
+## 9. Exam Traps: Wrong Versus Right Reasoning
+
+<Callout variant="warning" title="Exam Trap: Pick the lever that matches the symptom">
+Scenario A: "Validation loss rises while training loss falls. The team doubles the number of epochs." Wrong, since more epochs deepen overfitting. Right: early stopping, regularization or more data. Scenario B: "A Hyperband tuning job is configured with early stopping set to Auto." Wrong, because Hyperband has built-in early stopping and requires it to be OFF. Scenario C: "Tune a learning rate between 0.00001 and 0.1 using a linear scale." Wrong, since most samples land at large values. Right: logarithmic scaling. Scenario D: "The model does not fit in a single GPU, so the team adds more GPUs with data parallelism." Wrong, because each GPU still needs the full model. Right: model parallelism or sharded training. Scenario E: "Fine-tuning ruined the general abilities of the LLM." Right: lower learning rate, replay data and parameter-efficient tuning, or switch to RAG. Scenario F: "Large dataset, long startup time before training begins." Right: FastFile or Pipe mode instead of File mode.
+</Callout>
+
+| Distractor | Why it fails |
+|---|---|
+| Write a custom training container for every job | Script mode on a prebuilt framework container is simpler; bring-your-own-container is no longer a named MLA-C02 skill |
+| Use Grid search with continuous ranges | Grid supports categorical values only |
+| Increase parallel tuning jobs to improve Bayesian quality | Parallelism speeds up wall time but gives Bayesian search fewer informed steps |
+| Fine-tune an FM to add daily-changing knowledge | Weights are static; use RAG |
+| Prune or compress the model to fix overfitting | Removed from the blueprint and not a generalization fix; use regularization or more data |
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between a built-in algorithm and script mode (skills 2.2.1 and 2.2.2) and name the environment variables a script reads.
+<details>
+<summary>Explanation</summary>
+
+Choose a built-in algorithm when the problem fits (XGBoost or Linear Learner for tabular, DeepAR for forecasting, Random Cut Forest for anomalies) and the goal is minimal operational effort. Choose script mode when you have existing PyTorch, TensorFlow, Hugging Face or scikit-learn code or need a custom architecture: you provide `entry_point` and optionally `source_dir`, and SageMaker runs it in a prebuilt framework container. The script reads hyperparameters as command-line arguments and uses `SM_CHANNEL_*` for input data, `SM_MODEL_DIR` for the model artifact and `SM_OUTPUT_DATA_DIR` for other output.
+
+</details>
+
+- [ ] I can pick the right AMT strategy and configure it correctly (skill 2.2.3).
+<details>
+<summary>Explanation</summary>
+
+Bayesian suits few expensive jobs, Random suits wide parallel exploration, Grid covers categorical combinations exhaustively and needs no maximum job count, and Hyperband suits iterative training with per-epoch metrics. Hyperband requires `TrainingJobEarlyStoppingType` set to `OFF` because it stops weak runs itself. Use logarithmic scaling for learning rates. Warm start reuses parent tuning jobs: `IDENTICAL_DATA_AND_ALGORITHM` when data and algorithm are unchanged, `TRANSFER_LEARNING` when they changed slightly. The objective metric must be emitted by the built-in algorithm or captured by a regex in `metric_definitions`.
+
+</details>
+
+- [ ] I can reduce training time and cost and explain what each technique requires (skill 2.2.4).
+<details>
+<summary>Explanation</summary>
+
+Early stopping ends unpromising training. Managed Spot needs `max_wait` at least `max_run` and a checkpoint location to resume after interruption. FastFile streams objects on demand and Pipe streams sequentially, both avoiding a full download before training; File is the default and starts slowest on big data. Data parallelism splits batches across GPUs when the model fits on one GPU; model parallelism splits the model when it does not. Warm pools keep instances alive between iterative jobs.
+
+</details>
+
+- [ ] I can diagnose overfitting, underfitting and catastrophic forgetting from symptoms and name the fix, and I know how epochs, steps, batch size and learning rate behave (skills 2.2.5 and 2.2.7).
+<details>
+<summary>Explanation</summary>
+
+Overfitting shows a growing gap between training and validation loss; fix with regularization, dropout, more or augmented data, early stopping or a smaller model. Underfitting shows both losses high; add capacity or features, train longer or reduce regularization. Catastrophic forgetting appears after narrow fine-tuning; use a lower learning rate, fewer epochs, replay of general data and parameter-efficient tuning. A learning rate that is too high diverges or oscillates, and too low converges slowly; large batch sizes need memory and often a higher learning rate; too many epochs overfit.
+
+</details>
+
+- [ ] I can match customization techniques to problems and explain how to combine models (skills 2.2.6 and 2.2.8).
+<details>
+<summary>Explanation</summary>
+
+Start with prompt engineering, then RAG for knowledge, then fine-tuning for behavior and format, and continued pre-training for unfamiliar domain language. Distillation produces a smaller student from a teacher for lower cost and latency. Bedrock customization jobs use `create_model_customization_job` with a `customizationType` of fine-tuning, continued pre-training or distillation, training data in S3 and a service role. For combining models, bagging reduces variance, boosting reduces bias, stacking uses a meta-model on out-of-fold predictions, and cascades or routing cut cost by sending easy requests to a small model.
+
+</details>
+
+- [ ] I can improve a failing RAG system by tuning retrieval and embeddings before touching the generator (skill 2.2.9).
+<details>
+<summary>Explanation</summary>
+
+Check whether the correct chunk was retrieved. If not, adjust chunk size and overlap, consider hierarchical or semantic chunking, choose or fine-tune a better embedding model (the index dimension must match the model and a change requires re-embedding), raise top-k, add hybrid search for exact terms where supported, apply metadata filters and add reranking. If the right chunk was retrieved but the answer is poor, change the prompt or the generator. Measure with retrieval relevance and context coverage metrics on a fixed question set.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/05-model-selection-bedrock-fms-rag-patterns" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 05: Choosing Modeling Approaches: Bedrock FMs, RAG Patterns & AWS AI Services
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/07-model-evaluation-explainability-genai-eval" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 07: Evaluating ML and GenAI Systems: Metrics, Drift Baselines, Explainability & LLM-as-a-Judge →
+  </a>
+</div>

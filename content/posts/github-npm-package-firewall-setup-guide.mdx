@@ -1,0 +1,144 @@
+---
+title: "GitHub's npm Package Firewall: How to Block Malicious Packages Before They Install"
+slug: github-npm-package-firewall-setup-guide
+description: "How to enable and configure GitHub's npm Package Firewall to intercept trojanized and malicious open-source packages at install time, before they reach CI runners or developer machines."
+date: "2026-11-03"
+author: activenerds-team
+category: devsecops-security
+tags: ["npm", "supply-chain", "github", "devsecops", "security"]
+featured: true
+relatedArticles: ["supply-chain-security-k8s", "devsecops-hardening-checklist", "secrets-scanning-ci-pipelines", "vulnerability-scanning-automation-ci", "sbom-generation-tools-comparison"]
+image: https://cdn.activenerds.com/images/posts/github-npm-package-firewall-setup-guide.png
+imageAlt: "GitHub npm Package Firewall architecture — proxying npm registry requests and blocking malicious packages in CI/CD"
+published: true
+---
+
+<Callout variant="info" title="Public Preview Feature">
+GitHub has introduced the **GitHub Package Firewall** for npm in public preview. Built directly into GitHub Enterprise and GitHub Packages infrastructure, it functions as an inline inspection proxy that rejects malicious open-source packages at download time.
+</Callout>
+
+Software supply chain security has historically operated reactively. An attacker publishes a malicious npm package containing credential-stealing post-install scripts. Hours or days later, security researchers discover the threat, a CVE is registered, and Dependabot opens an alert on your repository. By then, developer laptops and ephemeral CI runners have already run `npm install` and executed the attack.
+
+The **GitHub npm Package Firewall** changes this paradigm from reactive notification to **proactive, inline interception**. Here is how it functions, how to enable it for your organization, and how to configure policies to safeguard your development environments.
+
+---
+
+## 1. What the Package Firewall Does
+
+The Package Firewall sits between your build environments (developer laptops, GitHub Actions runners, Docker builds) and the upstream public `registry.npmjs.org`.
+
+```
+[ Developer / CI Runner ]
+          │  npm install <package>
+          ▼
+[ GitHub Package Firewall Proxy ]
+   │
+   ├── 1. Check Threat Intelligence Engine (Real-time malware feed)
+   ├── 2. Evaluate Org Policies (Block unverified authors / typosquats)
+   ├── 3. Analyze Post-Install Scripts & Behavioral Heuristics
+   │
+   ├── [PASS] ──> Proxies package from upstream registry.npmjs.org
+   └── [BLOCK] ──> Returns 403 Forbidden with security remediation link
+```
+
+### Key Detection Capabilities:
+- **Instant Blocklist Synchronization**: Known malicious packages detected across GitHub's global telemetry or the GitHub Advisory Database are blocked immediately—even before formal CVE assignment.
+- **Typosquatting & Brandjacking Protection**: Algorithmic detection of names designed to mimic popular libraries (e.g., `cross-env-js` instead of `cross-env`).
+- **Suspicious Behavior Heuristics**: Flags brand-new packages published within the last 48 hours that immediately execute network calls or spawn shell processes in `preinstall` or `postinstall` hooks.
+
+---
+
+## 2. Enabling It on Your Organization (Public Preview)
+
+To activate the Package Firewall, you must hold Organization Owner or Security Manager permissions on GitHub Enterprise Cloud.
+
+### Step 2.1: Navigation in Organization Settings
+
+1. Navigate to your organization dashboard on GitHub: `https://github.com/organizations/<YOUR-ORG>/settings/security_analysis`.
+2. Scroll to the **Supply Chain Security** section.
+3. Locate **Package Firewall (Preview)** and click **Enable**.
+
+### Step 2.2: Establish Registry Authentication Credentials
+
+Once enabled, GitHub generates a dedicated scoped registry URL for your organization:
+
+```text
+https://npm.pkg.github.com/firewall/<YOUR-ORG>/
+```
+
+Generate an Organization-wide Machine Access Token (or Personal Access Token with `read:packages` scope) for developer and CI machine authentication.
+
+---
+
+## 3. Policy Configuration for npm Endpoints
+
+To route all package installations through the firewall, configure your global or project-level `.npmrc`.
+
+### Configuring `.npmrc` for Local Developers and CI
+
+Add the firewall proxy endpoint to your `.npmrc`:
+
+```ini
+# .npmrc
+registry=https://npm.pkg.github.com/firewall/<YOUR-ORG>/
+//npm.pkg.github.com/firewall/<YOUR-ORG>/:_authToken=${GITHUB_TOKEN}
+always-auth=true
+```
+
+### Testing the Firewall in CI
+
+You can test that the firewall is actively inspecting requests by running an installation in a GitHub Actions workflow:
+
+```yaml
+name: Test Supply Chain Firewall
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js with Firewall Registry
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://npm.pkg.github.com/firewall/${{ github.repository_owner }}/'
+
+      - name: Install Dependencies
+        run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.FIREWALL_READ_TOKEN }}
+```
+
+If a developer attempts to install a known malicious dependency, the installation fails immediately with an explicit error:
+
+```text
+npm error code E403
+npm error 403 Forbidden - GET https://npm.pkg.github.com/firewall/my-org/malicious-pkg/-/malicious-pkg-1.0.0.tgz
+npm error 403 [FIREWALL BLOCKED]: Package quarantined due to detected credential exfiltration heuristic (GH-SEC-98421).
+```
+
+---
+
+## 4. How It Fits with Dependabot and Security Advisories
+
+Many teams wonder whether the Package Firewall replaces Dependabot or SBOM vulnerability scanning. The answer is no—they form a layered defense:
+
+| Layer | Tool | Operational Timing | Primary Objective |
+|---|---|---|---|
+| **Prevention** | **GitHub Package Firewall** | **Download Time (Pre-execution)** | Blocks active malware, zero-day malicious releases, and brandjacking before files touch the disk. |
+| **Remediation** | **Dependabot Alerts & Updates** | **Codebase Scanning (Asynchronous)** | Identifies known vulnerabilities (CVEs) in legitimate libraries and opens automated pull requests. |
+| **Governance** | **Dependency Review** | **Pull Request Review** | Enforces license compliance and alerts developers to newly introduced transitive vulnerabilities. |
+
+---
+
+## 5. Limits of the Public Preview
+
+While the Package Firewall represents a major advancement in supply chain defense, engineers should keep current constraints in mind:
+
+1. **Ecosystem Scope**: The preview currently covers **npm only**. Support for PyPI (Python), Maven (Java), and RubyGems is scheduled for future release waves.
+2. **Offline Air-gapped Environments**: The firewall requires persistent connectivity to GitHub's threat intelligence endpoints; it does not yet support fully disconnected self-hosted enterprise runners without internet proxy access.
+3. **Internal Scoped Packages**: Organizations must properly configure scope routing so internal packages (`@my-org/core`) are served by internal registries without routing unnecessarily through public proxy pipelines.
+
+By deploying the npm Package Firewall across your organization's `.npmrc` configurations, you ensure that malicious packages are stopped at the network perimeter before their install hooks can compromise your infrastructure.

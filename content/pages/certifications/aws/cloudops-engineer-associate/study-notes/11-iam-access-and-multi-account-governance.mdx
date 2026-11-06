@@ -1,0 +1,178 @@
+---
+title: "Module 11: IAM, Access Troubleshooting & Multi-Account Governance"
+description: "Policy evaluation logic, roles and federation, MFA and conditions, Access Analyzer, policy simulator, Organizations, SCPs, and IAM Identity Center."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 11
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 4.1 (Skills 4.1.1–4.1.3): IAM features, troubleshooting and auditing access, and multi-account strategy with Organizations, SCPs, and IAM Identity Center.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 4.1 (Domain 4, 16%)">
+Skill 4.1.3 now names **Organizations, SCPs, and IAM Identity Center**. Note the job-task boundary: you **implement and troubleshoot** controls; **defining** security, compliance and governance requirements is out of scope.
+</Callout>
+
+---
+
+## 1. IAM Building Blocks
+
+* **Users, groups, roles, policies.** Prefer **roles** (temporary credentials via STS) for workloads and cross-account access; avoid long-lived access keys.
+* **Policy types:** identity-based, **resource-based** (S3 bucket policy, KMS key policy, role trust policy), **permissions boundaries**, **SCPs**, **session policies**, VPC endpoint policies.
+* **Password policy** (length, complexity, rotation, reuse), **MFA** (virtual, FIDO2, hardware), and **root user** protection (MFA, no access keys).
+* **Federation:** SAML 2.0 and OIDC identity providers, or **IAM Identity Center** for workforce access to many accounts.
+* **Conditions:** `aws:SourceIp`, `aws:RequestedRegion`, `aws:MultiFactorAuthPresent`, `aws:PrincipalOrgID`, `aws:ResourceTag/*`, `aws:SecureTransport`, `aws:PrincipalTag/*`.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "DenyWithoutMFA",
+    "Effect": "Deny",
+    "NotAction": ["iam:ChangePassword", "iam:CreateVirtualMFADevice", "iam:EnableMFADevice", "sts:GetSessionToken"],
+    "Resource": "*",
+    "Condition": { "BoolIfExists": { "aws:MultiFactorAuthPresent": "false" } }
+  }]
+}
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Policy evaluation logic">
+
+1. Start at **implicit deny**.
+2. Any **explicit Deny** in any applicable policy wins immediately.
+3. **Organizations SCPs** must allow the action (they filter, never grant). Not applied to the management account, and do not affect service-linked roles.
+4. **Resource-based policy** in the **same account** can grant access on its own when it names the principal (for example a role ARN), without a matching identity-policy allow.
+5. **Permissions boundary** and **session policy** act as **intersections** with the identity policy: effective permissions are what all agree on.
+6. **Cross-account:** needs an **Allow in both** the identity-based policy of the caller and the resource policy (or a role assumed in the target account).
+
+Troubleshooting inputs: the error message type (explicit versus implicit deny), the CloudTrail `errorCode`, and `aws sts decode-authorization-message` to decode an `UnauthorizedOperation` encoded message.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Troubleshooting and Auditing Access
+
+| Tool | Use |
+|---|---|
+| **CloudTrail** | Who called which API, from where, result (`AccessDenied`) |
+| **IAM Access Analyzer** | Finds resources shared **externally** (S3, KMS, roles, etc.); **unused access** findings; policy validation; **policy generation** from CloudTrail activity |
+| **IAM policy simulator** | Test whether a principal can perform actions on resources, including with SCPs and boundaries |
+| **Access Advisor / last accessed** | Services and actions last used; prune unused permissions |
+| **Credential report** | Account-wide user credential status (MFA, key age) |
+| Config | Track IAM configuration changes and rules (root MFA, access keys rotation) |
+
+```bash
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::111122223333:role/app-role \
+  --action-names s3:GetObject --resource-arns arn:aws:s3:::prod-data/*
+
+aws sts decode-authorization-message --encoded-message <message>
+
+aws accessanalyzer list-findings --analyzer-arn <arn> --filter '{"status":{"eq":["ACTIVE"]}}'
+```
+
+---
+
+## 3. Multi-Account Strategy
+
+| Service | Role |
+|---|---|
+| **AWS Organizations** | Accounts in OUs, consolidated billing, policies (SCP, tag, backup, AI opt-out), trusted access for services (CloudTrail, Config, GuardDuty) |
+| **SCPs** | Guardrails: define the **maximum** permissions for member accounts |
+| **IAM Identity Center** | Central workforce SSO: users/groups (built-in directory or external IdP), **permission sets** assigned to accounts, temporary credentials, CLI SSO (`aws sso login`) |
+| **Control Tower** | Landing zone, account factory, preventive (SCP) and detective (Config) controls |
+| Delegated administrator | Run security services (Security Hub, GuardDuty) from a security account |
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "DenyOutsideApprovedRegions",
+    "Effect": "Deny",
+    "NotAction": ["iam:*", "organizations:*", "route53:*", "cloudfront:*", "support:*", "sts:*"],
+    "Resource": "*",
+    "Condition": { "StringNotEquals": { "aws:RequestedRegion": ["us-east-1", "eu-west-1"] } }
+  }]
+}
+```
+
+```
+ Management account
+    +-- Security OU   (log archive, audit accounts)
+    +-- Workloads OU
+    |       +-- Prod accounts   <-- SCP: deny non-approved Regions, deny leaving Organization
+    |       +-- Dev accounts
+    '-- Sandbox OU            <-- SCP: deny expensive services
+```
+
+* **Deny-list** strategy (default `FullAWSAccess` plus explicit denies) is easier to manage than allow-lists.
+* Global services (IAM, Route 53, CloudFront, Organizations) must be exempted in Region-deny SCPs via `NotAction`.
+* An SCP **never grants** permissions; identities still need IAM policies.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Expecting an SCP to **grant** access, or to restrict the **management account**.
+- **Trap 2:** Using IAM users and access keys on EC2 instead of **instance profiles/roles**.
+- **Trap 3:** Region-restriction SCP that accidentally blocks global services.
+- **Trap 4:** Granting cross-account access with only one side's policy.
+- **Trap 5:** Troubleshooting with the policy simulator alone when an SCP or resource policy might be the blocker (check all layers).
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can find out why a role in account A cannot read a bucket in account B.
+<details>
+<summary>Explanation</summary>
+
+Both sides need allow: the role's identity policy and the bucket policy naming the role (or account). Also check SCPs on either account, permissions boundaries, a KMS key policy if the bucket uses SSE-KMS, VPC endpoint policies, and CloudTrail for the exact denied call.
+
+</details>
+
+- [ ] I can enforce MFA for console users except for MFA setup actions.
+<details>
+<summary>Explanation</summary>
+
+Attach a deny policy with `BoolIfExists aws:MultiFactorAuthPresent false` and `NotAction` for the MFA-enrollment and password-change actions. Users enroll MFA, then sign in with it to get full access.
+
+</details>
+
+- [ ] I can prove which permissions a role really uses.
+<details>
+<summary>Explanation</summary>
+
+Use last-accessed information (Access Advisor) and Access Analyzer unused-access findings, then generate a least-privilege policy from CloudTrail activity and replace broad permissions.
+
+</details>
+
+- [ ] I can centralize workforce access to dozens of accounts.
+<details>
+<summary>Explanation</summary>
+
+IAM Identity Center with the corporate IdP as the identity source, groups mapped to permission sets, assigned to accounts or OUs. Users get short-lived credentials through the access portal or CLI.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/10-systems-manager-and-event-driven-automation" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 10: Systems Manager Operations & Event-Driven Automation
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/12-encryption-secrets-and-data-protection" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 12: Encryption, Secrets & Data Classification →
+  </a>
+</div>

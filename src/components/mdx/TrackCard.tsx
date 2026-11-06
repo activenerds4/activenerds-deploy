@@ -51,11 +51,11 @@ export const TrackCard: React.FC<TrackCardProps> = ({
   return (
     <Link
       to={href}
-      className="group relative flex flex-col justify-between rounded-2xl border border-border/80 bg-card/60 p-6 sm:p-8 hover:border-primary/50 hover:bg-card transition-all duration-200 shadow-sm backdrop-blur-sm overflow-hidden"
+      className="group relative flex flex-col justify-between rounded-2xl border border-border/80 bg-card/60 p-6 sm:p-8 hover:border-primary/50 hover:bg-card transition-all duration-200 shadow-sm backdrop-blur-sm overflow-hidden cursor-pointer block focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       <div className="absolute -top-16 -right-16 w-44 h-44 bg-primary/10 rounded-full blur-3xl group-hover:bg-primary/20 transition-all pointer-events-none" />
 
-      <div className="space-y-4 relative z-10">
+      <div className="space-y-4 relative z-10 pointer-events-none">
         <div className="flex items-start justify-between gap-4">
           <div className="h-12 w-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 text-primary group-hover:scale-105 transition-transform">
             <IconComponent className="h-6 w-6" />
@@ -109,7 +109,7 @@ export const TrackCard: React.FC<TrackCardProps> = ({
         </div>
       </div>
 
-      <div className="pt-6 mt-6 border-t border-border/60 flex items-center justify-between text-sm font-semibold text-primary group-hover:text-primary/90 relative z-10">
+      <div className="pt-6 mt-6 border-t border-border/60 flex items-center justify-between text-sm font-semibold text-primary group-hover:text-primary/90 relative z-10 pointer-events-none">
         <span>Explore Study Track</span>
         <ArrowRight className="h-4 w-4 group-hover:translate-x-1.5 transition-transform" />
       </div>

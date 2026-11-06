@@ -1,0 +1,159 @@
+---
+title: "Cloud Foundation Architect (2V0-13.25) Revision Notes (13 Sections)"
+description: "Systematic 13-section architectural design guide: RCAR framework, Conceptual vs Logical vs Physical design, AMPRS-M, and multi-site federation."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "Cloud Foundation Architect (2V0-13.25) Track"
+trackSlug: "/certifications/vmware/vcf9-architect"
+totalModules: 13
+layout: "hub"
+---
+
+<Callout variant="tip" title="Track Overview & Exam Code: 2V0-13.25">
+The **Cloud Foundation Architect (2V0-13.25)** exam tests your capacity to translate complex business objectives into resilient, secure, and manageable private cloud architectures. Mastery of the RCAR methodology (Requirements, Constraints, Assumptions, Risks) and the AMPRS-M framework is required.
+</Callout>
+
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-4 my-6 not-prose">
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Exam Code</span>
+    <span className="font-mono text-sm font-bold text-primary">2V0-13.25</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Credential Level</span>
+    <span className="font-mono text-sm font-bold text-foreground">Advanced</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Study Duration</span>
+    <span className="font-mono text-sm font-bold text-foreground">~30 Hours</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Curriculum</span>
+    <span className="font-mono text-sm font-bold text-foreground">13 Modules</span>
+  </div>
+</div>
+
+<TrackResourceTabs
+  notesCount="13 Modules"
+  mockTestsCount="3 Practice Exams"
+  flashCardsCount="100+ Cards"
+  cheatSheetsCount="5 Reference Cards"
+>
+  <div className="space-y-3 my-4 not-prose">
+<ModuleCard
+    moduleNumber="1"
+    domain="Requirements"
+    title="Section 01: Business vs Technical Requirements (RCAR)"
+    description="Requirements, Assumptions, Constraints, Risks (RCAR); translating business outcomes into verifiable technical specifications."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/01-business-vs-technical-requirements"
+  />
+  <ModuleCard
+    moduleNumber="2"
+    domain="Architecture"
+    title="Section 02: Architecture Fundamentals & VCF 9 Building Blocks"
+    description="VCF 9 Fleet Management, multi-instance federation, bill of materials validation, and lifecycle boundary modeling."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/02-fundamentals"
+  />
+  <ModuleCard
+    moduleNumber="3"
+    domain="Requirements"
+    title="Section 03: Eliciting & Validating Business Requirements"
+    description="Stakeholder interviewing, compliance frameworks (PCI-DSS, HIPAA, GDPR), SLA definition, and architectural traceability."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/03-business-requirements"
+  />
+  <ModuleCard
+    moduleNumber="4"
+    domain="Operations"
+    title="Section 04: Logical Design Specifications"
+    description="Hardware-agnostic design: management vs workload domains, NSX routing topology, vSAN fault domains, cluster scaling models."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/04-logical-design"
+  />
+  <ModuleCard
+    moduleNumber="5"
+    domain="Core Mechanism"
+    title="Section 05: Physical Infrastructure Design"
+    description="ReadyNode hardware sizing, leaf-spine network fabric, 25GbE/100GbE NICs, MTU 9000 jumbo frames, VLAN and IP allocation."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/05-physical-design"
+  />
+  <ModuleCard
+    moduleNumber="6"
+    domain="Architecture"
+    title="Section 06: Availability Architecture & High Availability (HA)"
+    description="vSphere HA, DRS admission control, vSAN Stretched Clusters, witness placement (< 5ms latency), multi-region active-active."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/06-availability"
+  />
+  <ModuleCard
+    moduleNumber="7"
+    domain="Architecture"
+    title="Section 07: Manageability Architecture & Operational Governance"
+    description="Fleet-level administration, SDDC Manager multi-instance, programmatic REST automation, role delegation, lifecycle boundaries."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/07-manageability"
+  />
+  <ModuleCard
+    moduleNumber="8"
+    domain="Architecture"
+    title="Section 08: Performance Architecture & Optimization"
+    description="NUMA node alignment, vCPU sizing, vSAN ESA fast path NVMe, DPDK / SR-IOV acceleration, Network I/O Control (NIOC)."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/08-performance"
+  />
+  <ModuleCard
+    moduleNumber="9"
+    domain="Architecture"
+    title="Section 09: Recoverability Architecture & Disaster Recovery"
+    description="RPO & RTO engineering, VMware Live Site Recovery (SRM), vSphere Replication, SDDC Manager file-based backup & restore."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/09-recoverability"
+  />
+  <ModuleCard
+    moduleNumber="10"
+    domain="Architecture"
+    title="Section 10: Security Architecture & Zero-Trust Governance"
+    description="NSX Distributed Firewall micro-segmentation, vSAN encryption (KMS / Native Key Provider), certificate lifecycle, hardening."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/10-security"
+  />
+  <ModuleCard
+    moduleNumber="11"
+    domain="Migration"
+    title="Section 11: Workload Migration Strategies with VMware HCX"
+    description="HCX bulk migration, Cross-Cloud vMotion, Network Extension (L2 stretch), Cold migration, bandwidth and MTU sizing."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/11-migration"
+  />
+  <ModuleCard
+    moduleNumber="12"
+    domain="Architecture"
+    title="Section 12: Consumption Architecture & Private Cloud Self-Service"
+    description="VCF Automation templates, Terraform / Kubernetes providers, custom self-service catalog, approvals, pricing and metering."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/12-consumption"
+  />
+  <ModuleCard
+    moduleNumber="13"
+    domain="Operations"
+    title="Section 13: Monitoring, Observability & Proactive Telemetry"
+    description="VCF Operations dashboards, dynamic thresholds, metric alerting, Aria Operations for Logs, syslog forwarding architecture."
+    readTime="20m read"
+    href="/certifications/vmware/vcf9-architect/study-notes/13-monitoring"
+  />
+  </div>
+</TrackResourceTabs>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Back to VMware Certifications Hub
+  </a>
+  <a href="/certifications/vmware/vcf9-architect/study-notes/01-business-vs-technical-requirements" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity shadow-sm">
+    Start Module 01 →
+  </a>
+</div>

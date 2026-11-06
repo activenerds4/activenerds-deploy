@@ -1,0 +1,161 @@
+---
+title: "Module 05: Auto Scaling, Database Scaling & Caching"
+description: "ASG policies and lifecycle, ECS/Lambda scaling, ElastiCache and DAX strategies, CloudFront caching, RDS/Aurora/DynamoDB scaling."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 5
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 2.1 (Skills 2.1.1–2.1.3): scaling mechanisms for compute, caching with CloudFront/ElastiCache, and scaling managed databases.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 2.1 (Domain 2, 22%)">
+Domain 2 grew from 16% to 22% in SOA-C03. Scenarios ask you to pick the **scaling policy type** for a traffic shape, the **caching layer** that removes load from a database, and the **database scaling dimension** (vertical, read replicas, storage, capacity mode).
+</Callout>
+
+---
+
+## 1. EC2 Auto Scaling
+
+| Policy | Behavior | Use when |
+|---|---|---|
+| **Target tracking** | Keeps a metric near a target (like a thermostat), auto-creates alarms | Default choice: `ASGAverageCPUUtilization`, `ALBRequestCountPerTarget` |
+| Step | Different adjustments by alarm breach size | Need aggressive response to large spikes |
+| Simple | One adjustment then cooldown wait | Legacy |
+| Scheduled | Change min/max/desired at set times | Known events |
+| Predictive | ML forecast from history, pre-scales | Recurring daily or weekly patterns |
+
+* **Launch templates** (launch configurations are deprecated) define AMI, type, security groups; versioned.
+* **Health checks:** EC2 status by default. Enable **ELB health checks** so instances failing the application check are replaced. Set a **health check grace period** so slow-starting instances are not killed.
+* **Instance warm-up / cooldown** prevent overshoot. **Warm pools** keep pre-initialized instances to speed scale out.
+* **Lifecycle hooks** pause launch or terminate (for example to install software or drain/upload logs) with a timeout.
+* **Instance refresh** rolls a new launch template version across the group with `MinHealthyPercentage`.
+* **Termination policy** default balances AZs first, then oldest launch template/config.
+* **SQS-driven workers:** scale on a custom **backlog per instance** metric (queue depth divided by running instances), not raw queue depth.
+
+```bash
+aws autoscaling put-scaling-policy --auto-scaling-group-name web-asg \
+  --policy-name cpu50 --policy-type TargetTrackingScaling \
+  --target-tracking-configuration '{"PredefinedMetricSpecification":{"PredefinedMetricType":"ASGAverageCPUUtilization"},"TargetValue":50.0}'
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why an Auto Scaling group is not scaling or keeps flapping">
+
+* Min equals max, or desired already at max: no room to scale.
+* Instance quota or no capacity for the instance type in an AZ: add instance types (mixed instances policy) or AZs.
+* Launch failures: bad AMI/key pair/security group in the template, insufficient subnet IPs, missing instance profile permissions. Check **Activity history**.
+* Flapping: scale-in threshold too close to scale-out; with target tracking, scale-in is conservative by design. Increase warm-up and use ELB health checks with a grace period.
+* Suspended processes (`Launch`, `Terminate`, `HealthCheck`, `AZRebalance`) can silently stop behavior.
+
+</AccordionItem>
+</AccordionGroup>
+
+**Other compute scaling:** ECS Service Auto Scaling (Application Auto Scaling, target tracking on CPU/memory/ALB requests), capacity providers to scale the EC2 fleet beneath ECS; EKS with Cluster Autoscaler or Karpenter and HPA; **Lambda** scales automatically up to account concurrency, tune **reserved** (cap and guarantee) and **provisioned** concurrency (no cold starts).
+
+---
+
+## 2. Caching to Scale Dynamically
+
+| Layer | Service | Caches | Notes |
+|---|---|---|---|
+| Edge | **CloudFront** | HTTP content near users | TTLs, cache policies, hit ratio |
+| Application | **ElastiCache** (Redis OSS / Valkey, Memcached) | Query results, sessions | Sub-millisecond |
+| DynamoDB | **DAX** | Item/query cache, API-compatible | Microsecond reads, eventually consistent reads |
+
+| ElastiCache | Redis OSS / Valkey | Memcached |
+|---|---|---|
+| Replication, Multi-AZ failover | Yes | No |
+| Persistence, backups | Yes | No |
+| Data structures | Rich (sets, sorted sets, pub/sub) | Simple key/value |
+| Scaling | Cluster mode shards | Multi-threaded, add nodes |
+
+* **Lazy loading (cache-aside):** read from cache, on miss read DB and populate. Resilient, may serve stale data.
+* **Write-through:** write DB and cache together. Fresh but larger cache and write cost.
+* **TTL** bounds staleness. Evictions rising means the cache is too small.
+* **CloudFront**: raise cache-hit ratio by normalizing cache keys (forward only needed headers/cookies/query strings), longer TTLs, versioned object names; it also shields origins from spikes.
+
+```
+ Client --> CloudFront --(miss)--> ALB --> App --> ElastiCache (hit?) --(miss)--> RDS / DynamoDB
+                |                                      ^
+              (hit)                                    +-- DAX sits in front of DynamoDB
+```
+
+---
+
+## 3. Scaling Managed Databases
+
+| Service | Scale reads | Scale writes / capacity | Storage |
+|---|---|---|---|
+| **RDS** | Read replicas (up to 15 for MySQL, MariaDB, PostgreSQL; 5 for Oracle/SQL Server), RDS Proxy | Vertical (change instance class, brief outage/failover) | Storage autoscaling (`MaxAllocatedStorage`), gp3/io2 |
+| **Aurora** | Up to 15 replicas with Aurora Auto Scaling policies | Larger writer; **Aurora Serverless v2** scales ACUs in fine steps | Auto grows to 128 TiB |
+| **DynamoDB** | DAX, GSIs | **On-demand** (pay per request) or **provisioned with auto scaling** | Unlimited |
+
+* DynamoDB **throttling** (`ProvisionedThroughputExceededException`, `ThrottledRequests` metric): raise capacity or auto scaling target/max, fix **hot partition keys**, or switch to on-demand. You can switch capacity modes only once per 24 hours.
+* Aurora Serverless v2 suits variable or unpredictable load; set min and max ACUs.
+* Vertical scaling a Single-AZ RDS instance causes downtime; Multi-AZ reduces it by failing over.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Using simple scaling or manual capacity where **target tracking** matches the requirement.
+- **Trap 2:** Scaling on raw SQS queue length instead of backlog per instance.
+- **Trap 3:** Choosing Memcached when the requirement mentions persistence, replication, or failover.
+- **Trap 4:** Read replicas proposed to scale **writes**.
+- **Trap 5:** Forgetting ELB health checks on the ASG, so unhealthy but running instances are never replaced.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose the right scaling policy for a predictable daily spike and an unexpected surge.
+<details>
+<summary>Explanation</summary>
+
+Predictive or scheduled scaling pre-provisions for the known daily pattern; target tracking handles unexpected variation from there. Combine them: scheduled or predictive raise capacity ahead of time, target tracking adds more if demand exceeds the forecast.
+
+</details>
+
+- [ ] I can resolve database overload caused by repeated identical reads.
+<details>
+<summary>Explanation</summary>
+
+Add a cache: ElastiCache (lazy loading with TTL) for relational queries, DAX for DynamoDB. Read replicas help too but cost more per unit of read and carry replica lag; caching removes the load entirely for hot keys.
+
+</details>
+
+- [ ] I know the DynamoDB options when writes are throttled.
+<details>
+<summary>Explanation</summary>
+
+Check for a hot partition key first (adaptive capacity helps but cannot fix poor key design). Increase provisioned WCU or auto scaling maximum, or move to on-demand mode for unpredictable traffic. Batch and use exponential backoff in clients.
+
+</details>
+
+- [ ] I can explain Aurora Serverless v2 versus provisioned Aurora.
+<details>
+<summary>Explanation</summary>
+
+Serverless v2 scales capacity in fractional ACU increments within a configured min/max, quickly and without disrupting connections, and suits spiky or uncertain workloads. Provisioned fits steady load where reserved pricing is cheaper.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/04-s3-shared-storage-rds-performance" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 04: S3, Shared File Storage & RDS Performance Tuning
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/06-high-availability-elb-route53-multi-az" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 06: High Availability: ELB, Route 53 Health Checks & Multi-AZ →
+  </a>
+</div>

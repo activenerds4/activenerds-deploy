@@ -1,0 +1,505 @@
+---
+title: "Module 09: NSX Logical Routing (Tier-0 and Tier-1 Gateways)"
+description: "Distributed Router (DR) vs Service Router (SR), ECMP active/active routing, static vs dynamic BGP route redistribution, NAT."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF Administrator Study Guide"
+trackSlug: "/certifications/vmware/vcf-administrator"
+moduleNumber: 9
+totalModules: 18
+layout: "article"
+---
+
+> **Instructor note:** This module is where many candidates lose points, because the exam tests *where* a function lives (host DR vs. Edge SR, T0 vs. T1) rather than simple definitions. Build a mental picture of the data path, then memorize the rules below.
+
+---
+
+## 1. Learning Objectives
+
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Distributed Router (DR) vs Service Router (SR) Architecture">
+
+Every NSX Tier-0 and Tier-1 logical gateway is internally split into two architectural components:
+
+1. **Distributed Router (DR):**
+   * Runs directly inside the **ESXi hypervisor kernel** on every host participating in the transport zone.
+   * Handles east-west routing between virtual subnets on the same host or across hosts at hypervisor wire speed without hair-pinning traffic to an Edge node.
+
+2. **Service Router (SR):**
+   * Instantiated as an active/standby or active/active process running on **NSX Edge virtual machines**.
+   * Handles **stateful network services** that cannot be distributed across all hypervisors: North-South physical BGP routing, Source/Destination NAT, Edge Firewall, DHCP Server, and VPN termination.
+   * If a Tier-1 gateway does not configure NAT or Edge services, it does not deploy an SR; all routing remains 100% distributed!
+
+</AccordionItem>
+
+</AccordionGroup>
+
+
+After this module you should be able to:
+
+- Differentiate **overlay-backed** and **VLAN-backed** segments and choose the right one for a workload.
+- Explain **Geneve encapsulation**, TEPs, and MTU requirements.
+- Describe the roles of **Tier-0** and **Tier-1** gateways, including their **DR/SR** components.
+- Configure and troubleshoot **Tier-0 uplinks** and **BGP** peering with physical routers.
+- Trace **east-west** and **north-south** packet flows.
+- Recognize common exam traps and scenario patterns.
+
+---
+
+## 2. Core Building Blocks
+
+| Component | Purpose |
+|---|---|
+| **NSX Manager cluster** | Management/control plane; 3-node cluster with a VIP in VCF |
+| **Transport Node** | Any host or Edge participating in NSX (has N-VDS/VDS with NSX config and a TEP) |
+| **Transport Zone (TZ)** | Defines the *span* of a segment; type is **Overlay** or **VLAN** |
+| **Segment** | Layer 2 network (logical switch) attached to a TZ |
+| **TEP** | Tunnel Endpoint, the VMkernel/Edge interface that sources and terminates Geneve tunnels |
+| **Edge Node** | VM or bare metal appliance hosting gateway **Service Routers (SR)** and stateful services |
+| **Edge Cluster** | Group of Edge nodes; required for a gateway with an SR |
+| **Tier-0 Gateway** | Provider-level router; connects NSX to the physical network |
+| **Tier-1 Gateway** | Tenant-level router; connects segments, uplinks to a T0 |
+
+---
+
+## 3. Segment Types: Overlay vs VLAN
+
+### 3.1 Overlay Segments
+
+- Backed by an **Overlay Transport Zone**.
+- Traffic between hosts is encapsulated in **Geneve** (UDP **6081**).
+- Decouples virtual L2 from the physical fabric: only IP reachability between **TEPs** is required.
+- Supports distributed routing, micro-segmentation, and advanced services.
+- A segment can be attached to a **T1** (typical) or directly to a **T0**.
+
+### 3.2 VLAN-Backed Segments
+
+- Backed by a **VLAN Transport Zone**.
+- Traffic is sent **unencapsulated** with an 802.1Q tag (or untagged / VLAN trunk).
+- Used for:
+  - **Edge node uplinks** to the physical network (T0 external interfaces)
+  - Bridging/migrating physical or legacy workloads
+  - Workloads needing direct L2 adjacency with physical devices
+- Can still receive distributed firewall (DFW) protection when hosted on an NSX-prepared VDS.
+
+### 3.3 Side-by-Side Comparison
+
+| Attribute | Overlay Segment | VLAN-Backed Segment |
+|---|---|---|
+| Transport Zone type | Overlay | VLAN |
+| Encapsulation | Geneve (UDP 6081) | None (802.1Q) |
+| Physical network dependency | IP between TEPs, MTU ≥ 1600 | VLAN must exist/trunk on physical switches |
+| Scalability | Millions of virtual segments (24-bit VNI) | Limited to 4094 VLANs |
+| Typical use | Workload networks, tenant networks | Edge uplinks, legacy/physical integration |
+| Connects to | T1 or T0 (downlink) | T0 (uplink/external) or standalone L2 |
+| Provisioning speed | Software-only | Requires physical switch changes |
+
+### 3.4 Other Segment Types to Know
+
+- **Overlay segment with L2 Bridge**: bridges overlay to a VLAN (via Edge Bridge profile).
+- **VPC subnets (VCF 9)**: NSX **VPCs** give project/tenant-style self-service networking (public, private, and private-transit-gateway subnets) on top of a **Transit Gateway** and the Centralized Connectivity (T0/provider) path. Know that VPCs simplify consumption but still rely on the same overlay/Edge fundamentals.
+
+### 3.5 MTU Essentials
+
+- Geneve adds ~**50+ bytes** of overhead (variable due to options).
+- **Minimum underlay MTU: 1600**; VMware recommends **1700+**; VCF recommended practice is **9000 (jumbo)** on the host overlay/TEP network.
+- The **same MTU must be configured end-to-end** (physical switches, VDS, TEP VLAN).
+- Symptom of MTU mismatch: small pings work, large transfers hang or fail.
+- Validate with `vmkping ++netstack=vxlan -d -s <size> <remote TEP IP>` from ESXi.
+
+---
+
+## 4. Tier-0 and Tier-1 Gateways
+
+### 4.1 Two Routing Components
+
+Every gateway is built from up to two components:
+
+| Component | Where it runs | Function |
+|---|---|---|
+| **Distributed Router (DR)** | In the hypervisor kernel of **every** transport node in scope (hosts and Edges) | Distributed east-west routing, local forwarding |
+| **Service Router (SR)** | **Edge node(s)** only | Centralized services: north-south connectivity, NAT, gateway firewall, LB, VPN, DHCP relay/server, BGP |
+
+→ **Exam rule:** An **SR** is created only when a gateway needs a centralized service or an external uplink. A T1 with no stateful services has **DR only**. A T0 with uplinks always has **SR + DR**.
+
+### 4.2 Tier-0 Gateway
+
+- Provider/infra owner function; handles **north-south** routing to the physical network.
+- Hosts **uplinks (external interfaces)**, **BGP/static routing**, **BFD**, **route redistribution**.
+- Deployment modes:
+  - **Active-Active**: all SRs forward traffic using **ECMP**; stateful services (NAT, edge firewall) are **not** supported in the standard A/A configuration (stateless only, unless using special A/A with stateful config in newer releases; for the exam, remember "A/A = ECMP, stateless").
+  - **Active-Standby**: one SR active, one standby; supports **stateful services** (NAT, gateway firewall, VPN, LB). Uses a **HA VIP** for the uplink.
+- Needs an **Edge Cluster** assigned.
+- **Failover modes** (A/S): *Preemptive* or *Non-preemptive*.
+
+### 4.3 Tier-1 Gateway
+
+- Tenant/application-owner function; connects **overlay segments** (downlinks).
+- Uplinks to **one** T0 (or none, for an isolated tier-1).
+- **Does NOT run BGP** and does not peer with physical routers.
+- Gets a DR automatically; gets an SR only when you assign an **Edge Cluster** and enable a stateful service (NAT, GW firewall, LB, etc.).
+- Route advertisement toward the T0 is controlled by **Route Advertisement** settings:
+  - All Connected Segments & Service Ports
+  - All Static Routes
+  - All NAT IPs
+  - All LB VIP / LB SNAT IPs
+  - All DNS Forwarder Routes
+  - IPSec Local Endpoint
+
+### 4.4 Automatically Created Router Links
+
+| Link | Subnet range (default) | Purpose |
+|---|---|---|
+| **RouterLink** (T0↔T1) | `100.64.0.0/16` | Connects T1 to T0 |
+| **Inter-SR link** | `169.254.0.0/24` | Between SRs of a T0 (iBGP, A/A and A/S) |
+| **Backplane / Transit** (DR↔SR) | `169.254.0.0/24`-range internal | Connects the DR and SR within a gateway |
+
+→ Do not overlap your own address space with `100.64.0.0/10` or `169.254.0.0/16` internal ranges without understanding the impact.
+
+### 4.5 Single-Tier vs Multi-Tier Topology
+
+| Design | When to use |
+|---|---|
+| **Single-tier (T0 only)** | Small environments, simple routing, no tenants |
+| **Multi-tier (T0 + T1)** | Multi-tenant, per-tenant services/NAT, route isolation, operational delegation |
+
+**Benefits of multi-tier:** tenant isolation, scale-out of stateful services on per-tenant SRs, and the T0 routing table stays small (T1 prefixes are auto-learned via the RouterLink, not via BGP).
+
+---
+
+## 5. Tier-0 Uplink Configuration
+
+### 5.1 Prerequisites
+
+1. **Edge nodes** deployed and registered; **Edge Cluster** created.
+2. **VLAN Transport Zone** (for uplinks) plus **Overlay TZ** (for TEP) attached to the Edge's N-VDS/VDS.
+3. **VLAN-backed segment(s)** for uplinks created in the VLAN TZ (typically two, one per upstream VLAN/ToR for resilience).
+4. Uplink profile and IP pool (for TEPs) configured.
+5. Physical ToR switches have the VLANs trunked and BGP peering IPs ready.
+
+### 5.2 Configuration Workflow
+
+1. **Networking → Tier-0 Gateways → Add Tier-0 Gateway**
+2. Choose **HA Mode** (Active-Active or Active-Standby) and the **Edge Cluster**.
+3. Under **Interfaces → External and Service Interfaces**, add one interface per Edge per uplink:
+   - Type: **External**
+   - IP address / subnet (e.g., `172.16.10.2/24`)
+   - Connected to: the **VLAN-backed uplink segment**
+   - Edge Node: select the target Edge
+4. (A/S only) Configure an **HA VIP** across the uplink interfaces if using static routing for the next hop.
+5. Configure **Routing**: static routes and/or **BGP**.
+6. Configure **Route Redistribution** and **Route Filters**.
+7. Optionally attach a **BFD profile** for faster failure detection.
+
+### 5.3 Typical Production Design (2 Edges, A/A, ECMP)
+
+```
+          ToR-A (AS 65001)            ToR-B (AS 65001)
+            |  VLAN 1611                |  VLAN 1612
+            |                           |
+     +------+-------+            +------+-------+
+     | Edge-01 SR   |            | Edge-02 SR   |
+     | uplink1,2    |<-- iBGP -->| uplink1,2    |
+     +------+-------+            +------+-------+
+            \________  T0 DR  ________/
+                         |
+                      T1 / Segments
+```
+
+- Each Edge has **two uplinks**, one per ToR VLAN, giving 4 BGP sessions (2 per Edge) and up to **8-way ECMP** in the data plane.
+- Each ToR peers with both Edges.
+
+---
+
+## 6. BGP on the Tier-0
+
+### 6.1 Key Concepts
+
+| Item | Details |
+|---|---|
+| **Local AS** | NSX T0 AS number (private ASN range 64512-65534, or 4-byte private) |
+| **eBGP** | Peering with the physical routers (different AS) |
+| **iBGP** | Automatically established between T0 **SRs** (inter-SR) in the same T0 when A/A (same AS) |
+| **ECMP** | Enabled by default in A/A; up to 8 paths |
+| **Multipath relax** | Allows ECMP across different neighbor ASNs when needed |
+| **BFD** | Sub-second failure detection; configure on the neighbor |
+| **Graceful Restart** | Preserves forwarding during control-plane restarts (helper or full mode) |
+| **Default timers** | Keepalive **60 s**, Hold **180 s** |
+| **Source address** | Neighbor `Source Addresses` can pin the uplink IP used |
+
+### 6.2 Configuring BGP
+
+1. **T0 → BGP**: toggle **BGP** on; set **Local AS Number**.
+2. Toggle **ECMP** (A/A default on) and **Graceful Restart** as required.
+3. **Add BGP Neighbor**:
+   - Neighbor IP (ToR interface)
+   - **Remote AS Number**
+   - Source IPs (optional)
+   - **BFD** enabled with interval/multiplier if desired
+   - **Password** (MD5) if configured on the ToR
+   - **Hold Down / Keep Alive** timers (aligned with physical router)
+   - **Route Filters** (in/out, prefix lists, route maps)
+4. Verify the **Status = Established**.
+
+### 6.3 Route Redistribution (T0 → BGP)
+
+NSX does **not** automatically advertise everything. You select sources:
+
+| Source | Description |
+|---|---|
+| **T0 Subnets** | Connected segments, service interface, static routes on the T0 itself |
+| **Advertised Tier-1 Subnets** | Prefixes learned from T1s (connected, NAT, static, LB VIP) |
+| **EVPN / IPSec / etc.** | Where applicable |
+
+→ **Exam trap:** If a T1 segment isn't reachable from the physical network, check *both* T1 **Route Advertisement** *and* T0 **Route Redistribution** (Advertised Tier-1 Subnets). Both are required.
+
+### 6.4 Path Manipulation
+
+| Goal | Attribute (outbound from NSX) |
+|---|---|
+| Make a path **less preferred** to the ToR | **AS-Path Prepend** |
+| Influence neighbor's entry choice | **MED** (applies to the same neighboring AS) |
+| Influence NSX's own exit choice | **Local Preference** (inbound route map) |
+| Tag routes | **Communities** |
+
+### 6.5 Active-Standby with BGP
+
+- Only the **active SR** advertises prefixes at normal preference. The standby may advertise with prepended AS-path (or be suppressed) so that the physical network prefers the active.
+- After failover, the new active takes over; **BFD + graceful restart** shortens convergence.
+
+### 6.6 Troubleshooting Checklist
+
+1. **Layer 2/3**: Can the Edge ping the ToR peer IP? (VLAN tagging/trunk, uplink profile teaming)
+2. **TCP 179** permitted between peers.
+3. **AS numbers, MD5 password, timers, BFD** match on both sides.
+4. **Edge uplink interface** attached to the right VLAN segment and Edge node.
+5. **Route filters** aren't dropping the prefixes.
+6. **Redistribution** and **route advertisement** enabled.
+7. Use Edge CLI: `get logical-routers`, `vrf <id>`, `get bgp neighbor summary`, `get route`, `get bfd-sessions`.
+8. Use NSX **Traceflow** and **Network Topology** views to validate.
+
+---
+
+## 7. Traffic Flows
+
+### 7.1 East-West (Same T1 or Different T1s)
+
+| Scenario | Path |
+|---|---|
+| **Same segment, same host** | Switched locally on the host; no tunnel |
+| **Same segment, different hosts** | L2 switched, **Geneve** tunnel between source and destination TEPs |
+| **Different segments, same T1** | **T1 DR** on the source host routes locally, then Geneve to the destination host (only one hop) |
+| **Different T1s, same T0** | Source host **T1 DR → T0 DR → destination T1 DR** (all in the source host's kernel), then Geneve to the destination host |
+
+→ **Key concept:** East-west routing is **distributed**, evaluated on the source hypervisor. It never needs to hairpin through an Edge unless a stateful service forces it.
+
+### 7.2 North-South (VM to Physical Network)
+
+1. VM sends packet to its default gateway (T1 DR on the local host).
+2. T1 DR forwards to the T0 DR (still in the host kernel).
+3. T0 DR has a default route toward the **T0 SR** on an Edge (via the backplane); the packet is **Geneve-encapsulated** to the Edge TEP.
+4. The Edge **decapsulates**, the T0 SR routes the packet out an **uplink on the VLAN segment** to the ToR.
+5. ToR forwards using its routing table.
+
+**Return path:** Physical router → learned BGP prefix → T0 SR (Edge) → T0 DR → T1 DR → Geneve to the destination host's TEP → VM.
+
+### 7.3 When a T1 SR Enters the Path
+
+If the T1 has an **SR** (e.g., NAT, GW firewall, LB), traffic for that service passes through the **Edge hosting the T1 SR** (an additional hop), then proceeds to the T0 SR. This is why you size Edge nodes and consider Edge cluster placement carefully.
+
+### 7.4 Active-Active ECMP Asymmetry
+
+In A/A with ECMP, forward and return flows may use **different Edges**. This is why **stateful** services are not supported on an A/A T0 SR. Use A/S, or place stateful services on the **T1** SR instead (a common design: T0 A/A for performance, T1 A/S for NAT/FW).
+
+### 7.5 Summary Table
+
+| Flow | Components Traversed | Encapsulation |
+|---|---|---|
+| VM ↔ VM, same segment, same host | Host vSwitch | None |
+| VM ↔ VM, same segment, diff hosts | Host → Host | Geneve |
+| VM ↔ VM, different segments | Source host DR(s) → Host | Geneve (one tunnel) |
+| VM ↔ Physical (N-S) | Host DR → Edge SR → ToR | Geneve (host→Edge), then VLAN |
+| VLAN-backed VM ↔ Overlay VM | Via T0 uplink/Edge or bridge | VLAN on one side, Geneve on the other |
+
+---
+
+## 8. Quick-Reference "Cheat Sheet"
+
+| Topic | Remember |
+|---|---|
+| Geneve port | **UDP 6081** |
+| Minimum MTU | **1600** (recommended 1700+, VCF commonly 9000) |
+| BGP port | **TCP 179** |
+| BGP default timers | **60 / 180** seconds |
+| BGP on T1? | **No.** T0 only |
+| T0 stateful services | **Active-Standby** |
+| T0 ECMP | **Active-Active**, up to **8 paths** |
+| T0 uplink segment type | **VLAN-backed** |
+| Workload segments | **Overlay-backed** |
+| Where SR runs | **Edge node** only |
+| Where DR runs | **All** transport nodes in scope |
+| RouterLink T0↔T1 | `100.64.0.0/16` default |
+| T1 → T0 route visibility | **Route Advertisement** (T1) + **Redistribution** (T0) |
+| Edge cluster required | For any gateway with an **SR** |
+| T1 alone without Edge cluster | DR-only, no stateful services |
+
+---
+
+## 9. Exam Tips
+
+1. **Read for the keyword "centralized"**: if a service is centralized (NAT, LB, VPN, GW FW), the answer involves an **SR on an Edge**.
+2. **T1s don't peer BGP.** Any answer showing BGP configured on a T1 is wrong.
+3. **Uplinks = VLAN. Workloads = Overlay.** If a question says an Edge uplink uses an overlay segment, it is wrong.
+4. **"Can't reach from outside"** → check T1 route advertisement, then T0 redistribution, then BGP neighbor state, then route filters.
+5. **"Stateful NAT on T0"** → must be **Active-Standby**.
+6. **"Maximize north-south throughput"** → **Active-Active + ECMP**, scale out Edge nodes.
+7. **"Large packets fail, small pass"** → **MTU mismatch** in the TEP/underlay path.
+8. **"Fast failover"** → **BFD** (and ensure graceful restart configuration is appropriate).
+9. **"East-west traffic hairpinning through Edge"** → typically caused by a **T1 SR** (stateful service) or a design sending traffic via the wrong gateway.
+10. **Know the order of operations** for building: Transport zones → Uplink profiles/TEP pools → Transport node profiles / host prep → Edge nodes → Edge cluster → Segments (VLAN uplinks) → T0 (+uplinks, BGP) → T1 → Overlay segments.
+11. In **VCF**, many of these objects are created by **SDDC Manager/VCF Operations workflows** (e.g., Edge cluster deployment). Know that you should use **VCF-supported workflows** for Edge cluster/T0 deployment and avoid out-of-band changes that SDDC Manager doesn't track.
+
+---
+
+## 10. Practice Questions
+
+### Question 1
+
+An administrator has deployed a Tier-0 gateway in **Active-Active** mode with two Edge nodes. A tenant requests **source NAT** for outbound traffic from the `10.20.0.0/24` overlay segment to the physical network. Stateful traffic is being dropped intermittently. Which design change resolves the issue while maintaining ECMP north-south throughput?
+
+- **A.** Configure the SNAT rule on the Tier-0 gateway and enable ECMP hashing on the ToR.
+- **B.** Convert the Tier-0 to Active-Standby and remove ECMP.
+- **C.** Create a Tier-1 gateway in Active-Standby mode linked to an Edge cluster, attach the segment to it, and configure SNAT on the Tier-1.
+- **D.** Configure the SNAT rule on the Distributed Router of the Tier-0.
+
+<details>
+<summary>`<strong>`Answer & Explanation`</strong>`</summary>
+
+**Correct answer: C**
+
+With an Active-Active T0, ECMP can send the forward and return flows through **different Edge nodes**. Stateful services such as NAT need to see both directions of a flow, so asymmetric paths cause drops. The recommended pattern is to keep the **T0 Active-Active** (for ECMP throughput) and place the **stateful service on a Tier-1 SR** deployed in **Active-Standby** mode, so each flow is processed by a single active SR.
+
+- **A** is incorrect: stateful NAT on an A/A T0 isn't the supported design, and ToR hashing can't guarantee symmetry.
+- **B** would fix state, but it sacrifices ECMP, which violates the requirement.
+- **D** is incorrect: the DR is distributed and cannot perform stateful services; NAT requires an **SR**.
+</details>
+
+---
+
+### Question 2
+
+A new overlay segment `web-seg` is connected to Tier-1 gateway `T1-Tenant-A`, which is linked to the Tier-0 gateway. The Tier-0 has an Established eBGP session with both ToR switches, but the physical network does not learn the `web-seg` prefix. Which TWO settings must be verified? *(Select two.)*
+
+- **A.** The Tier-1 gateway has **Route Advertisement** enabled for *All Connected Segments & Service Ports*.
+- **B.** BGP is enabled on the Tier-1 gateway with a local AS number.
+- **C.** The Tier-0 **Route Redistribution** includes *Advertised Tier-1 Subnets* toward BGP.
+- **D.** The `web-seg` segment is connected to a **VLAN Transport Zone**.
+- **E.** The Edge nodes have an MTU of 1500 on the management interface.
+
+<details>
+<summary>`<strong>`Answer & Explanation`</strong>`</summary>
+
+**Correct answers: A and C**
+
+Prefix propagation is a two-stage process:
+
+1. The **Tier-1** must **advertise** the segment's prefix up to the Tier-0 (**Route Advertisement** setting).
+2. The **Tier-0** must **redistribute** the advertised T1 subnets into BGP (**Route Redistribution**, source *Advertised Tier-1 Subnets*).
+
+- **B** is wrong: a Tier-1 gateway **does not run BGP**.
+- **D** is wrong: workload segments use **Overlay** transport zones; a VLAN TZ is for uplinks/bridging.
+- **E** is wrong: the management interface MTU isn't related to prefix advertisement (and the BGP session is already Established).
+</details>
+
+---
+
+### Question 3
+
+After a datacenter network upgrade, VMs on the **same overlay segment** can ping each other when on the same host, and small pings succeed across hosts. However, file transfers between VMs on different hosts stall. The underlay TEP VLAN was recently re-provisioned. What is the MOST likely cause and best validation step?
+
+- **A.** BGP peering to the ToR flapped; run `get bgp neighbor summary` on the Edge.
+- **B.** The TEP VLAN/underlay path MTU is lower than required for Geneve; use `vmkping ++netstack=vxlan -d -s 1572 <remote TEP>` to test.
+- **C.** The Tier-1 gateway lacks an Edge cluster; assign one.
+- **D.** The VMs are attached to a VLAN-backed segment with a missing trunk; check the physical switch port configuration.
+
+<details>
+<summary>`<strong>`Answer & Explanation`</strong>`</summary>
+
+**Correct answer: B**
+
+The symptoms (**small packets succeed, large transfers fail**) are the classic signature of an **MTU mismatch** on the Geneve underlay. Geneve adds encapsulation overhead, so frames that fit in a 1500-byte VM MTU exceed the underlay MTU once encapsulated. Re-provisioning the TEP VLAN likely reset the MTU. Validate with a **don't-fragment (`-d`) vmkping using the `vxlan` netstack** at a size near the required MTU, and fix the MTU on the physical switch ports/VLAN interface so it is consistent end-to-end (minimum 1600; 1700+ recommended or 9000 in VCF).
+
+- **A** is wrong: same-segment east-west traffic doesn't depend on BGP.
+- **C** is wrong: a T1 with no SR doesn't need an Edge cluster, and the traffic is same-segment L2 anyway.
+- **D** is wrong: the segment is overlay-backed, and a missing VLAN trunk would block all traffic, not just large packets.
+</details>
+
+---
+
+## 11. Hands-On Lab Suggestions
+
+1. Build a **VLAN segment** for uplinks and an **overlay segment** for workloads; compare packet captures (`pktcap-uw`) to see Geneve vs. 802.1Q.
+2. Deploy a **2-Edge A/A T0** with eBGP to two virtual ToRs (e.g., FRR/Cumulus VMs). Verify ECMP with `get route`.
+3. Attach a **T1** and test both missing **Route Advertisement** and missing **Redistribution**; observe the results.
+4. Add **BFD** and kill an uplink to measure convergence time.
+5. Run **Traceflow** for east-west and north-south flows and map each hop to DR or SR.
+6. Set an MTU of 1500 on a TEP VLAN and reproduce the large-packet failure; fix it.
+
+---
+
+## 12. Self-Check Questions
+
+- [ ] What is the difference between a **DR** and an **SR**? Where does each live?
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] Why can't a typical **A/A T0** run stateful NAT?
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] Which gateway tier runs **BGP**?
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] What two settings must align for a T1 prefix to reach the physical network?
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] Which transport zone type is used for **Edge uplinks**? For **workloads**?
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] What is the Geneve UDP port and the minimum MTU?
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] How does an A/A T0 learn routes from the other T0 SR(s)?
+<details>
+<summary>Explanation</summary>
+
+</details>
+---
+
+*Always confirm exact defaults, maximums, and supported features against the current **VMware Cloud Foundation / NSX documentation** and the official **VCP-VCF Administrator exam guide** for your exam version.*
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vcf-administrator/study-notes/vcf-08-nsx-edge-clusters" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Module 08: NSX Edge Clusters & Uplink Profiles
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VCF Administrator Track
+  </a>
+  <a href="/certifications/vmware/vcf-administrator/study-notes/vcf-10-nsx-distributed-firewall" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 10: NSX Distributed Firewall (DFW) & Microsegmentation →
+  </a>
+</div>

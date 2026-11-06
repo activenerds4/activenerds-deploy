@@ -1,0 +1,153 @@
+---
+title: "Module 06: High Availability: ELB, Route 53 Health Checks & Multi-AZ"
+description: "Load balancer types and health checks, 5xx troubleshooting, Route 53 health checks and failover, RDS Multi-AZ, and Application Recovery Controller."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 6
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 2.2 (Skills 2.2.1–2.2.2): Elastic Load Balancing and Route 53 health checks, Multi-AZ designs, and Application Recovery Controller.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 2.2 (Domain 2, 22%)">
+Look for scenarios where traffic still reaches a failed target ("health check is too lenient / blocked by a security group"), or where users see 502/503/504. Also expect questions on what RDS Multi-AZ does and does not do.
+</Callout>
+
+---
+
+## 1. Elastic Load Balancing
+
+| Type | Layer | Key features |
+|---|---|---|
+| **ALB** | 7 (HTTP/HTTPS, gRPC, WebSocket) | Host/path/header routing, targets: instance, IP, Lambda; WAF and Cognito integration |
+| **NLB** | 4 (TCP, UDP, TLS) | Ultra-low latency, **static IP / Elastic IP per AZ**, preserves source IP, PrivateLink |
+| **GWLB** | 3 | Inline appliances (firewalls) using GENEVE on port 6081 |
+| CLB | 4/7 | Legacy, avoid |
+
+**Health check defaults (ALB):** interval 30 s, timeout 5 s, healthy threshold 5, unhealthy threshold 2, success code 200. Tune faster detection by lowering interval and thresholds. Health check path should test dependencies the app needs, not only a static page.
+
+* **Cross-zone load balancing:** always on for ALB; **off by default for NLB**, so uneven AZ capacity gets uneven traffic unless enabled.
+* **Deregistration delay (connection draining):** default **300 seconds**.
+* **Sticky sessions** (cookie based) and **slow start** for new targets.
+* Security: targets' security group must allow the **load balancer's security group** on both the traffic port and health check port.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Decoding ALB error codes">
+
+| Code | Likely cause |
+|---|---|
+| 502 Bad Gateway | Target closed the connection or sent a malformed response; app crashed; Lambda error |
+| 503 Service Unavailable | **No healthy targets** or none registered; capacity exhausted |
+| 504 Gateway Timeout | Target did not respond before the **idle timeout** (default 60 s) or SG/NACL blocks the path |
+| 403 | WAF block or listener rule fixed response |
+| 400/460/463 | Malformed request, client closed, or too many forwarded IPs |
+
+Distinguish ELB-generated from target-generated codes in **access logs** (`elb_status_code` versus `target_status_code`) and watch `HTTPCode_ELB_5XX_Count` versus `HTTPCode_Target_5XX_Count`. `UnHealthyHostCount` and `TargetResponseTime` are the first alarms to build.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Route 53 Health Checks and Failover
+
+| Health check type | What it evaluates |
+|---|---|
+| Endpoint | HTTP/HTTPS/TCP to an IP or domain; interval 30 s (standard) or **10 s (fast)**; default failure threshold 3 |
+| Calculated | Combines other health checks (AND/OR/threshold) |
+| **CloudWatch alarm** | State of an alarm; **use this for private resources** that Route 53 checkers on the internet cannot reach |
+
+* Route 53 health checkers are public, so allow their IP ranges in security groups and NACLs for endpoint checks.
+* **Failover routing:** primary record with a health check, secondary used when primary is unhealthy. Alias records can set **Evaluate Target Health** to inherit health from ELB/AWS resources.
+* Weighted, latency, geolocation and multivalue policies also honor health checks (unhealthy records are removed from answers).
+* DNS **TTL** controls how long clients cache a failed answer; use a low TTL on failover records.
+
+```
+                    Route 53 (failover policy)
+                    /                      \
+        Primary (health check OK)     Secondary (static S3/other Region)
+                |
+          ALB (cross-zone) --> targets in AZ-a, AZ-b (health checked)
+```
+
+---
+
+## 3. Fault-Tolerant Data and Application Tiers
+
+| Pattern | Behavior |
+|---|---|
+| **RDS Multi-AZ instance deployment** | Synchronous standby in another AZ, **not readable**, automatic failover (roughly 60 to 120 s) by flipping the DNS endpoint |
+| **RDS Multi-AZ DB cluster** | One writer plus two **readable** standbys, faster failover (typically under about 35 s), MySQL/PostgreSQL |
+| **Aurora** | Storage replicated six ways across three AZs; failover to a replica; readers double as failover targets |
+| **ElastiCache Redis** | Replication group with Multi-AZ automatic failover |
+| **EFS** | Regional storage across AZs; One Zone is cheaper but single-AZ |
+| **ASG across AZs** | Replaces lost capacity automatically |
+
+Multi-AZ is for **availability**, not scaling reads (use read replicas) and not a backup (corruption and deletes replicate).
+
+**Amazon Application Recovery Controller (ARC)** helps with recovery: **routing controls** and **readiness checks** for multi-Region failover through highly available data-plane control, and **zonal shift / zonal autoshift** to move traffic away from an impaired AZ for supported resources such as load balancers.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Using Route 53 endpoint health checks against a **private** IP. Use a CloudWatch-alarm health check.
+- **Trap 2:** Expecting the RDS Multi-AZ standby to serve read traffic (only the Multi-AZ **cluster** has readable standbys).
+- **Trap 3:** Forgetting that the target security group must allow the **ELB health check source**.
+- **Trap 4:** Long DNS TTLs on a failover record, delaying client recovery.
+- **Trap 5:** Treating Multi-AZ as a backup or DR plan across Regions.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can troubleshoot an ALB returning 503 with healthy-looking instances.
+<details>
+<summary>Explanation</summary>
+
+503 means no healthy registered targets. Check target group health reason codes, health check path/port/matcher, security group rules from the ALB to targets, and whether the application actually returns 200 on the health path. Verify targets are registered in the correct AZs enabled on the ALB.
+
+</details>
+
+- [ ] I can configure DNS failover to a standby site.
+<details>
+<summary>Explanation</summary>
+
+Create a health check on the primary endpoint (or CloudWatch alarm if private), then failover records: primary with the health check and secondary as fallback. Keep TTL low (for example 60 s) and allow Route 53 checker IPs.
+
+</details>
+
+- [ ] I know what happens during an RDS Multi-AZ failover.
+<details>
+<summary>Explanation</summary>
+
+RDS promotes the standby and updates the instance endpoint DNS to point to it. Applications must reconnect and respect DNS TTLs; connections drop. Triggers include AZ outage, instance failure, storage failure, reboot with failover, or patching.
+
+</details>
+
+- [ ] I can distinguish ALB, NLB, and GWLB use cases.
+<details>
+<summary>Explanation</summary>
+
+ALB: HTTP-aware routing and WAF. NLB: TCP/UDP/TLS performance, static IPs, source IP preservation. GWLB: transparently insert third-party virtual appliances (inspection) into the traffic path.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/05-scaling-elasticity-and-caching" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 05: Auto Scaling, Database Scaling & Caching
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/07-backup-restore-and-disaster-recovery" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 07: AWS Backup, Restore Strategies & Disaster Recovery →
+  </a>
+</div>

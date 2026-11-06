@@ -1,0 +1,165 @@
+---
+title: "Module 07: AWS Backup, Restore Strategies & Disaster Recovery"
+description: "Backup plans and vaults, EBS/RDS/DynamoDB/S3/FSx protection, point-in-time restore, versioning, and the four DR strategies mapped to RTO/RPO."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 7
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 2.3 (Skills 2.3.1–2.3.4): AWS Backup automation, restore methods, versioning, and disaster recovery strategies.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 2.3 (Domain 2, 22%)">
+Skill 2.3.4 was expanded in v1.1 to name the four DR patterns: **backup and restore, pilot light, warm standby, active/active**. Always map a stated **RTO and RPO** (and budget) to the cheapest pattern that meets them.
+</Callout>
+
+---
+
+## 1. AWS Backup
+
+| Concept | Detail |
+|---|---|
+| Backup plan | Rules: schedule (cron), window, lifecycle, vault, copy actions |
+| Resource assignment | By resource ID or **tags** (for example `backup=daily`) |
+| Vault | Container for recovery points, encrypted with KMS |
+| **Vault Lock** | WORM protection; governance or compliance mode prevents deletion before retention ends |
+| Lifecycle | Transition to cold storage (needs at least 90 days retention afterward for supported types), then delete |
+| Copy | **Cross-Region and cross-account** copies for DR and ransomware isolation |
+| Continuous backup | Point-in-time recovery for supported resources (RDS, S3) |
+| Audit | Backup Audit Manager, backup compliance reports; restore testing |
+
+Supports EC2, EBS, RDS/Aurora, DynamoDB, EFS, FSx, S3, Storage Gateway, and more. Centralize with Organizations backup policies.
+
+```bash
+aws backup create-backup-plan --backup-plan '{
+  "BackupPlanName":"daily-35d",
+  "Rules":[{"RuleName":"daily","TargetBackupVaultName":"prod-vault",
+    "ScheduleExpression":"cron(0 5 * * ? *)",
+    "Lifecycle":{"DeleteAfterDays":35},
+    "CopyActions":[{"DestinationBackupVaultArn":"arn:aws:backup:us-west-2:111122223333:backup-vault:dr-vault"}]}]}'
+```
+
+---
+
+## 2. Service-Level Protection and Restore
+
+| Resource | Backup mechanism | Restore behavior |
+|---|---|---|
+| **EBS** | Incremental snapshots; **Data Lifecycle Manager** automates; Recycle Bin protects deletions | New volume from snapshot (use Fast Snapshot Restore to avoid slow first reads) |
+| **EC2** | AMI (snapshots + metadata), AWS Backup | Launch from AMI |
+| **RDS** | Automated backups (retention **0 to 35 days**, transaction logs) plus manual snapshots (persist until deleted) | **Point-in-time restore** to any second in retention up to latest restorable time; always creates a **new instance** with a new endpoint |
+| **Aurora** | Continuous backup; **Backtrack** (MySQL compatible) rewinds in place; cloning | Restore to new cluster |
+| **DynamoDB** | On-demand backups; **PITR** (1 to 35 days) | Restore to a **new table** |
+| **S3** | **Versioning**, replication (CRR/SRR), Object Lock, AWS Backup | Restore previous version, delete marker removal |
+| **FSx** | Daily automatic backups, user backups, Windows **shadow copies** | Restore as new file system or file |
+| **EFS** | AWS Backup (automatic backups on by default) | Restore to new or existing file system |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: S3 versioning behavior and recovery">
+
+* Versioning states: unversioned, enabled, **suspended**. Once enabled it can only be suspended, not removed.
+* A delete without a version ID adds a **delete marker**; remove the marker to restore the object. Deleting a specific version is permanent. **MFA Delete** protects this.
+* Versioning stores every version, so add **noncurrent version lifecycle rules** to control cost.
+* Replication requires versioning on source and destination; existing objects need S3 Batch Replication.
+* FSx handles accidental deletion with Windows shadow copies and backups rather than S3-style versions.
+
+</AccordionItem>
+</AccordionGroup>
+
+```bash
+# RDS point-in-time restore to a new instance
+aws rds restore-db-instance-to-point-in-time \
+  --source-db-instance-identifier prod-db \
+  --target-db-instance-identifier prod-db-restore \
+  --restore-time 2026-11-03T14:55:00Z
+
+# DynamoDB PITR restore to a new table
+aws dynamodb restore-table-to-point-in-time \
+  --source-table-name Orders --target-table-name Orders-restore \
+  --restore-date-time 2026-11-03T14:55:00Z
+```
+
+---
+
+## 3. Disaster Recovery Strategies
+
+| Strategy | Description | RTO / RPO | Relative cost |
+|---|---|---|---|
+| **Backup and restore** | Backups copied to another Region; rebuild on demand (IaC) | Hours / hours | Lowest |
+| **Pilot light** | Data replicated and core resources (database) running; compute off, scaled up on failover | Tens of minutes / minutes | Low |
+| **Warm standby** | Full but **scaled-down** copy running, scaled up on failover | Minutes / seconds to minutes | Medium |
+| **Active/active (multi-site)** | Full capacity in multiple Regions serving traffic | Near zero / near zero | Highest |
+
+```
+ RTO/RPO shrinking, cost increasing -->
+ Backup&Restore  ->  Pilot Light  ->  Warm Standby  ->  Active/Active
+  (copy data)       (DB replicating,   (scaled-down      (full stack in
+                     compute off)       full stack)       both Regions)
+```
+
+DR toolbox: AWS Backup cross-Region copy, RDS cross-Region read replica or Aurora Global Database, DynamoDB global tables, S3 CRR, Route 53 failover, CloudFormation StackSets to recreate infrastructure, ARC routing controls.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Recommending Multi-AZ as DR for a **Region** failure.
+- **Trap 2:** Assuming RDS point-in-time restore restores **in place**. It creates a new DB instance; update the application endpoint.
+- **Trap 3:** Believing deleting an RDS instance keeps automated backups (they are removed unless you retain them at deletion; manual snapshots stay).
+- **Trap 4:** Picking active/active when RTO is hours; cost is the tiebreaker.
+- **Trap 5:** Relying on versioning alone against account compromise; add Object Lock, MFA Delete, or cross-account copies.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can design automated backups for tagged resources across accounts and Regions.
+<details>
+<summary>Explanation</summary>
+
+Create an AWS Backup plan (ideally via an Organizations backup policy), assign resources by tag, set retention and lifecycle, and add copy actions to a vault in another Region and account. Add Vault Lock for immutability and Backup Audit Manager for compliance evidence.
+
+</details>
+
+- [ ] I can recover a database table accidentally truncated 40 minutes ago.
+<details>
+<summary>Explanation</summary>
+
+RDS: restore to a point in time before the truncation into a new instance, then copy data back or repoint the application. DynamoDB: with PITR enabled, restore to a new table at a timestamp and migrate data. Aurora MySQL: Backtrack can rewind in place if enabled.
+
+</details>
+
+- [ ] I can map RTO/RPO requirements to a DR strategy.
+<details>
+<summary>Explanation</summary>
+
+RTO and RPO in hours: backup and restore. Tens of minutes: pilot light. Minutes with minimal data loss: warm standby. Near zero: active/active. Choose the cheapest option satisfying both numbers.
+
+</details>
+
+- [ ] I know how to recover an overwritten or deleted S3 object.
+<details>
+<summary>Explanation</summary>
+
+With versioning enabled, list versions and copy or promote the previous version, or delete the delete marker to restore the latest. Without versioning the object is gone unless a backup or replica exists.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/06-high-availability-elb-route53-multi-az" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 06: High Availability: ELB, Route 53 Health Checks & Multi-AZ
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/08-cloudformation-cdk-and-multi-account-provisioning" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 08: CloudFormation, CDK, StackSets & RAM →
+  </a>
+</div>

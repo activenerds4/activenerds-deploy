@@ -1,0 +1,181 @@
+---
+title: "Module 14: Cost-Optimized Storage & Data Transfer"
+description: "S3 storage classes, lifecycle policies, EBS and EFS cost levers, backup tiering, and lowest-cost migration methods."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 14
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 4.1 — S3 storage classes and lifecycle, EBS, EFS, and FSx cost levers, backup and archival tiers, hybrid and migration transfer cost, Requester Pays, and storage access patterns
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 4, Task 4.1 — Design cost-optimized storage solutions">
+Cost questions hinge on **access pattern** (how often, how fast), **retention** (how long), and **retrieval time tolerance**. Pick the cheapest tier that still meets the retrieval requirement, and automate transitions with lifecycle rules or Intelligent-Tiering when patterns are unknown.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: S3 Intelligent-Tiering">
+
+Intelligent-Tiering automatically moves objects between access tiers based on access patterns, with **no retrieval charges** and a small per-object monitoring and automation fee. Objects start in Frequent Access, move to Infrequent Access after 30 days without access, and to Archive Instant Access after 90 days; optional Archive Access and Deep Archive Access tiers can be enabled. Objects smaller than 128 KB are not monitored or auto-tiered. Choose it when access patterns are **unknown or changing**.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Lifecycle rules">
+
+Lifecycle configurations **transition** objects between classes and **expire** objects or noncurrent versions, and can **abort incomplete multipart uploads** (a common hidden cost). Constraints include a minimum of 30 days in S3 Standard before transitioning to Standard-IA or One Zone-IA, and the waterfall order of classes (you cannot transition from a colder class back up automatically).
+
+</AccordionItem>
+</AccordionGroup>
+
+| S3 storage class | Availability design | Min storage duration | Retrieval | Use when |
+|---|---|---|---|---|
+| Standard | 3+ AZs | None | Immediate, no retrieval fee | Frequently accessed data |
+| Intelligent-Tiering | 3+ AZs | None | Immediate for frequent, infrequent, and archive instant tiers | Unknown or changing patterns |
+| Standard-IA | 3+ AZs | 30 days | Immediate, per-GB retrieval fee | Infrequent access but needs rapid access and multi-AZ resilience |
+| One Zone-IA | 1 AZ | 30 days | Immediate, retrieval fee | Re-creatable infrequent data; secondary copies |
+| Glacier Instant Retrieval | 3+ AZs | 90 days | Milliseconds | Archive accessed about once a quarter |
+| Glacier Flexible Retrieval | 3+ AZs | 90 days | Expedited 1-5 minutes, Standard 3-5 hours, Bulk 5-12 hours | Backups and archives with flexible retrieval |
+| Glacier Deep Archive | 3+ AZs | 180 days | Standard within 12 hours, Bulk within 48 hours | Long-term compliance retention, cheapest |
+
+Standard-IA and One Zone-IA also bill a **128 KB minimum object size**, so many tiny objects can cost more in IA classes than in Standard.
+
+| Other storage | Cost lever |
+|---|---|
+| Amazon EBS | Use gp3 instead of gp2; delete unattached volumes and old snapshots; right-size volumes; use st1 or sc1 for throughput or cold data; EBS Snapshot Archive for rarely needed snapshots |
+| Amazon EFS | Lifecycle management to Infrequent Access and Archive classes; One Zone storage classes for non-critical data; choose the appropriate throughput mode |
+| Amazon FSx | Choose HDD storage for large, less latency-sensitive Windows shares; data deduplication; right-size throughput capacity |
+| AWS Backup | Lifecycle rules to move recovery points to cold storage; retention periods aligned to policy |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+Day 0            Day 30                 Day 90                  Day 365               Day 2555 (7 years)
+S3 Standard --> Standard-IA --> Glacier Flexible Retrieval --> Glacier Deep Archive --> Expire
+(hot)           (warm)          (cold backup)                    (compliance archive)    (delete)
+
+Noncurrent versions: expire after 30 days.   Incomplete multipart uploads: abort after 7 days.
+```
+
+### Lowest-cost data transfer into AWS storage
+
+| Situation | Lowest-cost / best method |
+|---|---|
+| Inbound internet transfer | Data transfer into AWS is generally free; cost is bandwidth and time |
+| Large dataset, limited bandwidth | Snow Family device (offline) |
+| Ongoing or large online transfer with scheduling and validation | AWS DataSync |
+| On-premises apps need continuing access with local cache | Storage Gateway |
+| Partners deliver files via SFTP | Transfer Family (hourly endpoint cost applies) |
+| Long-distance uploads to S3 | S3 Transfer Acceleration (extra per-GB fee) |
+| Many small objects | Batch or aggregate into larger objects; fewer PUT requests and smaller request charges |
+| Shifting transfer cost to the downloader | S3 Requester Pays bucket |
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "archive-logs",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "logs/" },
+      "Transitions": [
+        { "Days": 30, "StorageClass": "STANDARD_IA" },
+        { "Days": 90, "StorageClass": "GLACIER" },
+        { "Days": 365, "StorageClass": "DEEP_ARCHIVE" }
+      ],
+      "Expiration": { "Days": 2555 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 30 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    }
+  ]
+}
+```
+
+```bash
+aws s3api put-bucket-lifecycle-configuration --bucket example-logs \
+  --lifecycle-configuration file://lifecycle.json
+
+# Find waste: unattached EBS volumes
+aws ec2 describe-volumes --filters Name=status,Values=available \
+  --query "Volumes[].[VolumeId,Size,VolumeType]" --output table
+
+# Enable Requester Pays
+aws s3api put-bucket-request-payment --bucket example-shared-data \
+  --request-payment-configuration Payer=Requester
+```
+
+**Visibility tools:** S3 Storage Lens and storage class analysis help identify access patterns; S3 Inventory lists objects; Cost Explorer and the Cost and Usage Report show spending by tag.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Choosing Glacier for data that needs millisecond access. Glacier Instant Retrieval or Standard-IA fits; Flexible Retrieval and Deep Archive do not.
+- **Trap 2:** Moving data to a colder class before its minimum storage duration. Early deletion or transition incurs prorated charges.
+- **Trap 3:** Using One Zone-IA for the only copy of irreplaceable data.
+- **Trap 4:** Using Standard-IA for short-lived or tiny objects because of the 30-day and 128 KB minimums.
+- **Trap 5:** Using Intelligent-Tiering when access is known to be never or always; lifecycle or Standard is cheaper.
+- **Trap 6:** Forgetting to clean up incomplete multipart uploads, old versions, and orphaned snapshots.
+- **Trap 7:** Using Snowball for a modest dataset that fits comfortably over existing bandwidth.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can pick the S3 storage class given access frequency, retrieval time, and retention.
+<details>
+<summary>Explanation</summary>
+
+Frequent access: Standard. Unknown pattern: Intelligent-Tiering. Infrequent but immediate: Standard-IA (or One Zone-IA if re-creatable). Archive with millisecond retrieval: Glacier Instant Retrieval. Archive with hours acceptable: Glacier Flexible Retrieval. Long-term compliance with 12 to 48 hour retrieval: Deep Archive.
+
+</details>
+
+- [ ] I can write a lifecycle policy that minimizes cost while meeting retention rules.
+<details>
+<summary>Explanation</summary>
+
+Transition by age through progressively colder classes while honoring minimum durations, expire objects at the end of the retention period, expire noncurrent versions, and abort incomplete multipart uploads.
+
+</details>
+
+- [ ] I can reduce EBS, EFS, and backup storage costs.
+<details>
+<summary>Explanation</summary>
+
+Migrate gp2 to gp3, delete unused volumes and stale snapshots, use snapshot archive and lifecycle to cold storage for backups, enable EFS lifecycle to Infrequent Access and Archive, and right-size provisioned capacity.
+
+</details>
+
+- [ ] I can choose the lowest-cost way to move data to AWS.
+<details>
+<summary>Explanation</summary>
+
+Compare dataset size and available bandwidth. Slow links with large data favor Snow Family. Recurring or online migrations favor DataSync. Ongoing hybrid access favors Storage Gateway. Remember that inbound data transfer to AWS is free, so the cost drivers are the transport and operational method.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/13-data-ingestion-analytics" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 13: Data Ingestion, Transformation & Analytics
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/15-cost-optimized-compute-databases" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 15: Cost-Optimized Compute & Database Solutions →
+  </a>
+</div>

@@ -1,0 +1,219 @@
+---
+title: "Module 01: GenAI Solution Design, Proofs of Concept & the Well-Architected GenAI Lens"
+description: "Requirements analysis, architecture selection, Bedrock-based PoCs, and reusable standardized components (Task 1.1)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 1
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 1.1 (Skills 1.1.1 - 1.1.3): requirements analysis, GenAI architecture selection, proof-of-concept validation with Amazon Bedrock, and standardized components via the Well-Architected Framework Generative AI Lens.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1 (31% of scored content)">
+Domain 1 is the heaviest domain. Task 1.1 questions are scenario-driven: a business case with constraints (latency, data residency, budget, team skills) and four plausible architectures. The winning answer is almost always the **most managed option that satisfies every stated constraint**. Read for the one constraint that eliminates the others.
+</Callout>
+
+---
+
+## 1. From Business Need to GenAI Architecture
+
+A GenAI solution is rarely "call a model." Professional-level questions expect you to decompose the requirement into layers and choose a pattern for each.
+
+```
++--------------------+   +-------------------+   +--------------------+
+| Business workflow  |-->| Orchestration     |-->| Foundation model   |
+| (CRM, support,     |   | (Lambda, Step     |   | (Bedrock on-demand,|
+|  document intake)  |   |  Functions, Agent)|   |  provisioned, SM)  |
++--------------------+   +---------+---------+   +---------+----------+
+                                   |                       |
+                     +-------------v---------+   +---------v----------+
+                     | Knowledge / context   |   | Safety & governance|
+                     | (KB, vector store,    |   | (Guardrails, IAM,  |
+                     |  DynamoDB, S3)        |   |  CloudTrail, logs) |
+                     +-----------------------+   +--------------------+
+```
+
+### Pattern selection matrix
+
+| Requirement signal | Pattern to choose | Why |
+|---|---|---|
+| Answers must come from private, frequently changing documents | RAG (Bedrock Knowledge Bases) | Grounds output, no retraining, easy refresh |
+| Need consistent tone/format on a narrow task, labeled data available | Fine-tuning or distillation | Bakes behavior into weights; lower per-call prompt cost |
+| Multi-step task that calls APIs and decides next action | Agent (Bedrock Agents / AgentCore / Strands) | Planning plus tool use |
+| Fixed, auditable sequence of steps | Step Functions or Prompt Flows workflow | Deterministic control flow around FM calls |
+| Simple one-shot generation or classification | Direct Bedrock API call | Lowest complexity |
+| Bulk, non-interactive processing | Bedrock batch inference | Discounted pricing, asynchronous |
+
+<Callout variant="warning" title="Exam Trap: Fine-tuning is not the default">
+When the requirement is "use our latest internal documents," the answer is retrieval, not fine-tuning. Fine-tuning does not give you freshness, citations, or per-user access control. Choose fine-tuning only when the problem is style, format, or domain-specific behavior and you have quality labeled data. Model training itself is explicitly out of scope for this exam; deployment and lifecycle of customized models is in scope.
+</Callout>
+
+---
+
+## 2. Architectural Constraints That Drive Decisions
+
+| Constraint | Architectural implication |
+|---|---|
+| Data residency / sovereignty | Pin Region; use Region-specific (geographic) inference profiles rather than global ones; consider Outposts for on-premises data (Module 09) |
+| Latency under a few seconds | Streaming responses, smaller or latency-optimized models, caching, pre-computation |
+| Unpredictable or spiky traffic | On-demand Bedrock with Lambda; add cross-Region inference for throughput |
+| Steady high volume, strict throughput | Provisioned Throughput (model units) |
+| Strict audit | Model invocation logging, CloudTrail, prompt versioning |
+| Small team, low ops | Bedrock, Knowledge Bases, Prompt Management over self-hosted stacks |
+| Open-weight or custom model required | SageMaker AI endpoints or Bedrock Custom Model Import |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Reading a scenario like an exam writer">
+
+Exam scenarios embed constraints in single phrases. Translate them:
+
+* **"Minimize operational overhead"** points to a managed service (Bedrock, Knowledge Bases, Step Functions) and away from EC2, EKS-hosted models, or custom orchestration code.
+* **"Without retraining"** or **"always current"** points to RAG or tool use.
+* **"Must not leave the VPC"** points to interface VPC endpoints through AWS PrivateLink for Bedrock (Module 13).
+* **"Consistent across teams"** points to Prompt Management, shared IaC modules, and a gateway layer.
+* **"Auditable"** points to CloudTrail plus invocation logging plus versioned prompts and model cards.
+* **"Cost-sensitive, simple queries dominate"** points to model cascading or intelligent prompt routing (Module 15).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Proof-of-Concept Validation with Amazon Bedrock (Skill 1.1.2)
+
+A PoC exists to answer three questions before full build: **feasibility** (does an FM do the task at acceptable quality), **performance** (latency, throughput, token cost), and **business value** (does it move a measurable KPI).
+
+### PoC workflow
+
+1. Enable model access and pick two or three candidate FMs in the Bedrock console or API.
+2. Build a small **golden dataset** (representative inputs with expected outputs or rubric).
+3. Use the **Converse API** so candidate models are swappable by changing only the model ID.
+4. Run side-by-side with Bedrock Model Evaluations (Module 17) or a scripted harness.
+5. Record quality, latency percentiles, input/output tokens, and cost per request.
+6. Gate to production only if success criteria defined up front are met.
+
+```bash
+# Same request shape works across models that support Converse
+aws bedrock-runtime converse \
+  --model-id amazon.nova-lite-v1:0 \
+  --messages '[{"role":"user","content":[{"text":"Summarize this support ticket in two sentences: ..."}]}]' \
+  --inference-config '{"maxTokens":300,"temperature":0.2}'
+```
+
+```python
+import boto3, time
+brt = boto3.client("bedrock-runtime")
+
+def run(model_id, prompt):
+    t0 = time.time()
+    r = brt.converse(
+        modelId=model_id,
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        inferenceConfig={"maxTokens": 300, "temperature": 0.2},
+    )
+    return {
+        "model": model_id,
+        "latency_ms": r["metrics"]["latencyMs"],
+        "wall_s": round(time.time() - t0, 2),
+        "in_tokens": r["usage"]["inputTokens"],
+        "out_tokens": r["usage"]["outputTokens"],
+        "text": r["output"]["message"]["content"][0]["text"],
+    }
+```
+
+| PoC metric | Source | Decision it informs |
+|---|---|---|
+| Quality score vs golden set | Model Evaluations, LLM-as-a-judge | Model choice |
+| p50/p95 latency, time to first token | Converse metrics, CloudWatch | UX feasibility, streaming need |
+| Tokens per request | Converse usage block | Cost model, context budget |
+| Throttle rate under load | Load test, CloudWatch throttle metric | On-demand vs provisioned throughput |
+
+---
+
+## 4. Standardized Components & the Well-Architected Generative AI Lens (Skill 1.1.3)
+
+The **AWS Well-Architected Framework** has a **Generative AI Lens** that applies the six pillars to GenAI workloads, and the **AWS Well-Architected Tool** lets you run lens-based reviews. Standardization means teams reuse tested building blocks rather than reinventing them.
+
+| Pillar | GenAI-specific concern | Typical control |
+|---|---|---|
+| Operational Excellence | Prompt and model lifecycle, evaluation as part of release | Prompt Management versions, CI/CD quality gates |
+| Security | Prompt injection, data leakage, access to FMs | Guardrails, least-privilege IAM, VPC endpoints |
+| Reliability | Throttling, regional capacity, model deprecation | Retries, cross-Region inference, fallback models |
+| Performance Efficiency | Model right-sizing, token throughput | Model selection, caching, streaming |
+| Cost Optimization | Token spend, idle provisioned capacity | Tiering, prompt caching, batch inference |
+| Sustainability | Compute-intensive inference | Smaller models, caching, avoid over-provisioning |
+
+**Reusable components to standardize:** a shared Bedrock client wrapper (retries, logging, guardrail attachment), parameterized prompt templates, a CDK/CloudFormation construct for "RAG stack" (S3 + Knowledge Base + vector store + IAM), common Guardrail configurations, and a GenAI gateway (Module 09).
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why a shared wrapper and IaC construct matter">
+
+Without standardization, each team picks different retry logic, logging formats, and guardrail settings, which makes audit and cost attribution impossible. A shared library or Lambda layer that always (1) applies a guardrail, (2) tags requests with application and cost-center metadata, (3) emits token metrics to CloudWatch, and (4) uses the Converse API gives you uniform behavior. A CDK L3 construct for the RAG stack makes every deployment consistent and reviewable. Pair with AWS Service Catalog to publish approved products to teams.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 5. Exam Traps & Common Distractors
+
+- **Trap 1:** Proposing self-hosted models on EC2/EKS when Bedrock meets the need. Higher ops burden is almost never the right answer.
+- **Trap 2:** Skipping the PoC for a high-uncertainty use case. Questions that mention "validate feasibility first" want a scoped Bedrock PoC with a golden dataset, not a full build.
+- **Trap 3:** Choosing a model by popularity instead of benchmark and capability fit (context window, modality, language, cost).
+- **Trap 4:** Hard-coding a model ID in application code. Dynamic switching is a tested resilience and flexibility requirement (Module 02).
+- **Trap 5:** Treating the Well-Architected Framework as a one-time review rather than a repeatable, lens-based process.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can decide between RAG, fine-tuning, an agent, and a deterministic workflow for a given requirement.
+<details>
+<summary>Explanation</summary>
+
+RAG for fresh, private, citable knowledge; fine-tuning or distillation for consistent style or narrow-task behavior with labeled data; agents when the model must plan and call tools; Step Functions or Prompt Flows when the sequence is fixed and auditable. Combinations are common (an agent that uses a knowledge base and a guardrail).
+
+</details>
+
+- [ ] I can describe what a Bedrock-based PoC must prove and which metrics to capture.
+<details>
+<summary>Explanation</summary>
+
+Feasibility (quality against a golden dataset), performance (latency percentiles, time to first token, throttling), and business value (a KPI). Capture input/output tokens per request to build a cost model. Use the Converse API so candidate models can be compared with minimal code change.
+
+</details>
+
+- [ ] I know which signal phrases in a scenario point to a managed service.
+<details>
+<summary>Explanation</summary>
+
+"Minimize operational overhead," "no infrastructure management," and "small team" favor Bedrock, Knowledge Bases, and Step Functions. "Always current" favors RAG. "Must remain in VPC" favors PrivateLink endpoints. "Auditable" favors CloudTrail, invocation logging, and versioned prompts.
+
+</details>
+
+- [ ] I can map the Well-Architected pillars to GenAI controls.
+<details>
+<summary>Explanation</summary>
+
+Security maps to Guardrails and IAM; Reliability to retries and cross-Region inference; Cost to token tiering and caching; Operational Excellence to prompt versioning and evaluation gates; Performance to model right-sizing and streaming; Sustainability to smaller models and avoiding idle capacity.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ↑ Back to AWS Certified Generative AI Developer - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/02-fm-selection-dynamic-routing-resilience-customization" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 02: FM Selection, Dynamic Model Switching, Resilience & Customization Lifecycle →
+  </a>
+</div>

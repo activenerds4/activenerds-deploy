@@ -1,0 +1,341 @@
+---
+title: "Module 11: GenAIOps: Prompt Management, Agent Pipelines, Fine-tuned Model Versioning & RAG Refresh"
+description: "Task 3.3 (new in C02): Bedrock Prompt Management, prompt testing, agent deployment pipelines and versions/aliases, fine-tuned model versioning automation, knowledge base refresh orchestration."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 11
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Domain 3, Task 3.3 - the GenAI additions: 3.3.7 (manage prompts), 3.3.8 (agent deployment pipelines and version management), 3.3.9 (AI model testing frameworks including prompt testing), 3.3.10 (FM deployment automation with fine-tuned model versioning) and 3.3.11 (pipeline orchestration for RAG updates and knowledge base refresh cycles).
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 3.3 (Skills 3.3.7 - 3.3.11) - New in MLA-C02">
+These five skills did not exist in MLA-C01, so expect fresh scenario wording: "the team needs to roll back a prompt change without redeploying code", "promote an agent to production with a stable endpoint for the application", "the knowledge base must reflect documents uploaded to S3 every night". The unifying idea is that prompts, agents, fine-tuned models and knowledge bases are versioned artifacts that move through automated pipelines exactly like classic ML models.
+</Callout>
+
+---
+
+## 1. The GenAIOps Artifact Map
+
+| Artifact | Versioned by | Stable handle for apps | Automation hook |
+|---|---|---|---|
+| Prompt | Bedrock Prompt Management: draft, immutable versions, variants | Prompt version ARN (or draft ARN while testing) | `create_prompt_version`, CloudFormation Prompt / PromptVersion |
+| Agent | Draft working copy, numbered immutable versions | **Agent alias** pointing to a version | `prepare_agent`, `create_agent_alias`, `update_agent_alias` |
+| Fine-tuned FM | New custom model per customization job, tags and names | Custom model ARN / Provisioned Throughput ARN | `create_model_customization_job`, EventBridge job state change |
+| Knowledge base content | Data source sync (ingestion job) | Knowledge base ID | `start_ingestion_job`, EventBridge schedule / S3 events |
+| Evaluation dataset | Files in S3 with versioning | S3 URI plus object version | Bedrock Evaluations jobs in the pipeline |
+
+```
+ Developer edits prompt / agent / config
+              |
+              v
+  Git commit --> CodePipeline --> CodeBuild (unit + prompt regression tests)
+                                        |
+                       +----------------+----------------+
+                       v                                 v
+          Deploy IaC (CloudFormation/CDK)        Bedrock Evaluations job
+          Agent + Alias + KB + Prompt            (LLM-as-judge on golden set)
+                       |                                 |
+                       +----------------+----------------+
+                                        v
+                      Quality gate -> manual approval -> update alias
+                                        |
+                              CloudWatch alarms watch live traffic
+```
+
+---
+
+## 2. Skill 3.3.7: Managing Prompts with Amazon Bedrock Prompt Management
+
+Prompt Management lets you create, test, version and share prompts centrally instead of hard-coding strings in application code.
+
+* **Prompt with variables:** templates use double-curly-brace placeholders (for example, a variable called `customer_message`), so one prompt serves many inputs.
+* **Variants:** a prompt can hold several variants (different wording, model, or inference parameters) that you compare side by side in the console before choosing one.
+* **Draft vs version:** you edit the *draft*; `CreatePromptVersion` takes an **immutable snapshot**. Applications that reference a version always get identical text, and the version ARN supports audit and rollback.
+* **Run with the Converse API:** pass the prompt ARN as the `modelId` and supply `promptVariables`, so prompt text and model settings are resolved server side.
+
+```python
+import boto3
+agent = boto3.client("bedrock-agent")
+runtime = boto3.client("bedrock-runtime")
+
+# Freeze the current draft as an immutable version
+ver = agent.create_prompt_version(
+    promptIdentifier="PROMPT12345",
+    description="Shorter refund policy answer, tone: friendly",
+)
+prompt_arn = ver["arn"]            # includes the version number
+
+# Application call: no prompt text in code
+resp = runtime.converse(
+    modelId=prompt_arn,
+    promptVariables={"customer_message": {"text": "Where is my refund?"}},
+)
+print(resp["output"]["message"]["content"][0]["text"])
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why prompts deserve a release process">
+
+A one-word prompt edit can change tone, refusal rate, token usage and hallucination rate. Treating prompts as code gives you: review (pull requests on the prompt definition in IaC), repeatability (immutable versions), auditability (who changed what, via CloudTrail), controlled rollout (apps move to a new version ARN in configuration, not code), and rollback (point back to the previous version). Pair every prompt change with an automated evaluation run (Section 4).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Prompt Management vs Prompt Flows vs hard-coded strings">
+
+* **Prompt Management** stores and versions individual prompts.
+* **Bedrock Flows** chains prompts, models, knowledge bases and Lambda functions into a visual workflow. A flow can reference a prompt, so versioned prompts feed versioned flows.
+* **Hard-coded strings** need an application redeploy for each change and have no side-by-side comparison, so they are the exam's wrong answer when governance or fast rollback is required.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Skill 3.3.8: Automated Agent Deployment Pipelines and Version Management
+
+### Agent lifecycle concepts
+
+| Concept | Meaning | Exam nuance |
+|---|---|---|
+| Working draft | The editable agent configuration (instructions, action groups, knowledge bases) | Must be **prepared** (`PrepareAgent`) after changes before testing |
+| Version | Numbered, immutable snapshot of the agent | Cannot be edited; creating an alias can create a new version |
+| Alias | Named pointer to a version, used by the application | Apps call an alias ID, so promotion is "move the alias", with no code change |
+| Action group | Tools the agent can call, defined by an OpenAPI schema or function details, backed by Lambda (or return of control) | The Lambda role and resource policy must allow Bedrock to invoke it |
+| Knowledge base association | Gives the agent RAG over documents | Needs its own ingestion pipeline (Section 6) |
+
+```python
+import boto3
+agent = boto3.client("bedrock-agent")
+rt = boto3.client("bedrock-agent-runtime")
+
+agent.prepare_agent(agentId="AGENT123")              # validate and stage the draft
+
+# First promotion: create alias (this snapshots a new immutable version)
+alias = agent.create_agent_alias(agentId="AGENT123", agentAliasName="prod")
+
+# Later promotion: point the same alias at a tested version for instant cutover
+agent.update_agent_alias(
+    agentId="AGENT123",
+    agentAliasId=alias["agentAlias"]["agentAliasId"],
+    agentAliasName="prod",
+    routingConfiguration=[{"agentVersion": "4"}],
+)
+
+# Application invocation always uses the alias
+for event in rt.invoke_agent(agentId="AGENT123", agentAliasId="ALIAS789",
+                             sessionId="user-42", inputText="Cancel order 981")["completion"]:
+    ...
+```
+
+### Pipeline design
+
+1. **Source:** agent instructions, OpenAPI schemas and Lambda code in Git (via CodeConnections for GitHub or GitLab).
+2. **Build and test:** CodeBuild runs unit tests for the action-group Lambda, validates the OpenAPI schema, and runs scripted conversations against a *test alias*.
+3. **Deploy infrastructure:** CloudFormation or CDK creates the agent, action groups, knowledge base association and Lambda functions (CloudFormation provides resource types for Bedrock agents, aliases, knowledge bases, data sources and prompts).
+4. **Evaluate:** run an evaluation set against the staged version; fail the pipeline when quality or safety metrics regress.
+5. **Promote:** after manual approval, update the production alias to the new version. Keep the previous version number so rollback is a single `update_agent_alias` call.
+
+<Callout variant="tip" title="Amazon Bedrock AgentCore and agent deployment">
+For agents built with open frameworks and hosted on Amazon Bedrock AgentCore, the same principles apply: package the agent as a container image in Amazon ECR, deploy it to AgentCore Runtime, and treat each deployment as a versioned artifact that the application reaches through a stable endpoint. Observability for these agents flows to CloudWatch and AWS X-Ray (see Module 12).
+</Callout>
+
+---
+
+## 4. Skill 3.3.9: AI Model Testing Frameworks, Including Prompt Testing
+
+Classic unit tests are deterministic; GenAI outputs are not. A testing framework therefore layers several kinds of checks.
+
+| Test layer | What it checks | Tooling |
+|---|---|---|
+| Deterministic unit tests | Parsing, tool schemas, Lambda action-group logic, prompt template rendering | pytest in CodeBuild |
+| Golden-dataset regression | Quality metrics on a fixed set of prompts with reference answers | Bedrock Evaluations (programmatic metrics such as ROUGE, BERTScore; model-as-judge) |
+| LLM-as-a-judge | Helpfulness, correctness, coherence, faithfulness, harmfulness scored by a judge model | Bedrock Evaluations model-as-a-judge |
+| RAG evaluation | Retrieval relevance and context coverage; faithfulness of the answer to retrieved context | Bedrock Knowledge Base evaluation (retrieve only, or retrieve and generate) |
+| Safety tests | Jailbreak and PII leakage attempts, denied topics | Bedrock Guardrails applied in test runs |
+| Human evaluation | Subjective quality and brand voice | Bedrock human-based evaluation workflows or SageMaker Ground Truth |
+| Non-functional tests | Latency percentiles, token counts, cost per request | Load scripts plus CloudWatch metrics |
+
+```yaml
+# buildspec.yml fragment: prompt regression gate
+phases:
+  build:
+    commands:
+      - python tests/render_prompts.py                    # templates render, variables present
+      - python tests/run_eval.py --dataset s3://ml-eval/golden-v12.jsonl --candidate "$PROMPT_VERSION_ARN"
+      - python tests/assert_scores.py --min-correctness 0.80 --max-harmfulness 0.02
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Designing a prompt regression suite">
+
+Keep a versioned golden dataset (prompt, expected facts, edge cases, adversarial inputs). Score the *candidate* prompt version and the *current production* version on the same dataset with the same judge model, then gate on non-regression plus absolute floors. Pin the judge model and inference parameters (for example, temperature) because changes to the judge change the scores. Store results with the prompt version ARN so audits can link a release to its evidence.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Why metrics like BLEU alone are not enough">
+
+BLEU and ROUGE measure n-gram overlap with a reference and under-reward valid paraphrases. BERTScore and semantic similarity compare meaning through embeddings. LLM-as-a-judge handles open-ended quality but can show bias toward verbose answers. A robust pipeline combines programmatic metrics, a judge model and periodic human review.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 5. Skill 3.3.10: FM Deployment Automation with Fine-tuned Model Versioning
+
+When you customize a foundation model in Amazon Bedrock, each **model customization job** produces a *new custom model*. Versioning is therefore a naming and tagging discipline plus an automated promotion path.
+
+```python
+import boto3, datetime
+br = boto3.client("bedrock")
+
+stamp = datetime.date.today().isoformat()
+job = br.create_model_customization_job(
+    jobName=f"support-ft-{stamp}",
+    customModelName=f"support-assistant-v{stamp}",
+    roleArn=ROLE_ARN,
+    baseModelIdentifier=BASE_MODEL_ID,
+    customizationType="FINE_TUNING",
+    trainingDataConfig={"s3Uri": "s3://ml-ft/train/2026-11/train.jsonl"},
+    validationDataConfig={"validators": [{"s3Uri": "s3://ml-ft/val/2026-11/val.jsonl"}]},
+    outputDataConfig={"s3Uri": "s3://ml-ft/output/"},
+    hyperParameters={"epochCount": "2", "batchSize": "8", "learningRate": "0.00001"},
+    customModelTags=[{"key": "dataset-version", "value": "2026-11"},
+                     {"key": "stage", "value": "candidate"}],
+)
+```
+
+Automation pattern:
+
+1. **Trigger:** EventBridge schedule, a new curated dataset version in S3, or a drift alarm.
+2. **Customize:** Step Functions or a pipeline starts the customization job and waits for the job-state-change event.
+3. **Evaluate:** run a Bedrock Evaluations job comparing the new custom model with the current one on a golden dataset.
+4. **Register and tag:** record dataset version, hyperparameters and evaluation scores in tags or an external registry; set `stage=candidate` then `stage=production`.
+5. **Provision and promote:** custom models are invoked through **Provisioned Throughput** (purchase a model unit commitment, optionally with no commitment or a 1 or 6 month term), and the application reads the active model or provisioned model ARN from configuration (Systems Manager Parameter Store, AppConfig-style config, or an environment variable managed by IaC). Switching versions is a configuration update, and rollback is switching back.
+6. **Clean up:** delete provisioned throughput for retired versions because it bills hourly while it exists.
+
+| Path | Versioning mechanism | Invocation | Exam signal |
+|---|---|---|---|
+| Bedrock fine-tuning / continued pre-training | New custom model per job, tags and names | Provisioned Throughput | "fine-tune a Bedrock FM" |
+| Bedrock Custom Model Import | Imported model ARN per import job | Managed by Bedrock after import | "model trained outside AWS, bring into Bedrock" |
+| SageMaker JumpStart / training jobs | Model packages in SageMaker Model Registry | SageMaker endpoint | "needs full control of hosting" |
+
+<Callout variant="warning" title="Exam Trap: Provisioned Throughput bills until you delete it">
+A fine-tuned Bedrock model cannot simply be called on demand like a base model; it needs Provisioned Throughput. Forgotten provisioned throughput on a retired model version is a classic hidden cost, and the best pipelines delete or schedule it as the final step of a promotion.
+</Callout>
+
+---
+
+## 6. Skill 3.3.11: Orchestrating RAG Updates and Knowledge Base Refresh Cycles
+
+A Bedrock knowledge base is only as fresh as its last **ingestion job** (data source sync). A sync reads documents from the data source (for example, S3), chunks them, creates embeddings with the configured embedding model and writes vectors to the vector store. Syncs are incremental: new, changed and deleted source files are processed, not the whole corpus.
+
+```python
+import boto3, time
+agent = boto3.client("bedrock-agent")
+
+job = agent.start_ingestion_job(knowledgeBaseId="KB12345", dataSourceId="DS67890",
+                                description="nightly refresh")
+jid = job["ingestionJob"]["ingestionJobId"]
+
+while True:
+    s = agent.get_ingestion_job(knowledgeBaseId="KB12345", dataSourceId="DS67890",
+                                ingestionJobId=jid)["ingestionJob"]
+    if s["status"] in ("COMPLETE", "FAILED"):
+        break
+    time.sleep(30)
+```
+
+| Refresh trigger | Mechanism | Best for |
+|---|---|---|
+| Fixed cadence | EventBridge Scheduler or rule, then Lambda or Step Functions calls `start_ingestion_job` | Daily or hourly document batches |
+| Event-driven | S3 event notification to EventBridge or SQS, then Lambda starts ingestion (batch events to avoid one job per file) | Content that changes unpredictably |
+| Direct document API | `IngestKnowledgeBaseDocuments` for custom data sources, adding or updating specific documents without a full sync | Real-time or app-driven content |
+| Full rebuild | Create a new knowledge base or vector index and swap | Changing the embedding model or chunking strategy |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: A robust RAG refresh state machine">
+
+A Step Functions workflow that runs on a schedule: (1) validate new documents (format, size, PII scan with Amazon Macie or Comprehend); (2) start the ingestion job; (3) poll status with Wait and Choice states, retrying transient errors; (4) on COMPLETE run a retrieval smoke test with canary questions and check relevance; (5) on FAILED or low relevance, publish to SNS and leave the previous index serving. Alarm on ingestion failures and on documents that failed to index.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: When you must re-embed everything">
+
+Vectors from different embedding models are not comparable, and changing chunk size or parsing strategy changes what each vector represents. Changing any of these requires re-ingesting into a new index (ideally a new knowledge base, then switching the application or agent association), not an incremental sync. Plan for the extra embedding cost and the cutover.
+
+</AccordionItem>
+</AccordionGroup>
+
+<Callout variant="tip" title="Metadata for freshness">
+Store document timestamps or version attributes as metadata so retrieval can filter out stale content, and so evaluation reports can show which document versions were retrieved.
+</Callout>
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can explain how Bedrock Prompt Management supports versioning, variants and rollback.
+<details>
+<summary>Explanation</summary>
+
+You edit a draft, compare variants side by side, and call `CreatePromptVersion` to freeze an immutable snapshot with its own ARN. Applications reference a version (via the Converse API with the prompt ARN as modelId and promptVariables for inputs), so rolling back means pointing configuration to the previous version ARN, with no code redeploy. IaC definitions and CloudTrail provide review and audit trails.
+
+</details>
+
+- [ ] I can describe the roles of agent draft, version and alias and how promotion and rollback work.
+<details>
+<summary>Explanation</summary>
+
+The draft is editable and must be prepared before testing. A version is an immutable snapshot. An alias is a named pointer to a version that the application invokes through InvokeAgent, so promotion is `update_agent_alias` to a newer version and rollback is pointing it back. This avoids changing application code and gives a stable production endpoint.
+
+</details>
+
+- [ ] I can design a prompt/agent regression test stage for a CI/CD pipeline.
+<details>
+<summary>Explanation</summary>
+
+Run deterministic unit tests first (template rendering, Lambda action-group tests, schema validation), then evaluate the candidate against a golden dataset with Bedrock Evaluations using programmatic metrics and a pinned judge model. Compare to the current production version, enforce non-regression and absolute floors (for example, correctness and harmfulness), include adversarial and Guardrails checks, and store scores against the version ARN. Failing the gate stops promotion.
+
+</details>
+
+- [ ] I know how fine-tuned Bedrock models are versioned, invoked and promoted, and the hidden cost to avoid.
+<details>
+<summary>Explanation</summary>
+
+Each customization job produces a new custom model, which you name and tag with dataset version, hyperparameters and stage. Custom models are invoked through Provisioned Throughput, and the application reads the active ARN from configuration so promotion and rollback are config changes. Provisioned Throughput bills hourly, so delete it for retired versions. Models trained elsewhere use Custom Model Import instead.
+
+</details>
+
+- [ ] I can choose an orchestration approach for keeping a knowledge base fresh.
+<details>
+<summary>Explanation</summary>
+
+Use EventBridge Scheduler or S3 events to trigger Lambda or Step Functions that call StartIngestionJob and poll GetIngestionJob; syncs are incremental. For app-driven content on a custom data source use IngestKnowledgeBaseDocuments. Add a retrieval smoke test and failure notifications. If the embedding model, chunking or parsing strategy changes, re-embed into a new index and cut over, because old and new vectors are not comparable.
+
+</details>
+
+- [ ] I can match a requirement to the right artifact handle (version ARN, alias, provisioned model ARN, KB ID).
+<details>
+<summary>Explanation</summary>
+
+Prompts are consumed by version ARN, agents by alias, fine-tuned models by provisioned model ARN (or imported model ARN), and RAG content by knowledge base ID whose content freshness is controlled by ingestion jobs. The exam rewards answers that move a pointer (alias, parameter) rather than redeploy application code.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/10-cicd-mlops-pipelines-model-registry" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 10: MLOps CI/CD: CodePipeline, SageMaker Pipelines, Model Registry & Retraining Automation
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/12-monitoring-drift-observability" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 12: Monitoring Inference & Performance: Model Monitor, Drift, A/B Testing & GenAI Observability →
+  </a>
+</div>

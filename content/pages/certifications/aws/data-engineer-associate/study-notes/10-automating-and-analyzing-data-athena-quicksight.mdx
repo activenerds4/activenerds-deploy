@@ -1,0 +1,205 @@
+---
+title: "Module 10: Automating & Analyzing Data: Athena, Redshift SQL, DataBrew & Quick"
+description: "Athena SQL and Spark notebooks, views, Redshift SQL, DataBrew, Quick visualizations, provisioned vs serverless trade-offs, and aggregation concepts."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 10
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Tasks 3.1 and 3.2: automating processing (Lambda, EventBridge, SDKs, EMR/Redshift/Glue features, data APIs), preparing data (DataBrew, SageMaker Unified Studio), querying (Athena, Redshift SQL, Athena Spark notebooks), visualization (Amazon Quick), provisioned vs serverless trade-offs, and aggregation concepts (Skills 3.1.3–3.1.8, 3.2.1–3.2.6).
+
+<Callout variant="info" title="Exam Blueprint Focus: Query, Prepare, Visualize">
+The exam expects you to pick **Athena vs Redshift vs EMR**, explain **cost and performance levers**, and know which tool prepares data without code (**DataBrew**) or visualizes it (**Amazon Quick**, formerly QuickSight). Orchestration topics (3.1.1, 3.1.2, 3.1.9) are in Module 04.
+</Callout>
+
+---
+
+## 1. Athena (Skills 3.1.7, 3.2.3, 3.2.4)
+
+* **Serverless, interactive SQL (Trino/Presto engine) on S3** with the Glue Data Catalog; billed **per TB scanned** (10 MB minimum per query) or via **capacity reservations (DPUs)** for predictable workloads. Failed queries are not billed; DDL is free.
+* **Cost/performance levers:** Parquet/ORC, partitioning and partition projection, compression, `SELECT` only needed columns, `LIMIT` does not reduce scan on non-columnar data, bucketing, file compaction, **workgroups** with per-query and per-workgroup **data scanned limits**, **query result reuse**.
+* **Views:** `CREATE VIEW` stores a logical query in the catalog; **CTAS** materializes results; **federated queries** use Lambda data source connectors (RDS, DynamoDB, Redshift, on-prem).
+* **Athena for Apache Spark (notebooks):** interactive PySpark notebooks (Jupyter-compatible) with sessions; serverless, per-DPU-hour billing; good for exploration, ML prep, and non-SQL logic.
+
+```sql
+CREATE OR REPLACE VIEW curated.v_daily_revenue AS
+SELECT order_date, region, SUM(amount) AS revenue
+FROM curated.orders
+WHERE status = 'COMPLETE'
+GROUP BY order_date, region;
+
+-- Rolling 7-day average with a window function
+SELECT order_date, region, revenue,
+       AVG(revenue) OVER (PARTITION BY region ORDER BY order_date
+                          ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS rev_7d_avg
+FROM curated.v_daily_revenue;
+```
+
+```bash
+aws athena start-query-execution \
+  --query-string "SELECT count(*) FROM curated.orders WHERE order_date='2026-11-05'" \
+  --work-group analytics --result-configuration OutputLocation=s3://athena-results/
+```
+
+---
+
+## 2. Redshift SQL and Features (Skill 3.2.3, 3.1.4)
+
+* **Views** (regular and **late-binding** for external tables), **materialized views**, **stored procedures** (PL/pgSQL), **UDFs** (SQL, Python, Lambda), **`MERGE`** for upserts, **`SUPER`** + PartiQL for JSON, **window functions**, **`PIVOT`/`UNPIVOT`**, **data sharing**, **ML (`CREATE MODEL`)**.
+* **Performance tools:** result caching, short query acceleration, concurrency scaling, WLM (manual or automatic), **Advisor**, `EXPLAIN`, query monitoring rules, `SVL_QUERY_REPORT`, **automatic table optimization**.
+* **Query editor v2** and **Data API** for execution.
+
+---
+
+## 3. Provisioned vs Serverless Trade-offs (Skill 3.2.5)
+
+| Dimension | Provisioned (Redshift RA3, EMR on EC2, MSK, OpenSearch domains, Kinesis provisioned) | Serverless (Athena, Redshift Serverless, EMR Serverless, Glue, Lambda, Kinesis on-demand, MSK Serverless) |
+|---|---|---|
+| Operations | You size, patch windows, scale | Provider manages capacity |
+| Cost model | Pay for capacity whether used or not; deep discounts with Reserved Instances / Savings Plans | Pay per use (scan, RPU-second, DPU-second) |
+| Best for | Steady, predictable, high-utilization workloads | Spiky, unpredictable, infrequent, new workloads |
+| Performance control | Fine-grained tuning, consistent baselines | Less control; cold start / scaling behaviors |
+| Break-even | Cheaper at sustained high utilization | Cheaper at low or bursty utilization |
+
+---
+
+## 4. Preparing and Visualizing Data (Skills 3.1.6, 3.2.1, 3.2.2)
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: AWS Glue DataBrew (visual data preparation)">
+
+* **No-code, visual** tool with **250+ built-in transformations** (clean, normalize, split/merge columns, pivot, dedupe, handle missing values, format dates, mask PII).
+* Concepts: **dataset** (S3, Glue Catalog, JDBC, Redshift, file upload), **project** (interactive session with a sample), **recipe** (versioned steps), **job** (recipe job writes output; profile job generates statistics), **schedule**.
+* **Data profiling:** missing values, distributions, correlations, outliers; **data quality rules and rulesets** (Module 12); data lineage view.
+* Choose DataBrew when analysts need visual, low-code prep; choose Glue ETL for code-based large-scale pipelines.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Amazon SageMaker Unified Studio and Data Wrangler">
+
+* **SageMaker Unified Studio:** single environment for data, analytics, and AI. Provides **projects** with built-in query editor (Athena, Redshift), JupyterLab notebooks, Glue visual ETL, EMR/Glue compute connections, the SageMaker Catalog, and Bedrock tools. Use it to prepare and transform data collaboratively under project-based permissions.
+* **SageMaker Data Wrangler (Canvas/Studio):** visual import, analysis (histograms, target leakage, bias), and 300+ transforms; exports to Pipelines/notebooks/S3. Useful for verifying and cleaning data (Skill 3.2.2).
+* **Jupyter notebooks** (Athena Spark, EMR Studio, SageMaker) for ad hoc verification and cleaning.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Amazon Quick (QuickSight) basics">
+
+* Serverless BI with **SPICE** (in-memory engine) or **direct query**. Sources: Athena, Redshift, RDS, S3, Snowflake, and more.
+* Authors build **datasets** → **analyses** → **dashboards**; readers consume; **row-level and column-level security**, embedding, scheduled refresh, ML insights, natural-language Q&A, generative authoring.
+* Connectivity to private data (VPC connection, security groups) and Lake Formation integration for governed access.
+* Pick **SPICE** for fast dashboards and to protect source databases; **direct query** for real-time data.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 5. Automating Processing (Skills 3.1.3–3.1.5, 3.1.8)
+
+* **Lambda for automation:** triggered by S3, EventBridge, SQS, Kinesis, API Gateway; use for light ETL, validation, kicking off Glue/Athena.
+* **SDKs (Skill 3.1.3):** call AWS features from code with **boto3**, AWS SDK for Java/JavaScript/Go. Use IAM roles (not hard-coded keys), pagination, **retries with exponential backoff**, waiters, and the **Data API/Athena API** patterns.
+* **Process data with service features (Skill 3.1.4):** EMR (steps, managed scaling, instance fleets, Spot), Redshift (COPY, MERGE, stored procedures, scheduled queries, auto-copy), Glue (triggers, bookmarks, workflows).
+* **Data APIs (Skill 3.1.5):** consume REST/GraphQL APIs from jobs, and maintain your own (API Gateway stages, throttling, caching, versioning, authorizers, usage plans).
+
+```python
+import boto3
+athena = boto3.client("athena")
+qid = athena.start_query_execution(
+    QueryString="CREATE TABLE curated.orders_daily AS SELECT order_date, SUM(amount) AS total FROM curated.orders GROUP BY order_date", WorkGroup="analytics",
+    ResultConfiguration={"OutputLocation": "s3://athena-results/"})["QueryExecutionId"]
+# Athena has no built-in waiter: poll with backoff until the query reaches a terminal state
+import time
+delay = 1
+while True:
+    state = athena.get_query_execution(QueryExecutionId=qid)["QueryExecution"]["Status"]["State"]
+    if state in ("SUCCEEDED", "FAILED", "CANCELLED"):
+        break
+    time.sleep(delay); delay = min(delay * 2, 15)
+```
+
+---
+
+## 6. Aggregation, Rolling Averages, Grouping, Pivoting (Skill 3.2.6)
+
+| Concept | Definition | SQL |
+|---|---|---|
+| Aggregation | Collapse rows to a summary | `SUM, COUNT, AVG, MIN, MAX` |
+| Grouping | Aggregate per category | `GROUP BY`, `GROUPING SETS`, `ROLLUP`, `CUBE` |
+| Rolling average | Moving window average | `AVG() OVER (ORDER BY d ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)` |
+| Pivoting | Rows to columns | `PIVOT` (Redshift), conditional aggregation `SUM(CASE WHEN ...)` |
+| Unpivoting | Columns to rows | `UNPIVOT` |
+
+---
+
+## 7. Common Traps and Watchouts
+
+* **"Ad hoc queries on S3, minimal ops, pay per query"** → Athena.
+* **"Hundreds of concurrent BI users, complex joins, steady load"** → Redshift.
+* **"Non-technical users clean data visually"** → DataBrew.
+* **"Reduce Athena cost"** → fewer bytes scanned (Parquet, partitions), not bigger compute.
+* **SPICE vs direct query:** SPICE is cached and needs refresh.
+* **Athena Spark notebooks** are for PySpark exploration; Athena SQL is the default.
+* **Serverless is not always cheaper;** sustained heavy use favors provisioned with reservations.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Athena, Redshift, and EMR for an analytics requirement.
+<details>
+<summary>Explanation</summary>
+
+Athena for serverless ad hoc SQL on S3; Redshift for high-concurrency warehouse analytics and complex joins; EMR for custom frameworks and large-scale Spark/Hive processing.
+
+</details>
+
+- [ ] I can list five ways to reduce Athena cost and improve speed.
+<details>
+<summary>Explanation</summary>
+
+Parquet/ORC, partitioning (and projection), compression, selecting only needed columns, compacting small files, workgroup scan limits, result reuse, capacity reservations for steady load.
+
+</details>
+
+- [ ] I can explain provisioned vs serverless trade-offs with examples.
+<details>
+<summary>Explanation</summary>
+
+Serverless (Athena, Redshift Serverless, EMR Serverless) removes capacity management and suits spiky loads. Provisioned (RA3, EMR on EC2) offers control and lower unit cost for steady high utilization, especially with reservations.
+
+</details>
+
+- [ ] I can match DataBrew, Data Wrangler, SageMaker Unified Studio, and Quick to their roles.
+<details>
+<summary>Explanation</summary>
+
+DataBrew: no-code data prep/profile. Data Wrangler: visual prep and analysis for ML. Unified Studio: integrated data/AI workspace and catalog. Quick: BI dashboards with SPICE or direct query.
+
+</details>
+
+- [ ] I can write a rolling average and a pivot in SQL.
+<details>
+<summary>Explanation</summary>
+
+Rolling average: `AVG(x) OVER (ORDER BY d ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)`. Pivot: Redshift `PIVOT` or `SUM(CASE WHEN category = 'A' THEN x END)` per column.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/09-data-modeling-schema-evolution-vectors" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 09: Data Modeling, Schema Evolution, Open Table Formats & Vector Indexes
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/11-monitoring-logging-troubleshooting-pipelines" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 11: Monitoring, Logging & Troubleshooting Data Pipelines →
+  </a>
+</div>

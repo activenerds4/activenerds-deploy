@@ -1,0 +1,224 @@
+---
+title: "Module 05: Retrieval Mechanisms: Chunking, Embeddings, Hybrid Search & Query Handling"
+description: "Chunking strategies, Titan embeddings, hybrid search, rerankers, query decomposition, and MCP/function-calling retrieval (Task 1.5)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 5
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 1.5 (Skills 1.5.1 - 1.5.6): document chunking, embedding model selection, vector search deployment, advanced search (hybrid and reranking), query handling, and consistent retrieval access (function calling and MCP).
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1, Task 1.5">
+This task is about **retrieval quality**. Questions describe a symptom ("answers miss relevant clauses," "keyword searches for part numbers fail") and expect you to pick the fix: change chunking, add hybrid search, add a reranker, or transform the query.
+</Callout>
+
+---
+
+## 1. Document Segmentation / Chunking (Skill 1.5.1)
+
+Chunks are the unit of retrieval. Too large dilutes meaning and wastes context; too small loses surrounding information.
+
+| Strategy | How it works | Best for |
+|---|---|---|
+| Fixed-size | Split by token count with overlap | Uniform prose, simple baseline |
+| Hierarchical | Small child chunks for matching, larger parent chunks returned as context | Long structured documents; precision plus context |
+| Semantic | Split at meaning boundaries using embeddings | Documents with shifting topics |
+| No chunking | One chunk per file | Already-small documents |
+| Custom (Lambda) | Your code defines chunk boundaries and metadata | Domain structure such as contracts, code, tables |
+
+Bedrock Knowledge Bases provides built-in default, fixed-size, hierarchical, semantic, and no-chunking options, plus a **custom transformation Lambda** for bespoke logic.
+
+```
+Fixed:        [chunk1 (300 tok)][chunk2 (300 tok, 20% overlap)]...
+Hierarchical: parent (1500 tok) contains children (300 tok)
+              match on child --> return parent for fuller context
+```
+
+```json
+"chunkingConfiguration": {
+  "chunkingStrategy": "HIERARCHICAL",
+  "hierarchicalChunkingConfiguration": {
+    "levelConfigurations": [ {"maxTokens": 1500}, {"maxTokens": 300} ],
+    "overlapTokens": 60 }
+}
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Choosing chunk size and overlap">
+
+Match chunk size to question type. Factoid lookups benefit from small chunks (200 to 400 tokens); synthesis questions need larger context. Overlap (often 10 to 20 percent) prevents a sentence split across a boundary from losing meaning. Always check the **embedding model's maximum input** (Titan Text Embeddings V2 accepts up to 8,192 tokens) and your FM's context window multiplied by the number of retrieved chunks. Tune empirically using retrieval metrics (Module 17), not intuition.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Embedding Solutions (Skill 1.5.2)
+
+| Model | Notes |
+|---|---|
+| Amazon Titan Text Embeddings V2 | Selectable output dimensions (1,024 / 512 / 256), multilingual support, up to 8,192 input tokens, optional normalization |
+| Amazon Titan Embeddings G1 - Text | Earlier model, 1,536 dimensions |
+| Amazon Titan Multimodal Embeddings | Text and image in a shared space |
+| Cohere Embed (via Bedrock) | Alternative text and multilingual embeddings |
+
+Selection criteria: **domain and language fit**, **dimensionality** (storage and latency versus accuracy), **max input length**, cost, and measured retrieval quality on your own queries. **Use the same model for indexing and querying**; vectors from different models are not comparable. Changing the model means re-embedding everything.
+
+```python
+import json, boto3
+from concurrent.futures import ThreadPoolExecutor
+brt = boto3.client("bedrock-runtime")
+
+def embed(text):
+    r = brt.invoke_model(modelId="amazon.titan-embed-text-v2:0",
+        body=json.dumps({"inputText": text, "dimensions": 512, "normalize": True}))
+    return json.loads(r["body"].read())["embedding"]
+
+def embed_batch(texts):            # Lambda/batch job pattern
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        return list(ex.map(embed, texts))
+```
+
+---
+
+## 3. Vector Search Deployment (Skill 1.5.3)
+
+| Option | Notes |
+|---|---|
+| OpenSearch Service / Serverless (vector collection) | k-NN, filters, hybrid |
+| Aurora PostgreSQL with pgvector | SQL plus vectors |
+| Bedrock Knowledge Bases managed vector store | Quick setup; you do not manage the index |
+
+Bedrock APIs: **Retrieve** returns ranked chunks with scores and metadata (you assemble the prompt). **RetrieveAndGenerate** retrieves and calls an FM in one managed step and returns citations.
+
+```python
+r = bka.retrieve_and_generate(
+    input={"text": "What is the refund window?"},
+    retrieveAndGenerateConfiguration={"type": "KNOWLEDGE_BASE",
+      "knowledgeBaseConfiguration": {
+        "knowledgeBaseId": "KB12345678",
+        "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0"}})
+print(r["output"]["text"], r["citations"])
+```
+
+---
+
+## 4. Advanced Search Architectures (Skill 1.5.4)
+
+| Technique | Problem it solves |
+|---|---|
+| **Hybrid search** (BM25 keyword + vector) | Exact terms, IDs, acronyms, product codes that embeddings blur |
+| **Reranking** | First-stage recall is broad; a reranker reorders top candidates by true relevance |
+| Metadata filtering | Scope to the right domain/time |
+| Larger candidate set then rerank | Retrieve 25 to 100, rerank down to the best 3 to 5 |
+
+```
+query --> [vector search] \
+                           merge (RRF / weighted) --> top 50 --> reranker --> top 5 --> FM
+query --> [BM25 keyword]  /
+```
+
+Bedrock supports **reranker models** (for example Amazon Rerank and Cohere Rerank) through the Rerank API and as a Knowledge Bases option. OpenSearch supports hybrid queries with score normalization pipelines.
+
+<Callout variant="tip" title="Symptom to fix mapping">
+Exact-match misses (SKUs, error codes): add hybrid search. Relevant chunk retrieved but ranked 9th: add a reranker. Right document, wrong passage: change chunking. Vague or multi-part user question: transform the query.
+</Callout>
+
+---
+
+## 5. Query Handling (Skill 1.5.5)
+
+| Technique | Implementation |
+|---|---|
+| Query expansion | Ask an FM (Bedrock) to produce synonyms or related phrasings |
+| Query rewriting | Resolve pronouns using chat history ("what about its price?" becomes a standalone query) |
+| Decomposition | Break a complex question into sub-queries run in parallel (Lambda or Step Functions Map state), then merge |
+| Query transformation pipelines | Step Functions chains: classify intent, rewrite, route to the right index |
+| HyDE-style hypothetical answer | Generate a draft answer and embed that for retrieval |
+
+Bedrock Knowledge Bases offers built-in **query decomposition** for complex prompts in retrieve-and-generate flows.
+
+---
+
+## 6. Consistent Access Mechanisms (Skill 1.5.6)
+
+Give FMs and agents a **standard way** to call retrieval.
+
+* **Function calling / tool use**: define a `search_knowledge` tool in `toolConfig` with a JSON schema; the model emits arguments, your code runs the vector search, and you return results.
+* **Model Context Protocol (MCP)**: an open standard where an **MCP server** exposes retrieval as a tool and any **MCP client** (agent framework) can call it consistently.
+* **Standardized API patterns**: a single internal retrieval API (API Gateway + Lambda) fronting multiple stores, so applications do not care which backend is used.
+
+```json
+"toolConfig": { "tools": [ { "toolSpec": {
+  "name": "search_kb",
+  "description": "Search company policy documents",
+  "inputSchema": { "json": { "type": "object",
+    "properties": { "query": {"type": "string"}, "department": {"type": "string"} },
+    "required": ["query"] } } } } ] }
+```
+
+---
+
+## 7. Exam Traps & Common Distractors
+
+- **Trap 1:** Fixing keyword-miss problems by changing the FM. The retrieval layer needs hybrid search.
+- **Trap 2:** Using different embedding models for ingestion and query.
+- **Trap 3:** Increasing top-k to "get more context" without reranking, which adds noise and cost.
+- **Trap 4:** Picking tiny chunks for questions that need surrounding context; hierarchical chunking resolves the tension.
+- **Trap 5:** Embedding the entire conversation history as the query instead of rewriting into a standalone query.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose a chunking strategy for a document type.
+<details>
+<summary>Explanation</summary>
+
+Fixed-size with overlap for uniform text; hierarchical when precise matching and broad context are both needed; semantic for topic-shifting content; custom Lambda for domain structure such as legal clauses; no chunking for short documents.
+
+</details>
+
+- [ ] I can justify an embedding model and dimension choice.
+<details>
+<summary>Explanation</summary>
+
+Consider language and domain fit, maximum input tokens, dimensionality (storage, latency, accuracy), and measured retrieval quality. Titan V2 offers 1,024, 512, or 256 dimensions. Use the same model for indexing and queries.
+
+</details>
+
+- [ ] I can explain hybrid search and reranking and when each is needed.
+<details>
+<summary>Explanation</summary>
+
+Hybrid combines keyword and vector scores to catch exact terms embeddings miss. A reranker rescores a broad candidate set to put the best passages first. Use hybrid for exact-match failures and reranking for ordering failures.
+
+</details>
+
+- [ ] I can describe how MCP and function calling standardize retrieval access.
+<details>
+<summary>Explanation</summary>
+
+Function calling declares retrieval as a tool with a schema that the model can invoke. MCP packages tools behind a server so multiple clients and agents reach retrieval through one protocol, decoupling agents from the vector backend.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/04-vector-stores-metadata-maintenance" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 04: Vector Store Architecture, Metadata Frameworks & Data Maintenance
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/06-prompt-engineering-management-governance-flows" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 06: Prompt Engineering, Prompt Management, Governance & Prompt Flows →
+  </a>
+</div>

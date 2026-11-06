@@ -1,0 +1,188 @@
+---
+title: "Module 10: FM API Integration: Sync/Async, Streaming, Resilience & Intelligent Routing"
+description: "Bedrock Runtime APIs, SQS async, SSE/WebSocket streaming, backoff, rate limiting, X-Ray, and routing patterns (Tasks 2.4, 2.5.1)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 10
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 2.4 (Skills 2.4.1 - 2.4.4) and Skill 2.5.1: flexible model interaction (sync and async), real-time streaming, resilient FM calls, intelligent routing, and GenAI-specific API interface concerns.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 2, Task 2.4">
+Know **which Bedrock API fits which interaction style**, how to stream to a browser through AWS services, how to handle throttling and timeouts correctly, and the difference between static, content-based, and metric-based model routing. Gateway timeouts and token limits are common distractors.
+</Callout>
+
+---
+
+## 1. Flexible Model Interaction (Skill 2.4.1)
+
+| API / pattern | Behavior | Use |
+|---|---|---|
+| `Converse` | Synchronous, unified format | Most chat and tool-use workloads |
+| `ConverseStream` | Streaming version of Converse | Interactive UX |
+| `InvokeModel` | Synchronous, provider-native body | Embeddings, image generation, native features |
+| `InvokeModelWithResponseStream` | Streaming provider-native | Streaming with native bodies |
+| `StartAsyncInvoke` | Async job writing to S3 | Long generation such as video |
+| Batch inference (`CreateModelInvocationJob`) | Offline jobs from S3 JSONL | Bulk processing |
+| SQS + worker | Decouple request from processing | Spiky load, long tasks, retry control |
+
+```
+Sync:   Client --> API Gateway --> Lambda --> Bedrock --> response
+Async:  Client --> API Gateway --> SQS --> Lambda workers --> Bedrock --> DynamoDB/S3 + notify
+                       ^ returns 202 + job ID               (client polls or receives WebSocket push)
+```
+
+**API Gateway as a custom client front door:** request validation with JSON Schema models rejects malformed payloads before they cost tokens; usage plans and API keys meter consumers; Lambda authorizers or Cognito enforce identity.
+
+**Language SDKs** (boto3, AWS SDK for JavaScript, Java, and others) wrap Bedrock Runtime and include built-in retry configuration.
+
+---
+
+## 2. Real-Time Interaction and Streaming (Skill 2.4.2)
+
+Streaming cuts **perceived latency**: users see tokens as they are generated instead of waiting for the full completion.
+
+| Transport | How | Notes |
+|---|---|---|
+| Server-sent events (SSE) | One-way text stream over HTTP | Simple, firewall-friendly, ideal for token streams |
+| WebSockets | Bidirectional | API Gateway WebSocket APIs or AppSync subscriptions; good for chat with interrupts |
+| Lambda response streaming | Function URLs / `InvokeWithResponseStream` | Stream directly from Lambda; bypasses the buffered response limits |
+| API Gateway REST streaming | Response streaming / chunked transfer | Check current API Gateway documentation for streaming support and timeouts |
+
+```python
+resp = brt.converse_stream(
+    modelId="us.amazon.nova-lite-v1:0",
+    messages=[{"role": "user", "content": [{"text": "Explain vector search briefly."}]}])
+for event in resp["stream"]:
+    if "contentBlockDelta" in event:
+        print(event["contentBlockDelta"]["delta"].get("text", ""), end="", flush=True)
+    if "metadata" in event:
+        usage = event["metadata"]["usage"]   # token counts arrive at the end
+```
+
+<Callout variant="warning" title="Exam Trap: Guardrails with streaming">
+When a guardrail is attached to a stream, output can be evaluated synchronously (chunks are buffered and checked before release, adding latency) or asynchronously (chunks flow immediately and are checked in parallel, so some content may be delivered before a block). Choose based on whether low latency or strict blocking matters more.
+</Callout>
+
+---
+
+## 3. Resilient FM Systems (Skill 2.4.3)
+
+| Concern | Control |
+|---|---|
+| Throttling (`ThrottlingException`, HTTP 429) | SDK retries with **exponential backoff and jitter**; request quota increases; cross-Region inference; Provisioned Throughput |
+| Timeouts (`ModelTimeoutException`) | Right-size `maxTokens`, stream, retry once, then degrade |
+| Client abuse and cost | API Gateway usage plans, throttling, WAF rate rules |
+| Dependency failure | Fallback model, cached answer, graceful degradation message |
+| Cross-service visibility | **AWS X-Ray** tracing from API Gateway through Lambda to Bedrock |
+
+```python
+from botocore.config import Config
+cfg = Config(retries={"max_attempts": 8, "mode": "adaptive"}, read_timeout=120)
+brt = boto3.client("bedrock-runtime", config=cfg)
+```
+
+**Backoff with jitter** spreads retries so many clients do not retry in lockstep. **Adaptive** mode adds client-side rate limiting. Always cap attempts so retries cannot run forever.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Timeouts across the call chain">
+
+Every hop has its own limit: client timeout, API Gateway integration timeout (historically 29 seconds for REST APIs by default; confirm current quota behavior), Lambda timeout (up to 15 minutes), and Bedrock read timeout. A long generation behind a synchronous REST API can fail at the gateway even though Lambda and Bedrock are healthy. Fixes: stream the response, move to an asynchronous pattern (202 plus job ID, SQS, callbacks), or reduce output length. Always align timeouts so the inner call finishes before the outer one gives up.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Intelligent Model Routing (Skill 2.4.4)
+
+| Routing style | Mechanism | When |
+|---|---|---|
+| Static | Application code or config maps use case to model | Stable, simple requirements |
+| Content-based / dynamic | Step Functions Choice state, or a classifier FM, picks model by task type, length, language, sensitivity | Heterogeneous requests |
+| Metric-based | Route using live metrics (latency, error rate, cost, load) | Resilience and cost optimization |
+| Request transformation | API Gateway mapping templates or Lambda rewrites payload per model | Different providers need different shapes |
+| Managed | Bedrock Intelligent Prompt Routing | Quality/cost-based routing within a model family |
+
+```
+Request --> Lambda router --> classify (rules / small FM)
+        |-- code task    --> code model
+        |-- image input  --> multimodal model
+        |-- simple FAQ   --> small low-cost model
+        '-- unhealthy primary (alarm state in AppConfig) --> fallback model
+```
+
+---
+
+## 5. GenAI-Specific API Interface Concerns (Skill 2.5.1)
+
+* **Streaming responses** through API Gateway or Lambda streaming, as above.
+* **Token limit management:** count or estimate input tokens, truncate or summarize to fit the context window, set `maxTokens` to bound output cost, and surface a clear error when input is too large rather than letting Bedrock return a `ValidationException`.
+* **Retry strategies for timeouts:** idempotent retries with capped attempts; for long jobs use async patterns.
+* **Request validation:** JSON Schema in API Gateway models, size limits on payloads.
+
+---
+
+## 6. Exam Traps & Common Distractors
+
+- **Trap 1:** Using synchronous REST for long generations when streaming or async is needed.
+- **Trap 2:** Retrying immediately with no backoff, amplifying throttling.
+- **Trap 3:** WebSockets for one-way token streaming when SSE is simpler (and the reverse when interruption or bidirectional messaging is needed).
+- **Trap 4:** Using InvokeModel when portability across models and tool use favor Converse.
+- **Trap 5:** Ignoring token limits, then diagnosing `ValidationException` as a service outage.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose the right Bedrock API for sync, streaming, async, and batch needs.
+<details>
+<summary>Explanation</summary>
+
+Converse or InvokeModel for synchronous; ConverseStream or InvokeModelWithResponseStream for streaming; asynchronous invoke or SQS-backed workers for long or spiky jobs; batch inference for offline bulk workloads from S3.
+
+</details>
+
+- [ ] I can design a streaming path to a web client.
+<details>
+<summary>Explanation</summary>
+
+Call ConverseStream from Lambda (or a container), forward chunks via Lambda response streaming or SSE, or push through WebSocket or AppSync subscriptions for bidirectional chat. Consider guardrail streaming mode and gateway timeouts.
+
+</details>
+
+- [ ] I can explain correct retry behavior for throttling.
+<details>
+<summary>Explanation</summary>
+
+Use exponential backoff with jitter, cap attempts, prefer adaptive retry modes, and reduce pressure through quota increases, cross-Region inference, caching, or provisioned throughput. Trace with X-Ray to locate where latency accumulates.
+
+</details>
+
+- [ ] I can compare static, dynamic, and metric-based routing.
+<details>
+<summary>Explanation</summary>
+
+Static routing is fixed in config or code. Dynamic content-based routing inspects the request (Step Functions Choice or a classifier). Metric-based routing uses live health or cost signals. Bedrock Intelligent Prompt Routing offers managed routing within a model family.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/09-enterprise-integration-gateways-cicd" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 09: Enterprise Integration: Event-Driven Patterns, Secure Access, Hybrid & GenAI Gateways
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/11-application-integration-dev-tools-amplify-q" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 11: Application Integration Patterns & Developer Tooling →
+  </a>
+</div>

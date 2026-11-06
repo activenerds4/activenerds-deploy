@@ -1,0 +1,171 @@
+---
+title: "Module 13: Data Ingestion, Transformation & Analytics"
+description: "Kinesis, MSK, Glue, Athena, Lake Formation, EMR, Redshift, visualization, and data transfer sizing."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 13
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 3.5 — Kinesis, Amazon MSK, AWS Glue, Athena, Lake Formation, EMR, Redshift, OpenSearch, Amazon Quick, AppFlow, and sizing data transfer
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 3, Task 3.5 — Determine high-performing data ingestion and transformation solutions">
+The blueprint lists building and securing data lakes, designing streaming architectures, converting formats (for example, .csv to .parquet), and selecting ingestion configurations based on frequency, size, and speed. Identify batch versus near-real-time versus real-time, then select the service.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Kinesis Data Streams versus Data Firehose">
+
+**Kinesis Data Streams** is a real-time stream with replay. Each shard ingests up to 1 MB per second or 1,000 records per second and serves 2 MB per second of reads shared across consumers; **enhanced fan-out** gives each registered consumer a dedicated 2 MB per second per shard. Retention defaults to 24 hours and extends up to 365 days. Capacity modes: provisioned (you manage shards) or on-demand. The **partition key** determines the shard, so hot keys create hot shards.
+
+**Amazon Data Firehose** is a fully managed delivery service with **near-real-time** buffering (by size or time) to S3, Redshift, OpenSearch Service, Splunk, and HTTP endpoints, with optional Lambda transformation and format conversion to Parquet or ORC. There is no replay and no shard management.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Why Parquet and partitioning matter">
+
+Athena and Redshift Spectrum charge or scale by data scanned. **Columnar formats** (Parquet, ORC) read only required columns and compress well, while **partitioning** (for example, by date) prunes whole folders. Converting CSV to Parquet with Glue often cuts scanned data and cost dramatically and speeds queries.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Need | Service | Notes |
+|---|---|---|
+| Real-time ingestion with custom consumers and replay | Kinesis Data Streams | Ordered per shard |
+| Load streams into S3, Redshift, OpenSearch with no code | Amazon Data Firehose | Near real time, transformation |
+| Existing Apache Kafka applications | Amazon MSK | Managed Kafka; minimal app changes |
+| Serverless ETL and data catalog | AWS Glue | Crawlers, Data Catalog, Spark jobs, job bookmarks |
+| Ad hoc SQL directly on S3 | Amazon Athena | Serverless, pay per data scanned |
+| Governed data lake security | AWS Lake Formation | Fine-grained table, column, row, and cell access; cross-account sharing |
+| Big data frameworks (Spark, Hadoop, Hive, Presto) | Amazon EMR | EC2, EKS, or serverless; Spot task nodes |
+| Data warehouse, complex analytics | Amazon Redshift | Columnar MPP, Spectrum, concurrency scaling, serverless |
+| Search, logs, dashboards | Amazon OpenSearch Service | Log analytics and full text search |
+| Business intelligence dashboards | Amazon Quick | Serverless BI with in-memory acceleration |
+| SaaS to AWS data flows without code | Amazon AppFlow | Salesforce, SAP, and others to S3 or Redshift |
+| Third-party datasets | AWS Data Exchange | Subscribe to data products |
+| Video ingestion | Kinesis Video Streams | Device video for analytics |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+Sources                Ingestion              Storage (data lake)          Transform / Query         Consume
+------------------------------------------------------------------------------------------------------------
+IoT / apps / clickstream --> Kinesis Streams -->  Firehose --> S3 raw zone
+Databases ----------------> DMS (full + CDC) ------------------> S3 raw zone
+SaaS apps ----------------> AppFlow --------------------------> S3 raw zone
+On-prem files ------------> DataSync / Transfer Family ------> S3 raw zone
+                                                                 |
+                                        Glue crawler -> Data Catalog
+                                                                 |
+                                  Glue ETL (CSV -> Parquet, partitioned) --> S3 curated zone
+                                                                 |
+                      Athena | Redshift Spectrum | EMR  <-- Lake Formation permissions
+                                                                 |
+                                                            Amazon Quick dashboards
+```
+
+### Choosing ingestion by frequency and latency
+
+| Pattern | Latency | Typical services |
+|---|---|---|
+| Batch (hourly or daily files) | Hours | DataSync, Transfer Family, Glue, EMR |
+| Micro-batch or near real time | Seconds to minutes | Firehose, Lambda, MSK |
+| Real time streaming | Sub-second to seconds | Kinesis Data Streams, MSK, Flink |
+
+### Transfer sizing
+
+Transfer time equals data size divided by effective bandwidth. For example, **100 TB over a 1 Gbps link at full utilization** is about 800,000 gigabits divided by 1 Gbps, or roughly 800,000 seconds, which is about 9.3 days (and longer with real-world utilization). When the time is unacceptable or bandwidth is limited, use a **Snow Family** device, or provision **Direct Connect** for recurring large flows.
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```bash
+# Kinesis stream with 4 shards (provisioned): 4 MB/s ingest capacity
+aws kinesis create-stream --stream-name clicks --shard-count 4
+
+# Put a record; the partition key picks the shard
+aws kinesis put-record --stream-name clicks --partition-key user-123 --data "eyJldmVudCI6ImNsaWNrIn0="
+
+# Athena query against partitioned Parquet data
+aws athena start-query-execution \
+  --query-string "SELECT status, count(*) FROM logs WHERE dt = '2026-11-03' GROUP BY status" \
+  --query-execution-context Database=analytics \
+  --result-configuration OutputLocation=s3://example-athena-results/
+```
+
+**Securing a data lake:** store data in S3 with encryption and Block Public Access, register locations in Lake Formation, grant permissions on Data Catalog tables and columns (use LF-tags for scale), restrict ingestion endpoints with IAM and VPC endpoints, and encrypt streams with KMS. Use Lake Formation for cross-account sharing instead of copying data.
+
+**Shard planning:** shards needed is the greater of (peak MB per second written divided by 1) and (peak records per second divided by 1,000), plus read capacity considerations. Add consumers with enhanced fan-out rather than sharing one 2 MB per second read limit.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Using Kinesis Data Streams when the stem says "no custom code" and the goal is simply delivering to S3. Firehose is simpler.
+- **Trap 2:** Expecting Firehose to deliver in true real time. It buffers, so it is near real time.
+- **Trap 3:** Choosing EMR or Redshift for occasional ad hoc queries on S3. Athena is serverless and cheaper for that.
+- **Trap 4:** Storing analytics data as CSV or JSON when cost and speed matter. Convert to partitioned Parquet.
+- **Trap 5:** Using S3 bucket policies per team when Lake Formation provides column-level governance.
+- **Trap 6:** Migrating Kafka workloads to Kinesis when "minimal code changes" is stated. Choose MSK.
+- **Trap 7:** Sending huge datasets over limited bandwidth when a Snow Family device would finish sooner.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Kinesis Data Streams, Firehose, and MSK.
+<details>
+<summary>Explanation</summary>
+
+Data Streams gives real-time custom processing and replay. Firehose provides managed near-real-time delivery to destinations without consumers. MSK fits existing Kafka applications and ecosystem tooling with minimal changes.
+
+</details>
+
+- [ ] I can design a secure data lake with ETL and query layers.
+<details>
+<summary>Explanation</summary>
+
+Land raw data in S3, catalog with Glue crawlers, transform to partitioned Parquet with Glue ETL, query with Athena or Redshift Spectrum, govern with Lake Formation permissions at table, column, and row level, encrypt with KMS, and visualize with Amazon Quick.
+
+</details>
+
+- [ ] I can reduce Athena cost and improve performance.
+<details>
+<summary>Explanation</summary>
+
+Convert to columnar, compressed formats like Parquet, partition by commonly filtered columns, compact many small files into fewer larger ones, and select only needed columns because Athena charges by data scanned.
+
+</details>
+
+- [ ] I can compute whether to transfer online or offline.
+<details>
+<summary>Explanation</summary>
+
+Divide dataset size in bits by usable bandwidth to find transfer time. If it exceeds the project deadline or saturates the link needed for operations, use Snow Family devices, or use DataSync over Direct Connect for ongoing large transfers.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/12-network-architecture-edge-delivery" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 12: High-Performing Network Architecture & Edge Delivery
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/14-cost-optimized-storage-transfer" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 14: Cost-Optimized Storage & Data Transfer →
+  </a>
+</div>

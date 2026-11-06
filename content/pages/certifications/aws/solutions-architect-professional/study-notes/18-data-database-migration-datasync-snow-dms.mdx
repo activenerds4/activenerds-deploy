@@ -1,0 +1,155 @@
+---
+title: "Module 18: Data & Database Migration: DataSync, Snow Family, Transfer Family, DMS & SCT"
+description: "Transfer-time math, online vs offline movement, DMS full load and CDC, SCT schema conversion, Storage Gateway and directory migration."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 18
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Transfer-time math, online vs offline movement, DMS full load and CDC, SCT schema conversion, Storage Gateway and directory migration.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 4.2 Data and Database Migration">
+Pick the transfer mechanism by data volume, available bandwidth, time window, downtime tolerance and source/target engine. Be able to do the transfer-time math and to choose DMS vs SCT vs native tools.
+</Callout>
+
+---
+
+## 1. Transfer Time Math
+
+```
+ Time = Data size / (Bandwidth x Utilization)
+ 100 TB over a 1 Gbps link at 100% = 800,000 Gb / 1 Gb/s = 800,000 s = about 9.3 days (at ~80% utilization, about 11.6 days)
+ 100 TB over a 100 Mbps link       = about 93 days  -> offline transfer (Snow) is faster
+```
+
+Rule of thumb: if online transfer would exceed about a week, or the link cannot be saturated without hurting production, consider Snow Family (offline) or provisioning Direct Connect. Combine: bulk seed with Snow, then keep in sync with DataSync/DMS over the network.
+
+## 2. Data Transfer Services
+
+| Service | Use | Notes |
+|---|---|---|
+| AWS DataSync | Online, automated transfer from NFS, SMB, HDFS, object storage, other clouds to S3, EFS, FSx; between AWS storage services | Agent (VM/hardware) on premises; scheduling, bandwidth throttling, integrity verification, preserves metadata, incremental; encrypted in transit; can use VPC endpoints/Direct Connect; supports filters |
+| AWS Snow Family | Offline physical transfer and edge compute (Snowcone, Snowball Edge Storage Optimized / Compute Optimized) | Order device, copy data, ship back, AWS ingests to S3; 256-bit encryption with KMS keys; verify current availability of each device in the console as offerings change |
+| AWS Transfer Family | Managed SFTP, FTPS, FTP, AS2 endpoints in front of S3 or EFS | Keep partner workflows and authentication (service-managed, AD, custom Lambda/API Gateway IdP); VPC-hosted endpoints with Elastic IPs |
+| S3 Transfer Acceleration | Faster long-distance uploads to S3 over edge locations | Per-GB fee; test speed first |
+| Multipart upload / S3 CLI parallelism | Large objects over network | Use for objects above 100 MB |
+| Storage Gateway | Ongoing hybrid access, backup (tape, volume), cached file access | Not a bulk-migration tool, but good for continuous sync |
+| AWS Direct Connect | Dedicated bandwidth for steady large transfers | Provisioning takes weeks; pair with VPN for encryption |
+| AWS Backup / EBS snapshots | AWS-to-AWS | Cross-Region/account copies |
+| Amazon AppFlow | SaaS to AWS data flows | No-code |
+
+```bash
+aws datasync create-location-nfs --server-hostname nas.corp.local --subdirectory /export/data \
+  --on-prem-config AgentArns=arn:aws:datasync:us-east-1:111122223333:agent/agent-0abc
+aws datasync create-task --source-location-arn <nfs-loc> --destination-location-arn <s3-loc> \
+  --options VerifyMode=ONLY_FILES_TRANSFERRED,BytesPerSecond=104857600 --schedule ScheduleExpression="cron(0 2 * * ? *)"
+aws s3 cp bigfile.bin s3://bucket/ --expected-size 53687091200
+```
+
+<Callout variant="warning" title="Exam Trap: Choosing the Transfer Service">
+"Ongoing transfers of NFS data with scheduling and verification": DataSync, not scripts with rsync on EC2. "Partners must keep using SFTP": Transfer Family. "Tens of TB, 50 Mbps link, deadline in two weeks": Snow Family. "Ongoing low-latency hybrid file access to S3": File Gateway.
+</Callout>
+
+## 3. Database Migration
+
+```
+ Source DB --(full load)--> DMS replication instance --> Target DB
+        \--(CDC: change data capture via logs)--/   continuous replication until cutover
+ Heterogeneous: AWS SCT converts schema + code first; DMS moves data.
+```
+
+| Tool | Purpose |
+|---|---|
+| AWS DMS | Migrates data between databases with minimal downtime: full load, CDC, full load + CDC; homogeneous (Oracle to Oracle, MySQL to Aurora MySQL) and heterogeneous; also to S3, Kinesis, DynamoDB, Redshift, OpenSearch; DMS Serverless; Multi-AZ replication instance for HA; validation; premigration assessments |
+| AWS SCT | Assess and convert schema, stored procedures and application SQL for heterogeneous migrations (for example Oracle to Aurora PostgreSQL); produces an assessment report with conversion complexity; data warehouse conversions to Redshift |
+| Native tools | Homogeneous: `mysqldump`, `pg_dump`, Oracle Data Pump, SQL Server backup/restore to RDS (via S3), Aurora read replica from RDS (promote), logical replication |
+| Babelfish for Aurora PostgreSQL | Accept SQL Server T-SQL/TDS connections with few app changes |
+| Snow + DMS | Seed very large databases offline, then CDC |
+| Aurora/RDS read replica promotion | Minimal-downtime path from RDS MySQL/PostgreSQL to Aurora |
+
+**Process:** run SCT assessment, convert schema, create target, DMS full load + CDC, validate, test application against target, cut over by stopping writes on the source, letting CDC drain, then repoint applications. Prerequisites: enable binary logging/supplemental logging on source, size the replication instance, secure connectivity (VPN/DX, SSL), and KMS encryption.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: DMS Task Types and Limits">
+
+Full load (one-time copy), CDC only (ongoing replication after an initial dump or backup restore), full load + CDC (most common). DMS does not migrate secondary objects such as indexes, stored procedures and views in heterogeneous scenarios; that is SCT's job. Large objects (LOBs) require LOB mode settings (limited, full, inline). Replication instance placement near the target reduces latency; monitor with CloudWatch metrics such as CDCLatencySource and CDCLatencyTarget.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Minimizing Downtime for Large Databases">
+
+Approach: restore a backup or use Snow to seed, start CDC from the backup's log position, keep replicating until lag is near zero, schedule a brief write freeze, verify row counts/validation, switch application endpoints via DNS or configuration. For RDS to Aurora, create an Aurora read replica of the RDS instance and promote it for a near-zero-downtime switch.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 4. Identity, DNS and Governance in Migration
+
+| Need | Service |
+|---|---|
+| Keep Active Directory for lifted workloads | AWS Managed Microsoft AD with a trust to on-premises AD, or AD Connector (proxy only), or self-managed AD on EC2 |
+| Workforce SSO | IAM Identity Center with AD/IdP |
+| DNS cutover | Route 53 with low TTL, weighted records for gradual shift, Resolver endpoints for hybrid names |
+| Governance | Control Tower, Organizations, SCPs |
+| Network | Direct Connect/VPN with adequate capacity |
+
+## 5. Common Traps & Distractors
+
+- "Oracle to Aurora PostgreSQL": SCT (schema/code) then DMS (data).
+- "Migrate database with minimal downtime": DMS with CDC, not dump and restore during an outage window.
+- "Encrypt data on Snow devices": default; keys managed by KMS and not stored on the device.
+- "Huge archive, slow link, no rush on timing but no capacity to wait months": Snow.
+- "Using DMS to convert stored procedures": incorrect; SCT converts code.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can compute whether an online transfer meets a deadline and select an alternative.
+<details>
+<summary>Explanation</summary>
+
+Divide data size in bits by effective bandwidth. If it exceeds the deadline (accounting for realistic 70-80% link utilization and production traffic), use Snow Family for bulk seeding, optionally increase bandwidth with Direct Connect, and synchronize deltas with DataSync or DMS.
+
+</details>
+
+- [ ] I can describe a heterogeneous database migration with minimal downtime.
+<details>
+<summary>Explanation</summary>
+
+Use SCT to assess and convert the schema and code, create the target, run DMS full load and CDC to keep the target in sync, validate, test the application, then cut over by pausing writes, draining CDC and repointing the application.
+
+</details>
+
+- [ ] I can choose between DataSync, Transfer Family and Storage Gateway.
+<details>
+<summary>Explanation</summary>
+
+DataSync automates bulk and scheduled transfers between storage systems. Transfer Family provides managed SFTP/FTPS/FTP/AS2 endpoints for partner exchange into S3/EFS. Storage Gateway presents AWS storage to on-premises applications with local caching for ongoing hybrid workflows.
+
+</details>
+
+- [ ] I can explain how to preserve Active Directory-dependent workloads during migration.
+<details>
+<summary>Explanation</summary>
+
+Deploy AWS Managed Microsoft AD with a trust relationship to on-premises AD (or extend AD domain controllers to EC2), ensure DNS resolution between environments with Resolver endpoints, and use Identity Center for workforce access.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/17-migration-strategy-discovery-7rs" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 17: Migration Strategy: Discovery, 7 Rs, TCO & Wave Planning
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/19-modernization-containers-serverless" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 19: Modernization: Containers, Serverless & Event-Driven Architectures →
+  </a>
+</div>

@@ -1,0 +1,215 @@
+---
+title: "Module 05: Amazon DynamoDB: Keys, Capacity Math, Indexes & Streams"
+description: "Partition key design, RCU and WCU calculations, consistency models, query vs scan, GSI vs LSI, transactions, TTL, and streams."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 5
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Development with AWS Services
+
+<Callout variant="info" title="Exam Focus: Development with AWS Services (Skill 1.3.4)">
+In DVA-C03 four separate DynamoDB skills were **consolidated into one comprehensive skill**, with no reduction in emphasis: high-cardinality partition keys, read consistency models, query and scan operations, and keys, attributes, and indexes. Capacity math questions still appear, so practice the formulas.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: How DynamoDB Distributes Data">
+
+DynamoDB hashes the **partition key** to decide which physical partition stores an item. Throughput and storage scale by adding partitions. Each partition can serve up to **3,000 RCU and 1,000 WCU** and holds up to about 10 GB. **Adaptive capacity** shifts throughput toward hot partitions, but it cannot fix a single key that exceeds the per-partition ceiling.
+
+* **Primary Trade-off:** Query flexibility vs predictable single-digit-millisecond performance. You model data around access patterns, not around normalized entities.
+* **Failure Modes:** A **hot partition** (one popular key) causes throttling even when the table's total capacity looks fine.
+* **Exam Trap:** "Table is throttling but consumed capacity is far below provisioned" → hot key. Fix with a higher-cardinality key or **write sharding** (append a random or calculated suffix), not just more capacity.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Keys, Items, and Attributes
+
+* **Simple primary key:** partition key only. **Composite primary key:** partition key + **sort key** (items with the same partition key are stored together, sorted by the sort key).
+* Choose a **high-cardinality** partition key with evenly distributed access (`userId`, `orderId`, `deviceId`), not `status`, `date`, or `country`.
+* **Item size limit: 400 KB** (including attribute names). Store large blobs in S3 and keep a pointer.
+* Attribute types: scalar (`S`, `N`, `B`, `BOOL`, `NULL`), document (`L`, `M`), and sets (`SS`, `NS`, `BS`).
+* Schemaless except for key attributes.
+
+```
+Table: Orders      PK: customerId (S)    SK: orderDate#orderId (S)
+Query "all orders for customer 42 in 2026" = KeyCondition: customerId = 42 AND begins_with(SK, "2026")
+```
+
+---
+
+## 2. Capacity Modes and the Math
+
+| Mode | How It Works | Best For |
+|---|---|---|
+| **On-demand** | Pay per request, scales instantly to previous peak and beyond | Unpredictable or new workloads |
+| **Provisioned** | You set RCU and WCU (optionally with **auto scaling**) | Steady, predictable traffic; lower cost at scale |
+
+Table classes: **Standard** and **Standard-IA** (cheaper storage, pricier access).
+
+### Formulas (round item size UP to the next unit)
+
+| Operation | Cost |
+|---|---|
+| **Read, strongly consistent** | 1 RCU per 4 KB |
+| **Read, eventually consistent** | **0.5** RCU per 4 KB |
+| **Read, transactional** | **2** RCU per 4 KB |
+| **Write, standard** | 1 WCU per 1 KB |
+| **Write, transactional** | **2** WCU per 1 KB |
+
+**Worked examples**
+
+1. 80 strongly consistent reads per second of 6 KB items: 6 KB rounds up to 8 KB = 2 units each, so 80 x 2 = **160 RCU**. Eventually consistent: **80 RCU**.
+2. 100 writes per second of 2.5 KB items: rounds up to 3 KB = 3 WCU each, so **300 WCU**. Transactional: **600 WCU**.
+3. 50 transactional reads per second of 4 KB: 2 RCU each = **100 RCU**.
+
+A **Scan** consumes capacity for **every item it reads**, even if a filter discards them.
+
+---
+
+## 3. Read Consistency Models
+
+| Model | Behavior | Notes |
+|---|---|---|
+| **Eventually consistent** (default) | May return slightly stale data right after a write | Half the cost; **the only option on GSIs**, and the only option for reads against replicas in other Regions of a global table |
+| **Strongly consistent** (`ConsistentRead=true`) | Returns the latest committed write | Not supported on GSIs; higher latency; unavailable during some network issues; **bypasses DAX cache** |
+| **Transactional** (`TransactGetItems`) | Serializable, all-or-nothing reads | 2x cost |
+
+---
+
+## 4. Query vs Scan and Related Operations
+
+| Operation | Purpose | Key Facts |
+|---|---|---|
+| **GetItem** | One item by full primary key | Cheapest and fastest |
+| **Query** | Items with one partition key, optional sort-key condition | Efficient; can use `Limit`, `ScanIndexForward=false` (descending), `ProjectionExpression` |
+| **Scan** | Read the whole table or index | Expensive; **FilterExpression applies after the read** (still costs capacity); use **parallel scan** (`Segment`, `TotalSegments`) for big tables |
+| **BatchGetItem** | Up to **100** items / 16 MB across tables | Returns `UnprocessedKeys`; retry with backoff |
+| **BatchWriteItem** | Up to **25** put/delete requests / 16 MB | No updates, not atomic; handle `UnprocessedItems` |
+| **TransactWriteItems / TransactGetItems** | ACID across up to **100** items (4 MB), same Region/account | 2x capacity; fails entirely if any condition fails |
+
+**Pagination:** responses are capped at **1 MB**. Use `LastEvaluatedKey` as the next request's `ExclusiveStartKey` until it is absent.
+
+**Conditional writes and concurrency**
+
+```bash
+# Create only if it does not already exist (idempotent insert)
+aws dynamodb put-item --table-name Orders \
+  --item '{"customerId":{"S":"42"},"orderId":{"S":"A1"}}' \
+  --condition-expression "attribute_not_exists(customerId)"
+
+# Atomic counter
+aws dynamodb update-item --table-name Stats --key '{"id":{"S":"home"}}' \
+  --update-expression "ADD hits :one" --expression-attribute-values '{":one":{"N":"1"}}'
+```
+
+**Optimistic locking:** store a `version` attribute, update with `ConditionExpression: version = :expected`, and increment on each write. A `ConditionalCheckFailedException` means someone else changed the item first, so re-read and retry.
+
+---
+
+## 5. Secondary Indexes
+
+| Feature | Local Secondary Index (LSI) | Global Secondary Index (GSI) |
+|---|---|---|
+| Partition key | **Same** as the base table | **Any** attribute |
+| Sort key | Different | Any (optional) |
+| Created | **Only at table creation** | **Any time** |
+| Limit | 5 per table | 20 per table (default quota) |
+| Capacity | **Shares** the base table's capacity | **Own** RCU/WCU (provisioned mode) |
+| Consistency | Eventually **or strongly** consistent reads | **Eventually consistent only** |
+| Size restriction | 10 GB per partition key value (item collection) | None |
+
+* **Projection:** `KEYS_ONLY`, `INCLUDE` (chosen attributes), or `ALL`. Projecting fewer attributes lowers storage and write cost; **fetching non-projected attributes from an LSI** is allowed (extra read), but **not from a GSI**.
+* **Sparse index:** items that lack the index key attribute are not in the index. This is a cheap way to query "only flagged items."
+* **Write throttling on a GSI back-pressures the base table.** Provision GSIs adequately.
+* Always answer new access patterns with a **GSI** unless the question requires strongly consistent index reads (LSI, designed up front).
+
+---
+
+## 6. Data Lifecycle, Streams, and Advanced Features
+
+* **TTL:** designate a Number attribute holding an **epoch timestamp in seconds**. Expired items are deleted in the background (typically within a couple of days, so filter expired items in queries) at **no WCU cost**. Deletions appear in Streams.
+* **DynamoDB Streams:** ordered change log per item for **24 hours**; view types `KEYS_ONLY`, `NEW_IMAGE`, `OLD_IMAGE`, `NEW_AND_OLD_IMAGES`. Trigger **Lambda** for aggregation, search indexing, or replication. Alternative: Kinesis Data Streams for DynamoDB.
+* **Global tables:** multi-Region, multi-active replication (last-writer-wins).
+* **Backups:** on-demand and **point-in-time recovery** (35-day window); **export to S3** without consuming capacity.
+* **DAX:** in-memory cache for microsecond reads (Module 16). **PartiQL** offers SQL-compatible syntax.
+* **Encryption:** always at rest (AWS owned key by default, optionally AWS managed or customer managed KMS key).
+* **Fine-grained access control:** IAM condition keys `dynamodb:LeadingKeys` (restrict to items whose partition key equals the caller's identity) and `dynamodb:Attributes`.
+
+---
+
+## 7. Common Exam Traps and Scenario Distractors
+
+* "Reads of a 3.5 KB item" costs **1** unit (rounded up to 4 KB), and a 4.1 KB item costs **2**.
+* "Need to query by an attribute that is not the key" → add a **GSI**; **do not Scan**.
+* "Throttled while table-level metrics look fine" → hot partition.
+* "Delete old session items automatically for free" → **TTL**.
+* "Prevent overwriting an existing item" → **condition expression** `attribute_not_exists(pk)`.
+* "Strongly consistent read on a GSI" → **not possible**.
+* `ProvisionedThroughputExceededException` after batch writes → handle `UnprocessedItems` with **exponential backoff**.
+* "Multiple items must succeed or fail together" → **TransactWriteItems**.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] How many RCUs are needed for 120 eventually consistent reads per second of 9 KB items?
+<details>
+<summary>Explanation</summary>
+
+9 KB rounds up to 12 KB = 3 units of 4 KB. Strongly consistent would be 3 RCU per read; eventually consistent is half: 1.5. 120 x 1.5 = **180 RCU**.
+
+</details>
+- [ ] An app needs to look up orders by `status` and `createdAt` across all customers. Orders are keyed by `customerId`. What is the best approach?
+<details>
+<summary>Explanation</summary>
+
+Create a **GSI** with partition key `status` and sort key `createdAt` (consider write sharding if one status value is extremely hot). A Scan with filter would be slow and costly.
+
+</details>
+- [ ] Two users edit the same profile item at once and one update silently overwrites the other. What pattern prevents this?
+<details>
+<summary>Explanation</summary>
+
+**Optimistic locking** with a version attribute and a conditional update. The loser receives `ConditionalCheckFailedException` and retries with fresh data.
+
+</details>
+- [ ] A Scan with a FilterExpression returns 10 items but the table has 1 million items. What was consumed?
+<details>
+<summary>Explanation</summary>
+
+Capacity for **reading all scanned items** (up to the 1 MB page limit, repeated across pages). Filters reduce returned data, not consumed read capacity.
+
+</details>
+- [ ] You must trigger a function whenever an item changes and receive both the before and after values. What do you configure?
+<details>
+<summary>Explanation</summary>
+
+Enable **DynamoDB Streams** with **NEW_AND_OLD_IMAGES** and attach a Lambda event source mapping.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/04-messaging-events-and-streaming" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 04: Messaging, Event-Driven Patterns & Streaming: SQS, SNS, EventBridge, Step Functions, Kinesis
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/06-data-stores-caching-and-lifecycle" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 06: Choosing Data Stores: S3, RDS, Aurora, ElastiCache & Data Lifecycles →
+  </a>
+</div>

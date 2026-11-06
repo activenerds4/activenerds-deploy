@@ -1,0 +1,162 @@
+---
+title: "Module 04: S3, Shared File Storage & RDS Performance Tuning"
+description: "S3 multipart/Transfer Acceleration/lifecycle, DataSync, EFS vs FSx, RDS Performance Insights, Enhanced Monitoring, and RDS Proxy."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 4
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 1.3 (Skills 1.3.3–1.3.5): S3 performance and lifecycle, DataSync, EFS/FSx selection, and RDS monitoring with Performance Insights and RDS Proxy.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 1.3 (Domain 1, 22%)">
+Skill 1.3.4 now lists **Amazon S3 Files** alongside EFS and FSx as a shared storage option. It is brand new on the blueprint; this module covers EFS and FSx in depth and flags S3 Files as something to confirm in current AWS documentation. Also note that **FSx for OpenZFS is listed out of scope**.
+</Callout>
+
+---
+
+## 1. S3 Performance and Efficiency
+
+| Technique | When to use | Key facts |
+|---|---|---|
+| Parallelize across prefixes | High request rates | **3,500** PUT/COPY/POST/DELETE and **5,500** GET/HEAD per second **per prefix**, no limit on prefixes |
+| Multipart upload | Large objects | Recommended above 100 MB, **required above 5 GB**; object max 5 TB; parts 5 MiB to 5 GiB, up to 10,000 parts; retry failed parts only |
+| Transfer Acceleration | Uploads from far-away clients | Uses CloudFront edge network; endpoint `bucket.s3-accelerate.amazonaws.com`; bucket name must be DNS compliant without periods |
+| Byte-range fetches | Partial reads, parallel downloads | `Range` header |
+| DataSync | Bulk, scheduled, verified transfer from on-premises/other storage into S3, EFS, FSx | Agent for on-premises; integrity verification; bandwidth throttling |
+| Lifecycle policies | Cost and housekeeping | Transitions, expirations, `AbortIncompleteMultipartUpload`, noncurrent version rules |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Lifecycle transitions and minimum durations">
+
+* **Standard to Standard-IA / One Zone-IA:** objects must be at least **30 days** old before the lifecycle transition; minimum billable duration 30 days; 128 KB minimum billable size.
+* **Glacier Instant Retrieval** (90-day minimum), **Glacier Flexible Retrieval** (90 days), **Glacier Deep Archive** (180 days).
+* **Intelligent-Tiering** moves objects automatically by access pattern with no retrieval fee. Best for unknown or changing patterns.
+* Always add an **abort incomplete multipart uploads** rule (for example after 7 days); orphaned parts are billed but invisible in normal listings.
+* Lifecycle actions are rule-based on age or tags and run asynchronously (daily).
+
+</AccordionItem>
+</AccordionGroup>
+
+```bash
+aws s3api put-bucket-accelerate-configuration --bucket my-bucket \
+  --accelerate-configuration Status=Enabled
+
+aws configure set default.s3.multipart_threshold 100MB
+aws configure set default.s3.max_concurrent_requests 20
+```
+
+---
+
+## 2. Shared File Storage: EFS vs FSx
+
+| Need | Choose | Why |
+|---|---|---|
+| Linux NFS shared across many instances/AZs | **Amazon EFS** | Elastic, regional, POSIX |
+| Windows SMB, Active Directory, NTFS | **FSx for Windows File Server** | Native SMB, DFS, shadow copies |
+| HPC, ML, high throughput with S3 integration | **FSx for Lustre** | Parallel file system, links to S3 |
+| Multi-protocol (NFS, SMB, iSCSI), ONTAP features | **FSx for NetApp ONTAP** | Snapshots, clones, tiering |
+| Block volume for one instance | EBS | Not shared |
+
+**EFS tuning**
+
+* **Throughput modes:** **Elastic** (default, scales automatically), **Provisioned** (fixed throughput independent of size), **Bursting** (scales with stored data).
+* **Performance modes:** General Purpose (default, lowest latency); Max I/O is a legacy option for massive parallelism.
+* **Lifecycle management:** transition files not accessed for a period to **Infrequent Access** or **Archive** classes and back on access (`TransitionToPrimaryStorageClass`). Large cost saver.
+* **Mount:** NFS port **2049**; use the EFS mount helper and security groups on mount targets (one per AZ).
+
+<Callout variant="tip" title="S3 Files">
+Amazon S3 Files appears in the blueprint as a way to present S3 data with file-system access. I could not verify detailed behavior and limits for it, so treat this as a gap: read the current AWS announcement and documentation, and decide when it beats EFS (file access to data that must stay in S3) versus DataSync (copy into another store).
+</Callout>
+
+---
+
+## 3. RDS Performance Monitoring
+
+| Tool | What it shows | Use |
+|---|---|---|
+| CloudWatch metrics | `CPUUtilization`, `FreeableMemory`, `FreeStorageSpace`, `DatabaseConnections`, `ReadIOPS`/`WriteIOPS`, `DiskQueueDepth`, `ReplicaLag` | Alarms; hypervisor view |
+| Enhanced Monitoring | OS-level metrics per process, 1 to 60 second granularity | Find which process uses CPU or memory |
+| **Performance Insights** | **DB load** (average active sessions) split by wait event, SQL, host, user | Find the query or wait causing load; proactive recommendations flag issues |
+| Slow query / error logs | Published to CloudWatch Logs | Query tuning |
+
+Reading Performance Insights: when DB load exceeds the **max vCPU line**, sessions are waiting. CPU waits mean undersized compute; I/O waits mean storage (consider gp3/io2 or more IOPS); lock waits mean application contention.
+
+* **Storage autoscaling:** set `MaxAllocatedStorage` so RDS grows storage before it fills.
+* **Read replicas** offload reads. Watch `ReplicaLag`.
+* **RDS Proxy** pools and shares connections, cutting connection overhead and (per AWS) failover time. It integrates with Secrets Manager and IAM authentication and is ideal for **Lambda** and spiky connection loads. Applications connect to the proxy endpoint.
+
+```
+ Lambda (1000s concurrent) --> RDS Proxy (pool, multiplex) --> RDS / Aurora writer
+                                      |
+                                      +--> Secrets Manager (credentials)
+```
+
+<Callout variant="info" title="Performance Insights vs Database Insights">
+AWS has been positioning CloudWatch Database Insights as the evolution of Performance Insights. The SOA-C03 guide names Performance Insights, so study its concepts (DB load, wait events, top SQL); the same ideas carry over. Confirm the current product naming in the RDS documentation.
+</Callout>
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Uploading a 6 GB file with a single PUT. Multipart is mandatory above 5 GB.
+- **Trap 2:** Using Transfer Acceleration for same-Region uploads where it offers little benefit.
+- **Trap 3:** Choosing EFS for Windows/SMB workloads. That is FSx for Windows.
+- **Trap 4:** Increasing instance size when Performance Insights shows I/O wait events.
+- **Trap 5:** Connection exhaustion from Lambda against RDS answered by a bigger instance instead of **RDS Proxy**.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can speed up uploads of very large files from remote offices.
+<details>
+<summary>Explanation</summary>
+
+Use multipart upload (parallel parts) with **S3 Transfer Acceleration** enabled and the accelerate endpoint. For recurring on-premises syncs, DataSync with an agent and scheduled tasks gives verification and bandwidth control.
+
+</details>
+
+- [ ] I can reduce EFS cost without changing the application.
+<details>
+<summary>Explanation</summary>
+
+Enable lifecycle management to move files not accessed for a set period to Infrequent Access (and Archive). Files return to Standard on access if configured. Review throughput mode: Elastic suits spiky workloads, Provisioned suits steady high throughput on small data.
+
+</details>
+
+- [ ] I can use Performance Insights to decide between more CPU and faster storage.
+<details>
+<summary>Explanation</summary>
+
+Look at DB load versus the vCPU line and the wait-event breakdown. Dominant CPU wait: scale the instance class. Dominant I/O waits such as data file reads: improve storage IOPS or throughput or tune queries and indexes. Lock waits: fix transaction patterns.
+
+</details>
+
+- [ ] I know why a Lambda-backed API exhausts RDS connections and the fix.
+<details>
+<summary>Explanation</summary>
+
+Each concurrent Lambda execution environment opens its own connection. RDS Proxy keeps a pooled set of database connections and multiplexes client connections onto them, with credentials from Secrets Manager or IAM auth.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/03-compute-and-ebs-performance" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 03: EC2, Compute Optimizer & EBS Performance Optimization
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/05-scaling-elasticity-and-caching" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 05: Auto Scaling, Database Scaling & Caching →
+  </a>
+</div>

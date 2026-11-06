@@ -1,0 +1,173 @@
+---
+title: "Module 06: Disaster Recovery, Backup & Business Continuity"
+description: "RTO and RPO, the four DR strategies, Elastic Disaster Recovery, AWS Backup Vault Lock, cross-Region data replication and Route 53 failover."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 6
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** RTO and RPO, the four DR strategies, Elastic Disaster Recovery, AWS Backup Vault Lock, cross-Region data replication and Route 53 failover.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 1.3 and 2.2 Reliable Architectures and Business Continuity">
+Almost every DR question is an RTO/RPO matching exercise: map the stated recovery time and data-loss tolerance to the cheapest strategy that meets them, then pick the right replication technology per data store.
+</Callout>
+
+---
+
+## 1. RTO, RPO and the Four Strategies
+
+- **RPO** (Recovery Point Objective): maximum tolerable data loss measured in time.
+- **RTO** (Recovery Time Objective): maximum tolerable downtime until service is restored.
+
+| Strategy | RPO | RTO | Cost | What runs in the recovery Region |
+|---|---|---|---|---|
+| Backup and restore | Hours | 24 hours or more | $ | Nothing; backups copied cross-Region/account; infrastructure re-deployed with IaC |
+| Pilot light | Minutes | Tens of minutes | $$ | Data replication live; core resources (databases) running; compute off or minimal; scale out on failover |
+| Warm standby | Seconds to minutes | Minutes | $$$ | Scaled-down but fully functional copy; scale up on failover |
+| Multi-site active/active | Near zero | Near zero (seconds) | $$$$ | Full capacity serving production traffic in both Regions |
+
+```
+ Region A (primary)                    Region B (DR)
+ [Users]-> Route 53 -> ALB -> App --+   Pilot light: DB replica only
+                          |         +-> Warm standby: small ASG + replica
+                          v         +-> Active/active: full ASG + write-capable DB
+                      Database ===== async replication =====>
+```
+
+<Callout variant="warning" title="Exam Trap: Strategy Selection">
+"Lowest cost, 24-hour RTO" is backup and restore. "Core database always replicated, can tolerate tens of minutes to scale up" is pilot light. "Reduced capacity running continuously for minutes of RTO" is warm standby. "Near-zero RTO and RPO with active users in two Regions" is active/active. Do not over-engineer: choosing active/active for a 4-hour RTO is wrong on cost.
+</Callout>
+
+## 2. Replication and Recovery by Service
+
+| Service | Cross-AZ HA | Cross-Region DR mechanism | Typical RPO/RTO |
+|---|---|---|---|
+| Amazon RDS (non-Aurora) | Multi-AZ (sync standby) | Cross-Region read replica (async), promote on disaster; automated backups copy | RPO seconds to minutes; RTO minutes (manual promote) |
+| Amazon Aurora | 6 copies across 3 AZs, failover to replica | **Aurora Global Database**: storage-level replication, typically under one second lag, up to five secondary Regions, managed planned failover or detach-and-promote | RPO about 1 second; RTO about a minute |
+| DynamoDB | Replicated across 3 AZs | **Global tables** (multi-Region, multi-active, last-writer-wins) plus point-in-time recovery | RPO near zero; RTO near zero |
+| Amazon S3 | 3+ AZs (not One Zone) | **Cross-Region Replication**, Replication Time Control (15-minute SLA for most objects), Multi-Region Access Points | Minutes; RTC for guaranteed 15 min |
+| EBS | AZ-scoped | Snapshots copied cross-Region (Data Lifecycle Manager automation); Elastic Disaster Recovery | Depends on snapshot interval |
+| EFS | Multi-AZ | EFS replication to another Region (typically RPO minutes) | Minutes |
+| ElastiCache Redis | Multi-AZ with automatic failover | Global Datastore | Seconds |
+| EC2/servers | Auto Scaling across AZs | **AWS Elastic Disaster Recovery (DRS)** | RPO seconds; RTO minutes |
+
+## 3. AWS Elastic Disaster Recovery (DRS)
+
+- Installs an agent on source servers (on-premises, other clouds, or AWS Regions); continuous **block-level replication** to a low-cost **staging area** (small replication servers and EBS volumes) in the target Region.
+- On drill or failover, launches full-size EC2 instances from point-in-time recovery points; supports **non-disruptive drills**, failback.
+- Delivers RPO in seconds and RTO in minutes at a cost near pilot-light level.
+
+```bash
+aws drs initialize-service
+aws drs describe-source-servers --query 'items[].{id:sourceServerID,state:dataReplicationInfo.dataReplicationState}'
+aws drs start-recovery --source-servers sourceServerID=s-123 --is-drill
+```
+
+## 4. AWS Backup
+
+| Feature | Detail |
+|---|---|
+| Backup plans | Rules for schedule, lifecycle (cold storage tiering for supported types), retention, copy actions to other Regions/accounts |
+| Vaults | Encrypted (KMS) containers; **Vault Lock** (compliance mode is immutable after the cooling-off period, governance mode removable with permissions) provides WORM protection against deletion and ransomware |
+| Cross-Region and cross-account copy | Protects against Region failure and compromised accounts; use an isolated "backup account" with its own KMS keys |
+| Organizations integration | Backup policies from the management or delegated account roll out plans across accounts; tag-based resource assignment |
+| Logically air-gapped vault | Isolated vault shared via RAM for recovery |
+| Restore testing | Automated restore testing validates recoverability |
+| Supported | EBS, EC2, RDS, Aurora, DynamoDB, EFS, FSx, S3, Storage Gateway volumes, DocumentDB, Neptune, and more |
+
+```bash
+aws backup create-backup-plan --backup-plan file://plan.json
+aws backup put-backup-vault-lock-configuration --backup-vault-name prod-vault \
+  --min-retention-days 30 --max-retention-days 365 --changeable-for-days 3
+```
+
+## 5. Traffic Failover
+
+- **Route 53 failover routing** with health checks (primary/secondary), **latency/weighted** for active/active, alias records with "evaluate target health".
+- Health checks can monitor endpoints, other health checks (calculated) or CloudWatch alarms (for private resources).
+- **Route 53 Application Recovery Controller (ARC):** routing controls (manual, data-plane safety switches with highly available control plane endpoints), readiness checks, and zonal shift. Use when failover must be deliberate and safe across a complex stack.
+- **Global Accelerator:** fast failover (seconds) at the network layer without waiting for DNS TTL expiry; no client-side DNS caching issues.
+- Keep DNS TTL low (for example 60 seconds) for DNS-based failover.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why Failover Control-Plane Dependencies Matter">
+
+During a Regional event, control planes (creating resources, editing Route 53 records) can be impaired while data planes keep working. Resilient DR designs depend only on data-plane actions: pre-provisioned capacity, health-check-driven DNS failover, ARC routing controls using its cluster endpoints, and Global Accelerator endpoint health. Avoid runbooks that require creating new resources in the failing Region.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Testing DR">
+
+Untested DR is not DR. Use DRS non-disruptive drills, game days, Aurora Global Database managed planned failover tests, restore testing in AWS Backup, and chaos exercises. Measure achieved RTO/RPO against targets and record the results.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 6. Designing for Automatic Recovery (Single Region)
+
+- Auto Scaling group health checks (EC2 and ELB) replace unhealthy instances; use multiple AZs.
+- EC2 auto recovery (CloudWatch alarm action `recover`) for single instances with EBS.
+- Decouple with SQS so work survives consumer failure (Module 10).
+- Stateless tiers; externalize sessions (ElastiCache, DynamoDB).
+- Scale up vs scale out: prefer horizontal scale-out for availability; vertical scaling requires downtime and has an upper bound.
+
+## 7. Common Traps & Distractors
+
+- "RPO of seconds for a database across Regions": Aurora Global Database or DynamoDB global tables, not scheduled snapshot copies.
+- "On-premises servers need cost-effective DR to AWS": Elastic Disaster Recovery, not a second full environment.
+- "Ransomware-resistant backups": Backup Vault Lock plus cross-account copy.
+- "Failover without DNS caching delays": Global Accelerator.
+- "Read replicas for HA": async replicas are not automatic failover (except Aurora replicas, which are failover targets).
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can map an RTO/RPO pair to the cheapest compliant DR strategy.
+<details>
+<summary>Explanation</summary>
+
+RPO and RTO of many hours: backup and restore. Tens of minutes RTO with continuous data replication: pilot light. Minutes RTO needing quick serving capacity: warm standby. Near-zero both: active/active. The cheapest strategy that satisfies both numbers wins.
+
+</details>
+
+- [ ] I can describe how Elastic Disaster Recovery keeps cost low while giving low RPO.
+<details>
+<summary>Explanation</summary>
+
+Only small replication servers and EBS volumes run in the staging area during normal operation. Full-size recovery instances are launched only during a drill or failover from the continuously replicated block-level data, giving seconds of RPO and minutes of RTO.
+
+</details>
+
+- [ ] I can choose between Aurora Global Database and cross-Region read replicas for RDS.
+<details>
+<summary>Explanation</summary>
+
+Aurora Global Database replicates at the storage layer with typical lag below one second and supports managed failover in roughly a minute with multiple secondary Regions. RDS cross-Region read replicas use engine-level async replication, have higher lag potential and require a manual promotion.
+
+</details>
+
+- [ ] I can protect backups from deletion by a compromised administrator.
+<details>
+<summary>Explanation</summary>
+
+Use AWS Backup Vault Lock in compliance mode, copy backups to a separate backup account with separate KMS keys and restrictive SCPs, and consider logically air-gapped vaults, so even privileged credentials in the source account cannot remove recovery points.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/05-identity-cross-account-access-kms-acm" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 05: Identity, Cross-Account Access, Federation & Encryption (KMS, ACM)
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/07-iac-cicd-deployment-strategies" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 07: Infrastructure as Code, CI/CD & Deployment Strategies →
+  </a>
+</div>

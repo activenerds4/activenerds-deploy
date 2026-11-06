@@ -1,0 +1,220 @@
+---
+title: "Module 03: Amazon API Gateway: REST vs HTTP APIs, Integrations & Validation"
+description: "REST vs HTTP APIs, proxy and non-proxy integrations, authorizers, request validation, mapping templates, throttling, caching, and stages."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 3
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Development with AWS Services
+
+<Callout variant="info" title="Exam Focus: Development with AWS Services and Deployment (Skills 1.1.4, 3.1.4, 3.1.5)">
+API Gateway appears in three places in the blueprint: building and extending APIs with transformations and validation (1.1.4), environment-specific configuration (3.1.4), and stages and endpoints (3.1.5, **moved from the old Deployment domain**). Know **REST vs HTTP API** differences cold.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Request Flow Through a REST API">
+
+Every REST API request passes through stages you can configure independently:
+
+1. **Method request:** authorization, API key requirement, request validation, parameter definitions.
+2. **Integration request:** mapping templates (VTL) transform the client request into the backend's format.
+3. **Integration:** Lambda, HTTP endpoint, AWS service, VPC link, or Mock.
+4. **Integration response:** map backend status and body to client format.
+5. **Method response:** declare the status codes and headers clients may receive.
+
+With **proxy integrations** (Lambda proxy or HTTP proxy), steps 2, 4, and 5 are skipped: API Gateway passes the full request through and your code returns the final response shape.
+
+* **Exam Trap:** In a Lambda proxy integration, a response missing `statusCode` or with a non-string `body` yields **502 Bad Gateway** ("Malformed Lambda proxy response").
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. REST API vs HTTP API vs WebSocket API
+
+| Feature | REST API | HTTP API | WebSocket API |
+|---|---|---|---|
+| Positioning | Full-featured | Lower cost, lower latency, simpler | Persistent two-way connections |
+| Authorizers | IAM, **Cognito user pool**, **Lambda** | IAM, **JWT** (Cognito, any OIDC), Lambda | IAM, Lambda |
+| API keys and usage plans | **Yes** | No | No |
+| Request validation (models) | **Yes** | No | Limited (route selection) |
+| VTL mapping templates | **Yes** | Parameter mapping only | Yes (templates) |
+| Built-in caching | **Yes** | No | No |
+| AWS WAF | Yes | No | No |
+| Resource policies | Yes | No | No |
+| Private endpoints | Yes | No (use VPC links to private backends) | No |
+| Canary release settings | Yes | No | No |
+| X-Ray tracing | Yes | No (access logs and metrics) | No |
+
+**Choose HTTP API** when you only need proxying to Lambda or HTTP backends with JWT auth and want lower cost. **Choose REST API** when the scenario mentions API keys, usage plans, request validation, caching, WAF, mapping templates, or private APIs.
+
+**REST endpoint types:** **Edge-optimized** (CloudFront-backed, global clients), **Regional** (clients in the same Region; you can add your own CloudFront), **Private** (reachable only from a VPC through an interface endpoint).
+
+---
+
+## 2. Integration Types
+
+| Integration | Behavior | When to Use |
+|---|---|---|
+| **Lambda proxy** (`AWS_PROXY`) | Whole request passed as an event; function builds the response | Default for serverless APIs |
+| **Lambda custom** (`AWS`) | You map request and response with templates | Legacy or when you must reshape payloads without code |
+| **HTTP proxy / HTTP** | Forward to public HTTP endpoints | Fronting existing services |
+| **AWS service** | Call another AWS API directly (for example SQS `SendMessage`, DynamoDB `PutItem`, Step Functions) | Skip a Lambda for simple pass-through |
+| **VPC link** | Reach private NLB/ALB-backed services | Private backends |
+| **Mock** | Return a static response from API Gateway itself | Testing and frontend development before the backend exists (Skill 3.2.2) |
+
+```json
+{
+  "statusCode": 200,
+  "headers": { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+  "body": "{\"message\":\"ok\"}",
+  "isBase64Encoded": false
+}
+```
+
+**Async invocation through a non-proxy Lambda integration:** add the static header `X-Amz-Invocation-Type: 'Event'` to the integration request so API Gateway returns immediately.
+
+---
+
+## 3. Validation and Transformation (Skill 1.1.4)
+
+* **Request validators** check required parameters and a **JSON Schema model** for the body **before** invoking the backend; failures return **400** and save backend cost.
+* **Mapping templates** use Velocity Template Language to reshape payloads (for example turn a flat JSON body into a DynamoDB `PutItem` request).
+* **Gateway responses** customize API Gateway-generated errors (4XX, 5XX) and CORS headers on errors.
+* **Models** define request and response schemas and can generate SDKs and documentation.
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "OrderModel",
+  "type": "object",
+  "required": ["orderId", "quantity"],
+  "properties": {
+    "orderId":  { "type": "string" },
+    "quantity": { "type": "integer", "minimum": 1 }
+  }
+}
+```
+
+**CORS:** browsers send an `OPTIONS` **preflight**. For REST APIs add an `OPTIONS` method (mock integration) returning the `Access-Control-Allow-*` headers. With **Lambda proxy integrations, your function must also return the CORS headers** on actual responses. HTTP APIs can enable CORS with a setting.
+
+---
+
+## 4. Authentication and Authorization
+
+| Method | Works On | How It Works | Choose When |
+|---|---|---|---|
+| **IAM authorization** | REST, HTTP, WebSocket | Caller signs with SigV4; permission via IAM policy (`execute-api:Invoke`) | Internal services, other AWS workloads |
+| **Cognito user pool authorizer** | REST | Validates a user pool JWT; no code | Mobile and web users already in Cognito |
+| **JWT authorizer** | HTTP | Validates JWT against an OIDC issuer, audience, and scopes | Cognito or any OIDC provider with HTTP APIs |
+| **Lambda authorizer** | All | Your function returns an IAM policy (token-based or request-based); results **cached** (default TTL 300 s) | Custom tokens, SAML bridging, header or query-string logic |
+| **API keys + usage plans** | REST | Identify clients and apply throttle and quota | Metering and plans, **not** a security mechanism by themselves |
+
+**Cognito authorizer detail:** with no OAuth scopes configured on the method, it expects the **ID token**; with scopes configured, it expects the **access token**.
+
+---
+
+## 5. Throttling, Caching, and Quotas
+
+* **Throttling** uses a token bucket (steady-state rate and burst) at the account, stage, method, and **usage plan** levels. Exceeding it returns **429 Too Many Requests**; clients should back off with jitter.
+* **Stage cache** (REST only): per-stage cache sized 0.5 GB to 237 GB, default TTL **300 s**, maximum 3,600 s; you can override per method and enable encryption. Clients can bypass with `Cache-Control: max-age=0` only if the caller has `execute-api:InvalidateCache` permission (or you require authorization).
+* **Integration timeout:** the historical hard limit is **29 seconds**; Regional and private REST APIs can request an increase beyond this (with possible trade-offs in throttle quota). For long work, return **202 Accepted** and process asynchronously.
+* **Payload limit:** 10 MB.
+
+---
+
+## 6. Stages, Stage Variables, Custom Domains, and Releases (Skills 3.1.4 and 3.1.5)
+
+```
+https://{api-id}.execute-api.{region}.amazonaws.com/{stage}/{resource}
+         dev  ──> Lambda alias "dev"      (stage variable lambdaAlias = dev)
+         prod ──> Lambda alias "prod"     (stage variable lambdaAlias = prod)
+```
+
+* A **deployment** is a snapshot of the API; a **stage** (`dev`, `test`, `prod`) is a named reference to a deployment with its own settings, logging, throttling, cache, and WAF association. **Changes to a REST API take effect only after you create a new deployment to a stage.**
+* **Stage variables** act like environment variables. Reference them in integration URIs and mapping templates (for example `${stageVariables.lambdaAlias}`), which lets one API definition target different Lambda aliases or backend URLs per stage. Do **not** store secrets in them.
+* **Canary release** (REST): send a percentage of stage traffic to a new deployment before promoting it.
+* **Custom domain names:** requires an **ACM certificate** (for edge-optimized APIs the certificate must be in **us-east-1**; for Regional, in the API's Region), a **base path mapping** to API and stage, and a Route 53 alias record.
+* **Logging:** *Execution logging* records request flow and errors; *access logging* records who called what (you define the format). Both require a CloudWatch Logs role set at the account level.
+
+```bash
+aws apigateway create-deployment --rest-api-id abc123 --stage-name prod --description "v2.1"
+aws apigateway test-invoke-method --rest-api-id abc123 --resource-id xyz789 --http-method GET
+```
+
+---
+
+## 7. Common Exam Traps and Scenario Distractors
+
+* **403 `Missing Authentication Token`** usually means the **wrong path or method/stage**, not a missing credential.
+* **429** → throttling (stage, usage plan, or account). **502** → malformed Lambda proxy response or backend crash. **504** → integration timeout.
+* "Reduce backend load for repeated identical GET requests" → **stage caching** (REST) with an appropriate TTL.
+* "Reject malformed bodies before invoking Lambda" → **request validator + model**.
+* "Frontend team needs a working API before the backend exists" → **Mock integration**.
+* "Cheapest option to expose Lambda with JWT auth" → **HTTP API** with a JWT authorizer.
+* "Same API, different backend per environment" → **stage variables** + Lambda aliases.
+* "I updated the API but clients still see old behavior" → you did not **redeploy** to the stage.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A browser app calling your API fails with a CORS error even though API Gateway has an OPTIONS method. The API uses Lambda proxy integration. What is missing?
+<details>
+<summary>Explanation</summary>
+
+With proxy integration, the Lambda function must include `Access-Control-Allow-Origin` (and related) headers in its **actual** response. The OPTIONS preflight alone is not enough.
+
+</details>
+- [ ] You need per-customer rate limits and monthly quotas. Which API type and feature?
+<details>
+<summary>Explanation</summary>
+
+A **REST API** with **API keys and usage plans**. HTTP APIs do not support usage plans.
+
+</details>
+- [ ] After changing an integration setting in the console, the live `prod` stage did not change. Why?
+<details>
+<summary>Explanation</summary>
+
+REST API edits are not live until you **deploy** the API to the stage.
+
+</details>
+- [ ] A mobile app authenticates users with Amazon Cognito and calls a REST API. What is the least-code authorizer?
+<details>
+<summary>Explanation</summary>
+
+A **Cognito user pool authorizer**. For an HTTP API you would use a **JWT authorizer**.
+
+</details>
+- [ ] Calls return `502 Bad Gateway` after a Lambda deployment; the function logs show success. What is the likely cause?
+<details>
+<summary>Explanation</summary>
+
+The function returned a response that does not match the **proxy integration format** (missing `statusCode`, or `body` not a string). Fix the response object.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/02-aws-lambda-development" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 02: AWS Lambda Development, Configuration & Event Handling
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/04-messaging-events-and-streaming" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 04: Messaging, Event-Driven Patterns & Streaming: SQS, SNS, EventBridge, Step Functions, Kinesis →
+  </a>
+</div>

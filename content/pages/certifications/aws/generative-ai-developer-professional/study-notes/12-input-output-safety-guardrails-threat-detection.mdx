@@ -1,0 +1,194 @@
+---
+title: "Module 12: Input & Output Safety: Guardrails, Hallucination Control & Threat Detection"
+description: "Content filters, denied topics, contextual grounding, defense in depth, prompt injection and jailbreak defense (Task 3.1)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 12
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 3.1 (Skills 3.1.1 - 3.1.5): input safety, output safety, accuracy verification and hallucination reduction, defense in depth, and advanced threat detection (prompt injection and jailbreaks).
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 3 (20% of scored content), Task 3.1">
+Amazon Bedrock Guardrails is the centerpiece, but the exam rewards **layered** designs: pre-processing filters, model-based guardrails, post-processing validation, and API-level filtering. Know each Guardrails policy type and what it cannot do.
+</Callout>
+
+---
+
+## 1. Amazon Bedrock Guardrails: Policy Types
+
+| Policy | What it does |
+|---|---|
+| **Content filters** | Detect and block harmful categories (hate, insults, sexual, violence, misconduct) with adjustable strength, plus **prompt attack** detection (jailbreaks and prompt injection) on inputs |
+| **Denied topics** | Natural-language definitions of topics the application must not discuss |
+| **Word filters** | Block custom words or phrases and profanity |
+| **Sensitive information filters** | Detect PII types and custom regex; **block** or **mask** |
+| **Contextual grounding check** | Compares a response to source material and the query to flag ungrounded or irrelevant answers (hallucination mitigation in RAG) |
+| **Automated Reasoning checks** | Mathematically verify responses against formal policy rules to reduce factual errors in policy-bound domains |
+
+Guardrails apply to **inputs and outputs**, work across models, and can be attached to Converse/InvokeModel, Knowledge Bases, and Agents. The **ApplyGuardrail API** evaluates text independently of any model call, so you can protect third-party or self-hosted models, or check content at arbitrary pipeline stages.
+
+```python
+# Attached to a model call
+resp = brt.converse(
+    modelId="us.amazon.nova-lite-v1:0",
+    messages=[{"role": "user", "content": [{"text": user_text}]}],
+    guardrailConfig={"guardrailIdentifier": "gr-abc123", "guardrailVersion": "1", "trace": "enabled"})
+
+# Standalone check
+chk = brt.apply_guardrail(
+    guardrailIdentifier="gr-abc123", guardrailVersion="1", source="INPUT",
+    content=[{"text": {"text": user_text}}])
+blocked = chk["action"] == "GUARDRAIL_INTERVENED"
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Guardrail versions, intervention behavior, and tracing">
+
+Create a guardrail, test with the working draft, then create an immutable **version** for production use; applications reference the version so edits do not change live behavior unexpectedly. When a guardrail intervenes, you configure the **blocked message** returned to the user. With tracing enabled, responses include which policy and filter matched, which feeds monitoring and tuning. Guardrails publish CloudWatch metrics (for example invocations and interventions), enabling alarms on spikes that may indicate an attack.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Input Safety (Skill 3.1.1)
+
+| Layer | Implementation |
+|---|---|
+| Content moderation | Guardrails content filters and denied topics on input |
+| Custom moderation workflow | Step Functions plus Lambda: classify, branch to allow, rewrite, human review, or block |
+| Real-time validation | Length limits, encoding checks, schema validation in API Gateway and Lambda |
+| Rate limiting | API Gateway throttling, AWS WAF |
+
+---
+
+## 3. Output Safety (Skill 3.1.2)
+
+* Guardrails on model responses (content filters, PII masking, word filters).
+* **Specialized FM evaluations:** a second model classifies output for toxicity or policy compliance before release.
+* **Text-to-SQL for deterministic results:** instead of letting a model state numbers from memory, have it generate a query that a database executes, so figures are computed, not invented. Validate the generated SQL (read-only role, allow-listed tables) before running.
+* Structured outputs validated by JSON Schema.
+
+---
+
+## 4. Accuracy Verification and Hallucination Reduction (Skill 3.1.3)
+
+| Technique | How |
+|---|---|
+| Grounding with **Knowledge Bases** | Answer from retrieved sources; require citations |
+| Contextual grounding check | Threshold-based detection of ungrounded content |
+| Confidence scoring | Use model or retrieval scores; route low confidence to fallback or human |
+| Semantic similarity verification | Embed the answer and the cited chunks; compare similarity |
+| Fact-checking pass | Second model verifies claims against sources |
+| JSON Schema enforcement | Reject malformed or out-of-range structured output |
+| Lower temperature | Reduce randomness for factual tasks |
+
+```
+question --> retrieve --> generate with citations
+        --> grounding check (guardrail) --> pass --> return + sources
+                                         '-> fail --> "I could not verify that" or human escalation
+```
+
+---
+
+## 5. Defense in Depth (Skill 3.1.4)
+
+No single control is sufficient. Layer them:
+
+```
+Client
+  --> [1] API Gateway + WAF: auth, throttling, size and schema validation
+  --> [2] Pre-processing: Amazon Comprehend (PII, toxicity, language), Lambda sanitization
+  --> [3] Bedrock Guardrails (input policies) + model call with hardened system prompt
+  --> [4] Bedrock Guardrails (output policies, grounding check)
+  --> [5] Post-processing Lambda: schema/format validation, business rules, redaction
+  --> [6] API Gateway response filtering / transformation
+  --> Client            Logging and alerting across every layer
+```
+
+**Principle:** assume any single layer can be bypassed; each layer must catch what the others miss and fail closed.
+
+---
+
+## 6. Advanced Threat Detection (Skill 3.1.5)
+
+| Threat | Description | Mitigations |
+|---|---|---|
+| **Direct prompt injection** | User tells the model to ignore instructions | Guardrails prompt-attack filter, hardened system prompt, input classifiers |
+| **Indirect prompt injection** | Malicious instructions hidden in retrieved documents, web pages, or tool output | Treat retrieved content as untrusted data, delimit it, scan content at ingestion, limit tool permissions |
+| **Jailbreaks** | Role-play or encoding tricks to bypass policy | Content filters, safety classifiers, output checks |
+| **Data exfiltration** | Model induced to reveal secrets or other users' data | Never place secrets in prompts, access-controlled retrieval, output filters |
+| **Excessive agency** | Agent performs harmful actions | Least-privilege tools, approval gates |
+| **Resource abuse** | Token flooding | Input limits, quotas, throttling |
+
+**Automated adversarial testing:** maintain a red-team prompt suite, run it in CI and on a schedule (Step Functions, Lambda), measure block rate, and alert on regressions.
+
+<Callout variant="warning" title="Exam Trap: Delimiters are not security">
+Wrapping user input in tags helps the model distinguish data from instructions, but it does not guarantee safety. The correct answer layers Guardrails, input sanitization, least-privilege tools, and output validation.
+</Callout>
+
+---
+
+## 7. Exam Traps & Common Distractors
+
+- **Trap 1:** Relying only on a system prompt for safety.
+- **Trap 2:** Believing Guardrails alone eliminates hallucination; use grounding with retrieval and verification.
+- **Trap 3:** Applying guardrails to user input but not model output (or the reverse).
+- **Trap 4:** Trusting retrieved documents as safe instructions (indirect injection).
+- **Trap 5:** Using the working draft guardrail in production instead of a pinned version.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can list Guardrails policy types and pick the right one for a requirement.
+<details>
+<summary>Explanation</summary>
+
+Content filters for harmful categories and prompt attacks; denied topics for off-limits subjects; word filters for specific terms; sensitive information filters for PII block or mask; contextual grounding for hallucination in RAG; Automated Reasoning for rule-verifiable factual policy.
+
+</details>
+
+- [ ] I can design defense in depth for an FM application.
+<details>
+<summary>Explanation</summary>
+
+Combine edge controls (WAF, throttling), pre-processing (Comprehend, sanitization), input and output guardrails, post-processing validation, response filtering, and comprehensive logging so no single failure exposes users.
+
+</details>
+
+- [ ] I can reduce hallucinations using AWS features.
+<details>
+<summary>Explanation</summary>
+
+Ground responses with Knowledge Bases and citations, apply contextual grounding checks, verify with similarity or a second model, enforce schemas, use low temperature, and compute numbers with text-to-SQL.
+
+</details>
+
+- [ ] I can distinguish direct and indirect prompt injection and mitigations.
+<details>
+<summary>Explanation</summary>
+
+Direct injection arrives in the user's message; indirect hides in content the system retrieves or tools return. Mitigate with prompt-attack filters, treating external content as untrusted data, ingestion-time scanning, minimal tool permissions, and output validation.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/11-application-integration-dev-tools-amplify-q" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 11: Application Integration Patterns & Developer Tooling
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/13-data-security-privacy-controls" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 13: Data Security & Privacy: VPC Isolation, PII Handling & Retention →
+  </a>
+</div>

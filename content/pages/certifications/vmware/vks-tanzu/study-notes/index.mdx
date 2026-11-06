@@ -1,0 +1,95 @@
+---
+title: "VCF vSphere Kubernetes Service (3V0-24.25) Revision Notes"
+description: "Comprehensive preparation notes for the VCF vSphere Kubernetes Service (3V0-24.25) certification covering Supervisor, vSphere Pods, Cluster API, and Tanzu packages."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF vSphere Kubernetes Service (3V0-24.25) Track"
+trackSlug: "/certifications/vmware/vks-tanzu"
+totalModules: 5
+layout: "hub"
+---
+
+<Callout variant="tip" title="Track Overview & Exam Code: 3V0-24.25">
+The **VCF vSphere Kubernetes Service (3V0-24.25)** exam tests your ability to configure, manage, and troubleshoot enterprise Kubernetes platforms running natively on vSphere. Key areas include Supervisor cluster enablement, vSphere Namespaces, Antrea NSX routed networking, and declarative Cluster API deployments.
+</Callout>
+
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-4 my-6 not-prose">
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Exam Code</span>
+    <span className="font-mono text-sm font-bold text-primary">3V0-24.25</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Credential Level</span>
+    <span className="font-mono text-sm font-bold text-foreground">Specialist</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Study Duration</span>
+    <span className="font-mono text-sm font-bold text-foreground">~15 Hours</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Curriculum</span>
+    <span className="font-mono text-sm font-bold text-foreground">5 Modules</span>
+  </div>
+</div>
+
+<TrackResourceTabs
+  notesCount="5 Modules"
+  mockTestsCount="3 Practice Exams"
+  flashCardsCount="100+ Cards"
+  cheatSheetsCount="5 Reference Cards"
+>
+  <div className="space-y-3 my-4 not-prose">
+<ModuleCard
+    moduleNumber="1"
+    domain="Architecture"
+    title="Section 1: IT Architectures, Technologies, and Standards"
+    description="Compute models (VMs vs containers vs vSphere Pods), Kubernetes architecture, networking (Antrea, Calico), storage (CNS, FCD, SPBM)."
+    readTime="20m read"
+    href="/certifications/vmware/vks-tanzu/study-notes/section-1-it-architectures"
+  />
+  <ModuleCard
+    moduleNumber="2"
+    domain="NSX Networking"
+    title="Section 2: VMware Products and Solutions (Supervisor & Networking)"
+    description="Supervisor components, 5-IP requirement, single vs 3-zone HA, VDS vs NSX segments vs NSX VPCs, Avi & NSX load balancers."
+    readTime="20m read"
+    href="/certifications/vmware/vks-tanzu/study-notes/section-2-products-and-solutions"
+  />
+  <ModuleCard
+    moduleNumber="3"
+    domain="Kubernetes"
+    title="Section 3: Plan and Design the VMware Tanzu / VKS Solution"
+    description="Namespace isolation, capacity planning, SPBM storage classes, multi-zone topology, identity federation and OIDC mapping."
+    readTime="20m read"
+    href="/certifications/vmware/vks-tanzu/study-notes/section-3-plan-and-design"
+  />
+  <ModuleCard
+    moduleNumber="4"
+    domain="Kubernetes"
+    title="Section 4: Install, Configure, and Administrate VMware Tanzu"
+    description="Supervisor enablement, namespace RBAC, content library syncing, VKS cluster provisioning via Cluster API (CAPI), Harbor registry."
+    readTime="20m read"
+    href="/certifications/vmware/vks-tanzu/study-notes/section-4-install-configure-administrate"
+  />
+  <ModuleCard
+    moduleNumber="5"
+    domain="Lifecycle"
+    title="Section 5: Performance, Optimization, and Lifecycle Upgrades"
+    description="Surge node upgrades, control plane etcd maintenance, node pool scaling, Antrea traceflow, pod troubleshooting with kubectl-vsphere."
+    readTime="20m read"
+    href="/certifications/vmware/vks-tanzu/study-notes/section-5-performance-optimization-upgrades"
+  />
+  </div>
+</TrackResourceTabs>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Back to VMware Certifications Hub
+  </a>
+  <a href="/certifications/vmware/vks-tanzu/study-notes/section-1-it-architectures" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity shadow-sm">
+    Start Module 01 →
+  </a>
+</div>

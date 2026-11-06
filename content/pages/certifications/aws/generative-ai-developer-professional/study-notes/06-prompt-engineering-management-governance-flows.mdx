@@ -1,0 +1,215 @@
+---
+title: "Module 06: Prompt Engineering, Prompt Management, Governance & Prompt Flows"
+description: "Prompt Management variants and versions, Bedrock Guardrails, conversation memory, regression testing, and Prompt Flows (Task 1.6)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 6
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 1.6 (Skills 1.6.1 - 1.6.6): instruction frameworks, interactive and conversational systems, prompt management and governance, prompt quality assurance, advanced prompting techniques, and Prompt Flows.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1, Task 1.6">
+The exam treats prompts as **managed, versioned, governed software artifacts**, not strings in code. Expect questions on Prompt Management (variants, versions, approval), Guardrails, Prompt Flows, conversation state, and automated prompt regression tests.
+</Callout>
+
+---
+
+## 1. Model Instruction Frameworks (Skill 1.6.1)
+
+Control behavior through layered instructions.
+
+| Layer | Mechanism |
+|---|---|
+| Role and policy | System prompt defining role, tone, boundaries |
+| Structure | Templates with variables, output format specifications (JSON, XML tags) |
+| Enforcement | Amazon Bedrock Guardrails (content, topics, PII, grounding) |
+| Central management | Amazon Bedrock Prompt Management |
+
+**Prompt Management** stores prompts with **variables** (written as double-curly placeholders such as `{{customer_name}}`), model configuration, and multiple **variants** for comparison. Create immutable **versions** for production and reference them by ARN. **Guardrails** enforce policy regardless of prompt wording, so they complement, not replace, good instructions.
+
+```python
+bka_ctl = boto3.client("bedrock-agent")
+p = bka_ctl.create_prompt(
+    name="support-summarizer",
+    variants=[{
+        "name": "v-default", "templateType": "TEXT", "modelId": "amazon.nova-lite-v1:0",
+        "templateConfiguration": {"text": {
+            "text": "Summarize this ticket for {{audience}}:\n{{ticket}}",
+            "inputVariables": [{"name": "audience"}, {"name": "ticket"}]}},
+        "inferenceConfiguration": {"text": {"temperature": 0.2, "maxTokens": 300}}}],
+    defaultVariant="v-default")
+bka_ctl.create_prompt_version(promptIdentifier=p["id"])
+```
+
+---
+
+## 2. Interactive AI Systems & Context (Skill 1.6.2)
+
+| Need | AWS building block |
+|---|---|
+| Conversation history | DynamoDB table keyed by session ID (with TTL); load recent turns into `messages` |
+| Clarification when input is ambiguous | Step Functions workflow: detect missing slots, ask the user, wait for reply |
+| Intent recognition | Amazon Comprehend custom classification, Amazon Lex, or an FM classifier |
+| Long conversations | Sliding window plus summarization of older turns to stay within context |
+
+```
+user turn --> load history (DynamoDB) --> classify intent
+   |-- clear   --> build prompt (history + retrieved context) --> FM --> save turn
+   |-- unclear --> Step Functions: ask clarifying question --> wait --> resume
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Managing context windows in multi-turn chat">
+
+Every call is stateless; you resend history. Cost and latency grow with each turn. Strategies: keep the last N turns verbatim, summarize older turns into a running summary stored beside the session, drop low-value turns, and cap tool-output size. Use prompt caching for the stable prefix (system prompt, reference documents) so repeated tokens are cheaper (Module 15).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Prompt Management & Governance (Skill 1.6.3)
+
+| Governance need | Mechanism |
+|---|---|
+| Consistent templates | Prompt Management parameterized templates |
+| Approval workflows | Version promotion gated by review (Step Functions, CodePipeline manual approval) |
+| Template repository | Amazon S3 (versioned bucket) or Prompt Management |
+| Usage tracking | AWS CloudTrail records prompt management API activity |
+| Access logging | Amazon CloudWatch Logs |
+| Least-privilege access | IAM policies limiting who can edit versus invoke prompts |
+
+```
+Author edits DRAFT --> automated tests --> reviewer approves
+   --> create immutable version --> alias/ARN updated in app config --> CloudTrail audit trail
+```
+
+---
+
+## 4. Prompt Quality Assurance (Skill 1.6.4)
+
+Treat prompts like code with automated tests.
+
+| Test type | Implementation |
+|---|---|
+| Output verification | Lambda checks schema validity, required fields, forbidden phrases |
+| Edge cases | Step Functions Map state runs a prompt against a suite of tricky inputs |
+| Regression | Scheduled or CI job replays golden inputs against the new prompt version and compares scores; CloudWatch metrics track trends |
+| Format validation | JSON Schema validation on structured outputs |
+
+```python
+import jsonschema, json
+schema = {"type":"object","required":["category","urgency"],
+          "properties":{"category":{"type":"string"},"urgency":{"enum":["low","med","high"]}}}
+def verify(model_text):
+    try:
+        jsonschema.validate(json.loads(model_text), schema); return True
+    except Exception:
+        return False
+```
+
+---
+
+## 5. Enhancing Prompt Performance (Skill 1.6.5)
+
+| Technique | Use |
+|---|---|
+| Structured input components | Separate instructions, context, question using XML-style tags or headings |
+| Output format specification | Explicit JSON schema or tags; optionally prefill or tool-use for structured output |
+| Few-shot examples | Show 2 to 5 representative input/output pairs |
+| Chain-of-thought | Ask the model to reason step by step before the final answer, for multi-step logic |
+| Feedback loops | Capture user ratings and failures, fold into prompt revisions |
+| Parameter tuning | Lower temperature for determinism, adjust top-p for diversity |
+
+<Callout variant="warning" title="Exam Trap: Reasoning exposure">
+Chain-of-thought improves hard reasoning but increases output tokens and latency, and you may not want to show raw reasoning to users. Request a reasoning section and a separate final answer section, then return only the latter.
+</Callout>
+
+---
+
+## 6. Complex Prompt Systems with Prompt Flows (Skill 1.6.6)
+
+**Amazon Bedrock Prompt Flows** is a visual builder for workflows that connect prompts, models, knowledge bases, agents, Lambda functions, and logic.
+
+| Capability | Flow node / feature |
+|---|---|
+| Sequential prompt chains | Prompt nodes connected in order (summarize, then classify, then draft) |
+| Conditional branching | Condition node evaluating model output |
+| Reusable components | Prompt nodes referencing managed prompts |
+| Pre/post-processing | Lambda function nodes |
+| Retrieval | Knowledge base node |
+| Looping over lists | Iterator and Collector nodes |
+
+```
+Input --> Prompt: classify --> Condition
+            |-- billing  --> KB node --> Prompt: answer --> Lambda: format --> Output
+            |-- other    --> Prompt: escalate summary ------------------------> Output
+```
+
+**Prompt Flows vs Step Functions:** Flows suit prompt-centric, low-code orchestration inside Bedrock; Step Functions suit broader workflows with retries, human approval, many AWS service integrations, and long-running state.
+
+---
+
+## 7. Exam Traps & Common Distractors
+
+- **Trap 1:** Storing prompts as strings in Lambda code when versioned, governed Prompt Management is requested.
+- **Trap 2:** Believing a system prompt alone enforces safety; use Guardrails for enforcement.
+- **Trap 3:** Resending unbounded chat history with no summarization or windowing.
+- **Trap 4:** Shipping a prompt change with no regression suite.
+- **Trap 5:** Choosing Prompt Flows when the scenario needs human approval steps, long waits, and retries across many services (Step Functions).
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can describe how Prompt Management supports governance.
+<details>
+<summary>Explanation</summary>
+
+Parameterized templates with variables, variants for comparison, immutable versions for production, controlled by IAM, with CloudTrail recording API activity and CloudWatch Logs capturing access. Approval workflows can be built with Step Functions or CodePipeline gates.
+
+</details>
+
+- [ ] I can design a conversation system that keeps context affordably.
+<details>
+<summary>Explanation</summary>
+
+Persist turns in DynamoDB with a TTL, keep a recent window, summarize older turns, and use prompt caching on stable prefixes. Add a clarification branch via Step Functions when required information is missing.
+
+</details>
+
+- [ ] I can build an automated prompt regression process.
+<details>
+<summary>Explanation</summary>
+
+Maintain a golden input set, run each new prompt version through a Step Functions or CI job, verify schema and expected content with Lambda, compare quality scores to the baseline, publish metrics to CloudWatch, and block promotion when quality drops.
+
+</details>
+
+- [ ] I can choose between Prompt Flows and Step Functions.
+<details>
+<summary>Explanation</summary>
+
+Prompt Flows for visual, prompt-chaining workflows within Bedrock including branching and knowledge base or Lambda nodes. Step Functions when you need durable orchestration, retries and error handling, human approvals, parallelism, and broad AWS integrations.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/05-retrieval-chunking-embeddings-hybrid-search" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 05: Retrieval Mechanisms: Chunking, Embeddings, Hybrid Search & Query Handling
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/07-agentic-ai-strands-agentcore-mcp" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 07: Agentic AI: Strands Agents, Bedrock AgentCore, MCP & Safeguarded Workflows →
+  </a>
+</div>

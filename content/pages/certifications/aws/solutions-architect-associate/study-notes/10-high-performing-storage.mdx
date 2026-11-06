@@ -1,0 +1,167 @@
+---
+title: "Module 10: High-Performing & Scalable Storage"
+description: "S3 performance, EBS volume types, EFS, FSx, hybrid storage with Storage Gateway, DataSync, and the Snow Family."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 10
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 3.1 — Amazon S3 performance, EBS volume types, instance store, Amazon EFS, Amazon FSx, hybrid storage with Storage Gateway, DataSync, Transfer Family, and the Snow Family
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 3, Task 3.1 — Determine high-performing and/or scalable storage solutions">
+Start by classifying the storage type: **object** (S3), **block** (EBS, instance store), or **file** (EFS, FSx). Then match protocol (NFS versus SMB versus iSCSI), performance (IOPS versus throughput), and scale.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: S3 performance mechanics">
+
+* S3 supports at least **3,500 PUT/COPY/POST/DELETE** and **5,500 GET/HEAD** requests per second **per prefix**; spread keys across prefixes and parallelize to scale beyond that.
+* **Multipart upload:** recommended above 100 MB and required above 5 GB (single PUT limit). Maximum object size is 5 TB. Parallel parts improve throughput and allow retry of failed parts.
+* **Byte-range fetches** parallelize downloads and retrieve only needed bytes.
+* **S3 Transfer Acceleration** uses CloudFront edge locations to speed long-distance uploads to a bucket.
+* **S3 Express One Zone** (directory buckets) provides single-digit millisecond latency in one AZ for latency-sensitive data access.
+* Strong read-after-write consistency applies to all S3 operations.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: EBS volume characteristics">
+
+EBS volumes are network-attached block devices tied to **one AZ**; snapshots (stored in S3, incremental) are the path to other AZs or Regions. Most volumes attach to one instance; **io1 and io2 support Multi-Attach** to multiple Nitro instances in the same AZ for clustered applications. Only SSD volumes (gp2, gp3, io1, io2) can be boot volumes; st1 and sc1 cannot.
+
+</AccordionItem>
+</AccordionGroup>
+
+| EBS type | Class | Performance profile | Use case |
+|---|---|---|---|
+| gp3 | General purpose SSD | 3,000 IOPS and 125 MB/s baseline; scale IOPS (up to 16,000) and throughput (up to 1,000 MB/s) independently of size | Default for most workloads; cheaper than gp2 |
+| gp2 | General purpose SSD | IOPS tied to size (3 IOPS per GB) with burst | Legacy |
+| io2 / io2 Block Express | Provisioned IOPS SSD | Up to 256,000 IOPS; sub-millisecond latency; 99.999% durability | Large, latency-sensitive databases (Oracle, SQL Server) |
+| io1 | Provisioned IOPS SSD | High provisioned IOPS | I/O-intensive databases |
+| st1 | Throughput-optimized HDD | High sequential throughput | Big data, logs, data warehouses |
+| sc1 | Cold HDD | Lowest cost | Infrequently accessed large data |
+| Instance store | Local NVMe or HDD | Highest IOPS; **ephemeral** (lost on stop or termination) | Buffers, caches, scratch data, replicated data |
+
+| File / hybrid service | Protocol | Key facts | Choose when |
+|---|---|---|---|
+| Amazon EFS | NFS v4.1 (Linux) | Regional, multi-AZ, elastic; throughput modes Elastic, Provisioned, Bursting; EFS One Zone available | Shared Linux file storage for many instances or containers |
+| FSx for Windows File Server | SMB | AD integration, DFS, NTFS | Windows shared storage |
+| FSx for Lustre | Lustre | Sub-millisecond latency, hundreds of GB/s; links to S3 | HPC, ML training, media processing |
+| FSx for NetApp ONTAP | NFS, SMB, iSCSI | Multi-protocol, snapshots, cloning | Migrating NetApp workloads |
+| FSx for OpenZFS | NFS | Low-latency ZFS features | Migrating ZFS workloads |
+| Storage Gateway | NFS, SMB, iSCSI, VTL | File, Volume (cached or stored), and Tape gateways | On-premises access to AWS storage |
+| AWS DataSync | NFS, SMB, HDFS, S3 | Agent-based, scheduled, accelerated transfer | Large-scale online migration and recurring sync |
+| AWS Transfer Family | SFTP, FTPS, FTP, AS2 | Fully managed endpoints into S3 or EFS | Partners using file transfer protocols |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+On-premises                                   AWS
++-------------+   NFS/SMB    +---------------------+      +---------------+
+| App servers | -----------> | S3 File Gateway     | ---> | Amazon S3     |
++-------------+              | (local cache)       |      | (lifecycle ->  |
+      |                      +---------------------+      |  Glacier)      |
+      | iSCSI                                              +---------------+
+      v
++---------------------+  async snapshots  +----------------------------+
+| Volume Gateway      | ----------------> | EBS snapshots / S3         |
+| (cached or stored)  |                   +----------------------------+
++---------------------+
+Bulk one-time or scheduled copy:  DataSync agent --> S3 / EFS / FSx
+Offline, no bandwidth:           Snow Family device --> S3
+```
+
+**Volume Gateway modes:** *cached* keeps primary data in S3 with frequently used data cached locally; *stored* keeps the full dataset on premises and asynchronously backs up snapshots to AWS.
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```bash
+# Multipart upload using the high-level CLI (automatic for large files)
+aws configure set default.s3.multipart_threshold 64MB
+aws configure set default.s3.max_concurrent_requests 20
+aws s3 cp bigfile.dat s3://example-bucket/ --region us-east-1
+
+# Enable Transfer Acceleration and upload via the accelerated endpoint
+aws s3api put-bucket-accelerate-configuration --bucket example-bucket \
+  --accelerate-configuration Status=Enabled
+aws s3 cp bigfile.dat s3://example-bucket/ --endpoint-url https://s3-accelerate.amazonaws.com
+
+# Modify an EBS volume in place (no downtime) to gp3 with more IOPS
+aws ec2 modify-volume --volume-id vol-0abc --volume-type gp3 --iops 6000 --throughput 500
+```
+
+**Sizing and scaling:** EBS can be resized and retyped online (subject to a cool-down between modifications). EFS and S3 scale automatically. FSx file systems can have storage and throughput capacity increased.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Choosing EFS for Windows workloads. Windows needs SMB, so FSx for Windows File Server.
+- **Trap 2:** Using instance store for data that must persist. It is ephemeral.
+- **Trap 3:** Choosing st1 or sc1 as a boot volume. HDD volumes cannot be boot volumes.
+- **Trap 4:** Assuming EBS volumes can be attached across AZs. They are AZ-bound; use snapshots to move.
+- **Trap 5:** Choosing S3 for a low-latency POSIX shared file system. That is EFS or FSx.
+- **Trap 6:** Using Storage Gateway when a one-time bulk transfer is needed. DataSync or Snow Family fit better.
+- **Trap 7:** Provisioning io2 when gp3 can reach the required IOPS at lower cost.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between object, block, and file storage for a scenario.
+<details>
+<summary>Explanation</summary>
+
+Object storage (S3) suits unstructured data, static content, and data lakes with virtually unlimited scale. Block storage (EBS) suits boot volumes and databases needing low-latency IOPS for a single instance. File storage (EFS, FSx) suits shared access by multiple instances through NFS or SMB.
+
+</details>
+
+- [ ] I can select the EBS volume type for IOPS-heavy versus throughput-heavy workloads.
+<details>
+<summary>Explanation</summary>
+
+Use gp3 by default and raise provisioned IOPS and throughput as needed. Use io2 (Block Express) for the highest IOPS and durability on critical databases. Use st1 for large sequential throughput workloads and sc1 for cold data. Use instance store when ephemeral, maximum local I/O is acceptable.
+
+</details>
+
+- [ ] I can pick the right FSx flavor.
+<details>
+<summary>Explanation</summary>
+
+Windows File Server for SMB and Active Directory, Lustre for HPC and ML with S3 integration, NetApp ONTAP for multi-protocol and NetApp feature compatibility, and OpenZFS for ZFS-based NFS workloads.
+
+</details>
+
+- [ ] I can match hybrid and migration tools: Storage Gateway, DataSync, Transfer Family, Snow Family.
+<details>
+<summary>Explanation</summary>
+
+Storage Gateway gives on-premises applications ongoing access to AWS storage with local caching. DataSync moves large datasets online on a schedule. Transfer Family exposes SFTP, FTPS, or FTP endpoints backed by S3 or EFS. The Snow Family transfers data offline when bandwidth is insufficient.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/09-high-availability-disaster-recovery" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 09: High Availability, Fault Tolerance & Disaster Recovery
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/11-high-performing-databases" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 11: High-Performing Database Solutions →
+  </a>
+</div>

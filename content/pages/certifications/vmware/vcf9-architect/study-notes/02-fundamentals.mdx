@@ -1,0 +1,192 @@
+---
+title: "Section 02: Architecture Fundamentals & VCF 9 Building Blocks"
+description: "VCF 9 Fleet Management, multi-instance federation, bill of materials validation, and lifecycle boundary modeling."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF 9.0 Architect Exam Revision Notes"
+trackSlug: "/certifications/vmware/vcf9-architect"
+moduleNumber: 2
+totalModules: 13
+layout: "article"
+---
+
+**VMware Products and Solutions**
+**Objective 2.1: Differentiate VCF 9.0 architecture options based on scenario requirements**
+
+→ Verify product names and feature limits against the current VCF 9.0 documentation and exam guide. VCF 9.0 renamed and re-packaged several components (see the naming note below), and exam wording may follow either old or new terms.
+
+---
+
+## 1. Naming Note: "Aria" → VCF 9.0 Terms
+
+| Legacy name (Aria Suite) | VCF 9.0 name / role |
+|---|---|
+| Aria Operations | **VCF Operations**: monitoring, capacity, cost, compliance, plus **fleet management** (lifecycle of VCF management components) |
+| Aria Operations for Logs | **VCF Operations for logs**: log collection and analysis |
+| Aria Operations for Networks | **VCF Operations for networks**: network flow visibility, troubleshooting |
+| Aria Automation | **VCF Automation**: self-service consumption, blueprints/templates, governance, multi-tenancy |
+| Aria Suite Lifecycle | Folded into **VCF Operations fleet management** |
+| Cloud Builder (bring-up) | **VCF Installer** |
+
+**Takeaway:** if a question says "Aria", map it to the VCF Operations / Automation family.
+
+---
+
+## 2. Component Roles
+
+| Component | Role in VCF 9.0 | Architecture relevance |
+|---|---|---|
+| **vSphere (ESXi + vCenter)** | Compute virtualisation; clustering, HA, DRS, vMotion; vCenter is the management plane per domain | Each domain has its own vCenter; defines cluster/host failure handling |
+| **vSAN** (ESA preferred, OSA supported) | Software-defined storage (principal storage) | Drives host count, FTT, failure domains, stretched cluster options, hardware (ReadyNode) choices |
+| **NSX** | Software-defined networking and security: overlay, T0/T1 gateways, Edge nodes, distributed firewall, load balancing | Defines multi-site/connectivity, micro-segmentation, edge sizing and placement |
+| **SDDC Manager** | Domain and infrastructure lifecycle: creating domains, cluster/host operations, patching and upgrades | Per-instance control point for domain operations |
+| **VCF Installer** | Initial bring-up of a VCF instance (deploys management domain) | Day-0 only |
+| **VCF Operations** (incl. fleet management) | Monitoring, capacity, health, compliance; lifecycle of management components across the fleet | Central visibility across instances |
+| **VCF Automation** | Private cloud consumption layer (self-service, tenancy, policies) | Needed for service-catalogue / multi-tenant scenarios |
+| **VCF Identity Broker** | SSO and identity federation to external IdPs across VCF components | Central identity/security requirement |
+| **vSphere Kubernetes Service (VKS)** | Kubernetes runtime on Supervisor | Modern app / container scenarios |
+
+---
+
+## 3. Core Building Blocks (Terminology)
+
+| Term | Meaning |
+|---|---|
+| **VCF Instance** | A single deployment unit: one management domain plus zero or more workload domains, managed by one SDDC Manager |
+| **VCF Fleet** | One or more instances managed together via VCF Operations (fleet management) |
+| **Management Domain** | Hosts management components (vCenter, NSX Manager, SDDC Manager, VCF Operations components, etc.); first domain created at bring-up |
+| **Workload Domain (VI domain)** | Isolated resource pool for tenant/application workloads with its own vCenter, lifecycle and (optionally) NSX instance |
+| **Cluster** | Set of hosts in a domain; unit of compute and storage scaling |
+
+---
+
+## 4. Architecture Options and When to Choose Them
+
+### 4.1 Consolidated vs Standard Architecture
+
+| | **Consolidated** | **Standard** |
+|---|---|---|
+| **Layout** | Management and user workloads share the management domain (resource pools separate them) | Dedicated management domain plus one or more separate workload domains |
+| **Best for** | Small/edge/lab sites, tight budget and footprint, few workloads | Production, enterprise, scale, strict isolation |
+| **Pros** | Fewest hosts, lowest cost, simplest | Isolation of management from workloads, independent lifecycle per domain, scalability, security boundary |
+| **Cons** | Resource contention, larger blast radius, limited scale, upgrades affect everything | More hosts, more cost and complexity |
+| **Exam signal** | "Small", "remote office", "minimum hardware" | "Isolation", "multiple business units", "scale", "compliance" |
+
+### 4.2 Single Instance vs Multi-Instance Fleet
+
+| | **Single Instance** | **Multi-Instance Fleet** |
+|---|---|---|
+| **Use when** | One site, one failure domain | Multiple sites/regions, DR, data sovereignty, latency or scale limits |
+| **Drivers for more instances** | n/a | Geographic separation, regulatory boundaries, independent failure/blast domains, scale ceilings, separate lifecycle windows |
+| **Trade-off** | Simpler; single point of site failure | Better resilience and compliance; more management overhead; need fleet-level tooling (VCF Operations) and DR design |
+
+### 4.3 Single Site vs Multi-Site Availability Models
+
+| Model | Description | Availability / Recoverability | Cost / Complexity |
+|---|---|---|---|
+| **Single site, single cluster** | Local HA only | Protects from host failure only | Lowest |
+| **Multiple clusters / domains in one site** | Rack/cluster-level fault isolation | Protects from cluster or rack failure | Moderate |
+| **Stretched cluster (vSAN, two sites + witness)** | Synchronous replication across sites; near-zero RPO | Site-failure tolerance with automatic restart | High; needs low latency (typically ≤ 5 ms RTT) and sufficient inter-site bandwidth; witness required |
+| **Separate instances + replication/DR** | Asynchronous replication, orchestrated recovery | Recovery with non-zero RPO/RTO | Moderate to high; DR tooling and runbooks required |
+
+**Key trade-off:** **stretched cluster = lowest RPO/automatic failover but needs low latency and more hardware; separate instances with DR = looser coupling and greater distance but non-zero RPO/RTO.**
+
+### 4.4 Storage Options
+
+| Option | Notes |
+|---|---|
+| **vSAN ESA** | Modern architecture; NVMe-based; better performance and space efficiency (RAID-5/6 without the usual performance penalty); needs ESA-certified ReadyNodes |
+| **vSAN OSA** | Legacy cache/capacity tier design; supports hybrid and all-flash; use for existing/non-NVMe hardware |
+| **Supplemental storage (VMFS on FC/iSCSI, NFS, etc.)** | Used where external arrays exist or capacity must scale independent of compute; check VCF 9.0 support per domain type |
+| **Compute-only / storage disaggregation (vSAN remote datastore)** | Scale compute and storage independently; share capacity across clusters |
+
+**Trade-offs:** HCI (vSAN) = simple operations and scale-out, but storage scales with hosts. External storage = reuse of investment and independent scaling, but extra management and potentially more dependencies.
+
+### 4.5 Networking Options (NSX)
+
+| Decision | Options | Trade-off |
+|---|---|---|
+| **NSX Manager scope** | Dedicated NSX instance per workload domain vs shared NSX instance across domains | Dedicated = isolation, independent lifecycle, higher footprint; shared = fewer components, but tighter coupling and shared blast radius |
+| **Edge cluster** | Dedicated Edge cluster vs Edge on shared cluster; form factor (VM vs bare metal) | Dedicated/bare metal = best performance and isolation; shared/VM = lower cost |
+| **Gateway design** | Active/Active vs Active/Standby T0 | A/A = more throughput, ECMP; A/S = stateful services (NAT, firewall, VPN) |
+| **Connectivity** | Overlay (Geneve) vs VLAN-backed segments | Overlay = agility and scale; VLAN = simplicity or legacy integration |
+| **Multi-site** | NSX Federation (global manager) vs independent per-site NSX | Federation = consistent policy and stretched networking; more complexity |
+| **Security** | Distributed firewall micro-segmentation, IDS/IPS, gateway firewall | Granular control vs policy-management effort |
+
+### 4.6 Deployment Approach for Existing Environments
+
+| Scenario | Option |
+|---|---|
+| **Greenfield** | VCF Installer bring-up of new management domain |
+| **Brownfield (existing vSphere/vSAN/NSX)** | Convert or import existing environment into VCF (as a management or workload domain), subject to prerequisites and supported versions |
+| **Migrating workloads** | vMotion, HCX (VCF Operations HCX family), replication-based migration |
+
+### 4.7 Management Component Sizing and Resilience
+
+- VCF Operations / VCF Automation and related appliances can be deployed in **simple (single-node, smaller footprint)** or **highly available (clustered)** form.
+- **Trade-off:** HA form = resilience for the management plane, larger resource footprint; simple form = smaller footprint, lower availability (acceptable for lab/small/non-critical).
+- Match management-plane availability to the **availability requirement (A in AMPRS)**.
+
+---
+
+## 5. Scenario → Architecture Cheat Sheet
+
+| Requirement in scenario | Architecture choice |
+|---|---|
+| Small edge site, minimal hardware | **Consolidated** architecture, minimal host count, simple-form management |
+| Production, strong isolation between management and workloads | **Standard** architecture, dedicated management domain |
+| Different business units or tenants need separation | Separate **workload domains**; VCF Automation for tenancy; dedicated NSX where isolation is strict |
+| Near-zero RPO, automatic site failover, metro distance | **vSAN stretched cluster** with witness |
+| Long distance DR, tolerate small data loss | **Separate instances** plus replication-based DR |
+| Regulatory data residency across regions | **Multi-instance fleet**, per-region instances, fleet-level operations |
+| Existing external storage must be kept | **Supplemental storage** (FC/NFS) where supported, or vSAN plus external mix |
+| Maximum storage performance and efficiency, modern NVMe hardware | **vSAN ESA** |
+| Existing non-NVMe hardware | **vSAN OSA** |
+| High-throughput north-south, heavy NAT/VPN/stateful services | Dedicated **Edge cluster** (bare metal for throughput); choose **A/S T0** for stateful services, **A/A** for ECMP throughput |
+| Self-service catalogue, governance, chargeback | **VCF Automation** plus **VCF Operations** |
+| Central visibility and lifecycle across many instances | **Fleet management** in VCF Operations |
+| Single sign-on with corporate IdP | **VCF Identity Broker** |
+| Container/modern apps | **VKS** on Supervisor in a workload domain |
+| Existing vSphere estate, want VCF | **Brownfield import/convert**, then migrate with vMotion/HCX |
+
+---
+
+## 6. Key Trade-offs (AMPRS Lens)
+
+| Choice | Improves | Costs |
+|---|---|---|
+| Standard vs consolidated | A, S, M (isolation, independent lifecycle) | Cost and footprint |
+| Stretched cluster | A, R (RPO≈0) | Cost, latency/bandwidth dependency, complexity |
+| Separate instances plus DR | R, S (isolation), compliance | Non-zero RPO, DR operations |
+| vSAN ESA | P, efficiency | Hardware certification and cost |
+| Dedicated NSX per domain | S, M (independence) | More components to run |
+| Bare-metal Edge | P | Cost, flexibility |
+| HA management components | A | Resource footprint |
+| Multi-instance fleet | A (blast radius), S, regulatory | Operational overhead |
+
+---
+
+## 7. Quick Recall
+
+- **Instance** = one management domain + workload domains; **Fleet** = instances managed together.
+- **Consolidated = small/cheap/less isolated. Standard = production, isolated, scalable.**
+- **Stretched cluster = RPO≈0, needs low latency and a witness. Separate instances + DR = distance, non-zero RPO.**
+- **ESA = NVMe, modern, efficient. OSA = legacy/existing hardware.**
+- **NSX**: overlay, T0/T1, Edge, DFW; dedicated Edge and NSX instances trade cost for isolation and performance.
+- **"Aria" → VCF Operations / VCF Automation**; **SDDC Manager** handles domain lifecycle; **VCF Installer** does bring-up.
+- Always justify choices with **requirements, constraints and AMPRS trade-offs**.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vcf9-architect/study-notes/01-business-vs-technical-requirements" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 01: Business vs Technical Requirements (RCAR)
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VCF 9.0 Architect Track
+  </a>
+  <a href="/certifications/vmware/vcf9-architect/study-notes/03-business-requirements" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 03: Eliciting & Validating Business Requirements →
+  </a>
+</div>

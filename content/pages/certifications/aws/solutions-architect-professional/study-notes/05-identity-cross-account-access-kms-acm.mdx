@@ -1,0 +1,189 @@
+---
+title: "Module 05: Identity, Cross-Account Access, Federation & Encryption (KMS, ACM)"
+description: "IAM policy evaluation, cross-account roles, IAM Identity Center, SAML and OIDC federation, STS, KMS key policies, multi-Region keys and ACM."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 5
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** IAM policy evaluation, cross-account roles, IAM Identity Center, SAML and OIDC federation, STS, KMS key policies, multi-Region keys and ACM.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 1.2 and 2.3 Identity and Encryption">
+Skills tested include cross-account access, third-party identity provider integration, encryption at rest and in transit, and least privilege. Questions often combine IAM policy logic with KMS key policy details, so learn both evaluation models.
+</Callout>
+
+---
+
+## 1. IAM Policy Evaluation
+
+```
+1. Explicit DENY anywhere (SCP, boundary, identity, resource, session)  -> DENIED
+2. Organization SCP must allow
+3. Resource-based policy: for same-account access, an Allow here can suffice
+4. Identity-based policy must allow (cross-account: BOTH sides must allow)
+5. Permissions boundary must allow (if set)
+6. Session policy must allow (if set)
+Otherwise implicit deny
+```
+
+| Policy type | Attached to | Notes |
+|---|---|---|
+| Identity-based | User, group, role | Grants permissions |
+| Resource-based | S3 bucket, SQS queue, KMS key, Lambda, etc. | Includes a Principal; can grant cross-account |
+| Permissions boundary | User or role | Maximum permissions the identity can have; enables safe delegation of role creation |
+| SCP | Org, OU, account | Guardrails (Module 04) |
+| Session policy | AssumeRole session | Further restricts temporary credentials |
+| Trust policy | Role | Who can assume the role |
+
+## 2. Cross-Account Access Patterns
+
+| Pattern | How | Best for |
+|---|---|---|
+| Assume a role | Role in target account with trust policy for source principal; caller needs `sts:AssumeRole` permission | Most general; temporary credentials, full audit in CloudTrail |
+| Resource-based policy | Bucket/queue/topic policy names the foreign principal | Direct access without switching identities; permissions stay with the caller's identity (useful for services like S3 or SNS) |
+| AWS RAM | Share the resource itself | Subnets, TGW, rules |
+| Federation | Identity provider and IAM Identity Center | Human users |
+
+**Confused deputy prevention:** when a third party assumes a role in your account, require an **ExternalId** in the trust policy condition. For AWS services acting on your behalf use `aws:SourceArn` and `aws:SourceAccount` conditions.
+
+```json
+{
+  "Effect": "Allow",
+  "Principal": {"AWS": "arn:aws:iam::111122223333:root"},
+  "Action": "sts:AssumeRole",
+  "Condition": {"StringEquals": {"sts:ExternalId": "vendor-unique-id-8f3a"}}
+}
+```
+
+**STS facts:** role session default 1 hour (up to 12 hours max-session-duration); **role chaining** limits the resulting session to 1 hour. `AssumeRoleWithSAML`, `AssumeRoleWithWebIdentity` (OIDC), `GetSessionToken` (MFA for IAM users), `GetFederationToken`.
+
+## 3. Federation & IAM Identity Center
+
+| Need | Service | Notes |
+|---|---|---|
+| Workforce SSO across many accounts and apps | **IAM Identity Center** | Permission sets deployed as roles into accounts; assignments by user/group and account; external IdP (Okta, Entra ID, etc.) via SAML 2.0 and SCIM provisioning; AWS Managed Microsoft AD or AD Connector as source; attribute-based access control (ABAC) |
+| Customer-facing app sign-in | **Amazon Cognito** | User pools (authentication, JWTs, social/SAML/OIDC federation); identity pools (exchange tokens for temporary AWS credentials) |
+| Legacy: one IdP, one account | IAM SAML provider | Prefer Identity Center for multi-account |
+| Hybrid AD | AWS Managed Microsoft AD (trust with on-premises AD), AD Connector (proxy only), Simple AD (basic, not for trust) | Choose by whether you need an actual directory in AWS |
+
+```
+ User -> Okta (IdP) --SAML--> IAM Identity Center --(permission set)--> role in Account X
+                                    ^
+                        SCIM sync users/groups from IdP
+```
+
+**Least privilege tooling:** IAM Access Analyzer finds external and cross-account access (resource policies), unused access (unused roles, keys, permissions), validates policies and generates least-privilege policies from CloudTrail activity. Pair with permission boundaries and SCPs.
+
+## 4. AWS KMS Essentials
+
+| Concept | Key point |
+|---|---|
+| Key types | AWS owned (invisible), AWS managed (aws/service, auto-rotated yearly, cannot edit policy), customer managed (you control policy, rotation, deletion) |
+| Symmetric (AES-256-GCM) vs asymmetric | Asymmetric for signing or encrypt outside AWS |
+| Direct encrypt limit | 4 KB; for larger data use **envelope encryption**: `GenerateDataKey`, encrypt locally, store encrypted data key with ciphertext |
+| Key policy | Primary access control; if the key policy does not allow the account root/IAM delegation, IAM policies alone are ineffective |
+| Grants | Temporary delegated permissions, used by AWS services (EBS, RDS) |
+| Rotation | Automatic for customer managed symmetric keys (configurable period, default yearly); old backing keys retained for decryption; imported key material requires manual rotation |
+| Multi-Region keys | Same key ID and key material replicated to other Regions (for global tables, cross-Region DR decrypt without re-encrypt) but each replica has its own policy |
+| Deletion | 7-30 day waiting period; disable first to test impact |
+| Custom key store | Backed by CloudHSM (single-tenant FIPS 140-2 Level 3) or external key store (XKS) for keys outside AWS |
+
+**Cross-account KMS use** requires: (1) the key policy in the key-owner account allows the external account (or its principals), AND (2) an IAM policy in the external account allows the principal to call KMS on the key ARN.
+
+**Sharing encrypted resources:**
+- EBS snapshots/AMIs encrypted with the **AWS managed key** cannot be shared; re-encrypt using a customer managed key and share the key too.
+- Encrypted RDS/Aurora snapshots: same rule; share the snapshot and grant the key to the target account.
+- S3 SSE-KMS cross-account: caller needs both bucket access and `kms:Decrypt` on the key.
+
+```bash
+aws kms create-key --description "app-data" --multi-region
+aws kms replicate-key --key-id mrk-abc123 --replica-region eu-west-1
+aws kms enable-key-rotation --key-id 1234abcd-12ab-34cd-56ef-1234567890ab --rotation-period-in-days 365
+aws kms create-grant --key-id <key> --grantee-principal arn:aws:iam::444455556666:role/app --operations Decrypt GenerateDataKey
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Envelope Encryption Flow">
+
+1. Application calls `GenerateDataKey` on a KMS key; receives a plaintext data key and an encrypted copy.
+2. Application encrypts the data locally with the plaintext key, discards the plaintext key from memory.
+3. Encrypted data key is stored beside the ciphertext.
+4. To decrypt, call `Decrypt` on the encrypted data key, then decrypt data locally.
+Benefits: KMS handles only small payloads, latency and request quotas are lower, and key access is centrally audited in CloudTrail.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Encryption in Transit Options">
+
+TLS to AWS endpoints by default; ALB/NLB/CloudFront terminate TLS with ACM certificates; end-to-end encryption by re-encrypting to targets (ALB to HTTPS targets) or NLB TLS passthrough. Internal service-to-service: App Mesh/ECS Service Connect with TLS, or private CA certificates (AWS Private CA). VPN (IPsec) and MACsec protect hybrid links. Enforce TLS in S3 using the `aws:SecureTransport` condition.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 5. AWS Certificate Manager (ACM)
+
+- Public certificates are free, auto-renew (DNS validation preferred) when attached to integrated services (ELB, CloudFront, API Gateway). Private keys for integrated use are managed by ACM.
+- Certificates are **Regional**: for CloudFront and API Gateway edge-optimized endpoints, request in **us-east-1**.
+- **ACM Private CA** issues private certificates for internal workloads (can be shared via RAM); private certificates can be exported for use on EC2/containers.
+- Historically, ACM public certificates could not be installed directly on EC2; check current documentation for export options, but on the exam the safe pattern is ALB/CloudFront termination or Private CA for instance-level certificates.
+
+## 6. Common Traps & Distractors
+
+- "Shared encrypted snapshot fails in another account": it used the AWS managed key; re-encrypt with a CMK and share the key.
+- "S3 bucket policy allows the other account but access is denied": missing IAM allow in the caller's account or missing KMS permissions.
+- "Thousands of users from corporate AD need access to 50 accounts": Identity Center with AD/IdP, not IAM users.
+- "Third-party vendor needs access to my account": role with ExternalId, never long-term access keys.
+- "Reduce blast radius when developers create roles": permissions boundary.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can explain why cross-account access needs two allows but same-account access can use one.
+<details>
+<summary>Explanation</summary>
+
+Within one account, an allow in either the identity-based or resource-based policy suffices (absent explicit denies). Across accounts, the caller's account must allow the identity and the resource account must allow the principal, so both sides are required, except when the caller assumes a role in the resource account (then the role's permissions apply).
+
+</details>
+
+- [ ] I can describe a secure way for a SaaS vendor to access my account.
+<details>
+<summary>Explanation</summary>
+
+Create an IAM role with a trust policy for the vendor's account and an ExternalId condition, scoped permissions, and monitor with CloudTrail. The ExternalId prevents the confused deputy problem where another customer of the vendor tricks them into using your role.
+
+</details>
+
+- [ ] I can explain how to share an encrypted EBS snapshot with another account.
+<details>
+<summary>Explanation</summary>
+
+The snapshot must use a customer managed KMS key (not aws/ebs). Modify the snapshot permissions to add the target account, update the key policy (or create a grant) to allow that account to use the key, and the target account should copy the snapshot, re-encrypting with its own key.
+
+</details>
+
+- [ ] I know when to choose Identity Center, Cognito and an IAM SAML provider.
+<details>
+<summary>Explanation</summary>
+
+Identity Center for workforce access across many accounts and applications; Cognito for customer identities in your applications; a standalone IAM SAML provider only for narrow single-account federation or legacy designs.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/04-multi-account-organizations-control-tower-ram" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 04: Multi-Account Governance: Organizations, Control Tower, SCPs & RAM
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/06-disaster-recovery-backup-business-continuity" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 06: Disaster Recovery, Backup & Business Continuity →
+  </a>
+</div>

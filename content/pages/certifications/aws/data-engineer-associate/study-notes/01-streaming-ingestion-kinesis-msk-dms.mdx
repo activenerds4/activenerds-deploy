@@ -1,0 +1,203 @@
+---
+title: "Module 01: Streaming Ingestion: Kinesis, MSK, DynamoDB Streams & DMS"
+description: "Kinesis Data Streams vs Firehose, MSK, DynamoDB Streams, DMS CDC, fan-in/fan-out, replayability, throttling, and stateful vs stateless processing."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 1
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 1.1 streaming skills: Kinesis Data Streams, Kinesis Data Firehose, Amazon MSK, DynamoDB Streams, AWS DMS CDC, Lambda consumers, fan-in/fan-out, throttling, replayability, and stateful vs stateless processing (Skills 1.1.1, 1.1.7, 1.1.9–1.1.12).
+
+<Callout variant="info" title="Exam Blueprint Focus: Streaming Ingestion (Domain 1 = 34%)">
+Domain 1 is the heaviest domain. Streaming questions are almost always "which service fits this latency, ordering, replay, or ops-burden requirement?" Learn the decision between Kinesis Data Streams, Firehose, and MSK cold.
+</Callout>
+
+---
+
+## 1. Choosing a Streaming Service
+
+| Service | Model | Latency | Replay | Ops burden | Typical exam signal |
+|---|---|---|---|---|---|
+| Kinesis Data Streams (KDS) | Shards (provisioned) or on-demand | ~70 ms with enhanced fan-out, ~200 ms shared | Yes, retention 24 h (default) up to 365 days | Low | "Custom consumers", "replay", "ordering per key" |
+| Kinesis Data Firehose | Fully managed delivery | Buffered (seconds to minutes; zero-buffer option exists) | No | Lowest | "Load into S3 / Redshift / OpenSearch with no code" |
+| Amazon MSK | Managed Apache Kafka | Low | Yes (topic retention) | Medium | "Existing Kafka apps", "Kafka Connect", "migrate Kafka" |
+| MSK Serverless | Kafka without broker sizing | Low | Yes | Low | "Unpredictable Kafka throughput" |
+| DynamoDB Streams | Change log of a DynamoDB table | Near real time | 24 h only | Low | "React to table changes" |
+| Managed Service for Apache Flink | Stream processing engine | Sub-second | Via source | Low | "Windowed aggregations, joins, SQL on streams" |
+
+<Callout variant="warning" title="Exam Trap: Firehose is not a replayable stream">
+Firehose buffers and delivers to a destination. You cannot re-read records from it. If a scenario needs replay or multiple independent consumers, the answer is KDS or MSK (optionally with Firehose as one consumer).
+</Callout>
+
+---
+
+## 2. Reference Architecture
+
+```
+ Producers (apps, KPL, IoT, CDC)                         Consumers
+ +-----------+                                      +--------------------+
+ | App / SDK |--PutRecords-->+----------------+---->| Lambda (ESM)       |
+ +-----------+               | Kinesis Data   |     +--------------------+
+ +-----------+               | Streams        |---->| Flink application  |
+ | KPL batch |-------------->| shards 1..N    |     +--------------------+
+ +-----------+               +-------+--------+---->| Firehose -> S3     |
+                                     |               +--------------------+
+                              Enhanced fan-out
+                         (dedicated 2 MB/s per consumer)
+```
+
+---
+
+## 3. Kinesis Data Streams Internals
+
+* **Shard limits (provisioned):** write 1 MB/s or 1,000 records/s per shard; read 2 MB/s per shard shared across all classic consumers (5 `GetRecords` calls/s per shard).
+* **Partition key** is hashed (MD5) to select the shard. A skewed key creates a **hot shard** and `ProvisionedThroughputExceededException`.
+* **Capacity modes:** Provisioned (you size shards, reshard by split/merge) vs On-demand (auto-scales, billed per GB, good for unpredictable traffic).
+* **Retention:** default 24 hours, extended up to 365 days. Extended retention is what makes **replayability** possible.
+* **Ordering** is guaranteed only within a shard (per partition key), not across the stream.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Fan-out — shared vs enhanced (Skill 1.1.10)">
+
+**Fan-out** is distributing one stream to many consumers. **Fan-in** is many producers into one stream.
+
+* **Shared (classic) throughput:** all consumers split 2 MB/s per shard using polling `GetRecords`. Adding consumers increases per-consumer latency and risks read throttling.
+* **Enhanced fan-out (EFO):** each registered consumer gets its own 2 MB/s per shard via HTTP/2 `SubscribeToShard` push. Lower latency (~70 ms), higher cost. Use when you have several consumers or need low latency.
+* **Lambda event source mapping** can use EFO consumers (parallelization factor up to 10 per shard).
+* **Alternative fan-out pattern:** one Firehose or Lambda writes to SNS/SQS or multiple S3 prefixes for downstream consumers.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Throttling and rate limits (Skill 1.1.9)">
+
+* **Kinesis producers:** `ProvisionedThroughputExceededException` means a shard is over its write limit. Fixes: better partition key distribution, more shards (or on-demand), KPL aggregation and batching, exponential backoff with jitter.
+* **DynamoDB:** `ProvisionedThroughputExceededException` / throttling when RCU/WCU exceeded or a hot partition. Fixes: on-demand mode, adaptive capacity, better key design, backoff, DAX for reads.
+* **RDS:** connection exhaustion. Fix with RDS Proxy and connection pooling.
+* **API sources (AppFlow, custom APIs):** respect source rate limits; use retries with exponential backoff and jitter, batch, and schedule off-peak.
+* **SQS as a buffer** decouples a bursty producer from a rate-limited sink.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Replayability (Skill 1.1.11)">
+
+A pipeline is replayable if you can reprocess past data deterministically.
+
+* **KDS/MSK:** reset the consumer offset or create a new consumer reading from `TRIM_HORIZON` or an `AT_TIMESTAMP`. Bounded by retention.
+* **S3 as a landing zone:** Firehose or DMS writes raw immutable data to S3, so you can replay with Glue/EMR/Athena at any time. This is the most robust pattern.
+* **Idempotent writes:** use upserts (Redshift MERGE, Iceberg MERGE INTO, DynamoDB conditional writes) so replays do not duplicate rows.
+* **Lambda failure handling:** `BisectBatchOnFunctionError`, `MaximumRetryAttempts`, `MaximumRecordAgeInSeconds`, and an on-failure destination (SQS/SNS) to capture poison records.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Firehose, DMS, DynamoDB Streams, and Lambda
+
+**Firehose** delivers to S3, Redshift (via S3 COPY), OpenSearch, Splunk, HTTP endpoints, and Apache Iceberg tables. It supports buffer hints (size 1–128 MB, interval 0–900 s), format conversion (JSON to Parquet/ORC using a Glue Data Catalog schema), dynamic partitioning, and Lambda transformation.
+
+**AWS DMS** reads source database transaction logs for **change data capture (CDC)**. Modes: full load, CDC only, full load + CDC. Targets include S3, Redshift, Kinesis, Kafka, DynamoDB. DMS Serverless scales replication capacity automatically.
+
+**DynamoDB Streams** records item-level changes (keys only, new image, old image, or both) for 24 hours. Lambda polls the stream through an event source mapping. Alternative: **Kinesis Data Streams for DynamoDB** gives longer retention and EFO.
+
+**Calling Lambda from Kinesis (Skill 1.1.7):** Lambda uses an **event source mapping** that polls shards and invokes the function synchronously with a batch.
+
+```bash
+# Create a Kinesis -> Lambda event source mapping
+aws lambda create-event-source-mapping \
+  --function-name process-clicks \
+  --event-source-arn arn:aws:kinesis:us-east-1:111122223333:stream/clicks \
+  --starting-position LATEST \
+  --batch-size 500 \
+  --maximum-batching-window-in-seconds 5 \
+  --parallelization-factor 4 \
+  --bisect-batch-on-function-error \
+  --maximum-retry-attempts 3 \
+  --destination-config '{"OnFailure":{"Destination":"arn:aws:sqs:us-east-1:111122223333:clicks-dlq"}}'
+```
+
+---
+
+## 5. Stateful vs Stateless Transactions (Skill 1.1.12)
+
+| Aspect | Stateless | Stateful |
+|---|---|---|
+| Definition | Each record processed independently, no memory of earlier records | Result depends on previous records or accumulated state |
+| Examples | Filtering, field mapping, format conversion | Windowed aggregates, sessionization, joins, dedup |
+| Scaling | Trivial, horizontal | Needs state store, checkpointing, key partitioning |
+| AWS fit | Lambda, Firehose transforms | Managed Service for Apache Flink, Spark Structured Streaming on EMR/Glue |
+| Failure recovery | Retry | Restore from checkpoint or snapshot |
+
+---
+
+## 6. Common Traps and Watchouts
+
+* **"Near real time, load to S3, no code, minimal ops"** → Firehose, not a Lambda consumer on KDS.
+* **"Multiple consumers need low-latency, independent reads"** → enhanced fan-out.
+* **"Existing Kafka workloads"** → MSK (or MSK Serverless), not Kinesis.
+* **"Ordering required"** → same partition key (KDS) or same Kafka partition key.
+* **Hot shard** is a key-design problem; adding shards does not fix a single hot key.
+* **DMS CDC to S3** writes Parquet/CSV with an `Op` column (I/U/D); you still need a merge step to build the current-state table.
+* **Redshift and Glue as streaming-related sources (Skill 1.1.1):** Redshift *streaming ingestion* pulls from Kinesis Data Streams or MSK directly into a materialized view (no Firehose/S3 staging); Glue streaming ETL jobs (Spark Structured Streaming) read from Kinesis, Kafka, or MSK and write micro-batches to S3 or other sinks.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Kinesis Data Streams, Firehose, and MSK from requirements.
+<details>
+<summary>Explanation</summary>
+
+KDS: custom consumers, replay, per-key ordering, 24 h–365 d retention. Firehose: fully managed delivery to S3/Redshift/OpenSearch/Iceberg with buffering, no replay. MSK: Kafka API compatibility, existing Kafka ecosystem, Kafka Connect. If the question says "minimal operational overhead, deliver to S3," choose Firehose.
+
+</details>
+
+- [ ] I can explain why a Kinesis producer gets ProvisionedThroughputExceededException and how to fix it.
+<details>
+<summary>Explanation</summary>
+
+A shard exceeded 1 MB/s or 1,000 records/s ingest. Causes: too few shards or a hot partition key. Fixes: choose a high-cardinality partition key, add shards or switch to on-demand, batch with KPL aggregation, and retry with exponential backoff and jitter.
+
+</details>
+
+- [ ] I know when enhanced fan-out is required.
+<details>
+<summary>Explanation</summary>
+
+Classic consumers share 2 MB/s per shard. With several consumers, or when latency must be ~70 ms, enhanced fan-out gives each registered consumer a dedicated 2 MB/s per shard through push-based HTTP/2. It costs extra per consumer-shard-hour and data retrieved.
+
+</details>
+
+- [ ] I can describe how to make an ingestion pipeline replayable and idempotent.
+<details>
+<summary>Explanation</summary>
+
+Land raw data immutably in S3, use extended stream retention, track offsets, and make sinks idempotent via upserts/MERGE or conditional writes. Configure Lambda on-failure destinations so poison records are captured rather than blocking a shard.
+
+</details>
+
+- [ ] I can distinguish stateful from stateless stream processing and name an AWS service for each.
+<details>
+<summary>Explanation</summary>
+
+Stateless (filter, map, convert) fits Lambda or Firehose transformations. Stateful (windows, joins, sessionization) needs checkpointed state: Managed Service for Apache Flink or Spark Structured Streaming. Stateful jobs recover from checkpoints/snapshots.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ↑ Back to AWS Certified Data Engineer - Associate Study Guide
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/02-batch-ingestion-apis-schedulers-triggers" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 02: Batch Ingestion, Data APIs, Schedulers & Event Triggers →
+  </a>
+</div>

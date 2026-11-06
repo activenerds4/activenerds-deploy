@@ -1,0 +1,188 @@
+---
+title: "Module 03: Hybrid DNS, PrivateLink, Endpoints & Network Traffic Visibility"
+description: "Route 53 Resolver inbound and outbound endpoints, gateway vs interface endpoints, PrivateLink services, Flow Logs, Reachability Analyzer and Traffic Mirroring."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 3
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Route 53 Resolver inbound and outbound endpoints, gateway vs interface endpoints, PrivateLink services, Flow Logs, Reachability Analyzer and Traffic Mirroring.
+
+<Callout variant="info" title="Exam Blueprint Focus: Hybrid DNS, Endpoints & Traffic Monitoring">
+Task 1.1 explicitly lists hybrid DNS (Route 53 Resolver, on-premises DNS integration), service endpoints for integrations, and network traffic monitoring. Know which endpoint type fits which service, who forwards to whom, and which tool answers which troubleshooting question.
+</Callout>
+
+---
+
+## 1. Route 53 Resolver & Hybrid DNS
+
+Every VPC has a built-in resolver at the VPC base address plus two (the ".2" address) and 169.254.169.253. By default it resolves private hosted zones and public names, but it does not know your on-premises zones.
+
+```
+ On-premises DNS server                          AWS VPC
+ corp.example.com                         (Route 53 Resolver)
+        ^                                         |
+        |   Outbound endpoint + forwarding rule   |
+        +<----------------------------------------+   VPC -> on-premises names
+        |                                         |
+        +---------------------------------------->+   on-premises -> AWS names
+            Inbound endpoint (ENIs in VPC)            (private hosted zones, ec2.internal)
+```
+
+| Component | Direction | Purpose |
+|---|---|---|
+| Inbound endpoint | On-premises to AWS | On-premises servers forward queries for AWS-hosted private zones to the endpoint's IPs (ENIs in at least two AZs) |
+| Outbound endpoint | AWS to on-premises | VPC queries matching a forwarding rule are sent to on-premises DNS servers |
+| Forwarding rule | Outbound | Domain to target IPs; most specific rule wins |
+| Resolver rule sharing | Multi-account | Share rules through **AWS RAM** and associate with VPCs in other accounts |
+| Route 53 Resolver DNS Firewall | Outbound DNS | Block or allow domains; managed with Firewall Manager |
+
+**Private hosted zones across VPCs/accounts:** associate additional VPCs with the zone (cross-account association uses `create-vpc-association-authorization` then `associate-vpc-with-hosted-zone`). For many VPCs, a central shared-services VPC with endpoints plus RAM-shared rules scales better than per-VPC association.
+
+```bash
+aws route53resolver create-resolver-endpoint --name onprem-out --direction OUTBOUND \
+  --security-group-ids sg-0abc --ip-addresses SubnetId=subnet-a SubnetId=subnet-b \
+  --creator-request-id r1
+aws route53resolver create-resolver-rule --rule-type FORWARD --domain-name corp.example.com \
+  --resolver-endpoint-id rslvr-out-123 --target-ips Ip=10.10.0.2,Port=53 --creator-request-id r2
+aws ram create-resource-share --name dns-rules --resource-arns arn:aws:route53resolver:...:resolver-rule/rslvr-rr-123 \
+  --principals arn:aws:organizations::111122223333:organization/o-abc
+```
+
+<Callout variant="warning" title="Exam Trap">
+Inbound = queries coming INTO AWS. Outbound = queries going OUT to on-premises. Many distractors reverse them, or propose running your own BIND forwarders on EC2 when Resolver endpoints are the managed answer.
+</Callout>
+
+## 2. Endpoints: Gateway vs Interface vs Gateway Load Balancer
+
+| Type | Services | Mechanism | Cost | Reachable from on-premises? |
+|---|---|---|---|---|
+| Gateway endpoint | Amazon S3 and Amazon DynamoDB only | Route table target using a prefix list | Free | No (not over VPN/DX/peering) |
+| Interface endpoint (PrivateLink) | Most AWS services, partner services, your own endpoint services | ENI with private IP in your subnet, private DNS option | Hourly per AZ plus per GB | Yes, over VPN/DX to the ENI IPs |
+| Gateway Load Balancer endpoint | Third-party virtual appliances | Routes traffic to a GWLB for inspection (GENEVE, port 6081) | Hourly plus per GB | Via route tables |
+| S3 interface endpoint | S3 | Allows on-premises access to S3 privately | Hourly plus per GB | Yes |
+
+**Endpoint policies** (resource-based JSON on the endpoint) restrict which principals/resources can be used through it. Combine with S3 bucket policy condition `aws:SourceVpce` or `aws:SourceVpc` to force data access through the endpoint.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Deny", "Principal": "*", "Action": "s3:*",
+    "Resource": ["arn:aws:s3:::finance-data", "arn:aws:s3:::finance-data/*"],
+    "Condition": {"StringNotEquals": {"aws:SourceVpce": "vpce-0123456789abcdef0"}}
+  }]
+}
+```
+
+**Cost insight:** traffic to S3/DynamoDB through a NAT gateway incurs per-GB NAT processing charges. A free gateway endpoint removes that cost and keeps traffic off the internet, a frequent cost-optimization answer.
+
+## 3. Exposing Your Own Service with PrivateLink
+
+```
+ Consumer VPC (any account, any CIDR)            Provider VPC
+ +-----------------------------+              +--------------------------+
+ | App -> Interface endpoint   | --PrivateLink--> NLB -> service targets  |
+ |        (ENI, private IP)    |              | (endpoint service)       |
+ +-----------------------------+              +--------------------------+
+```
+
+- Provider creates an NLB (or GWLB) and an **endpoint service**; chooses to auto-accept or manually approve connections and can allow specific principals.
+- Traffic is one-directional (consumer initiates), has no CIDR overlap concerns and does not traverse the internet.
+- Supports cross-Region interface endpoints for some services and endpoint services, which removes the need for inter-Region peering for a single service.
+
+## 4. Network Traffic Monitoring & Troubleshooting Tools
+
+| Need | Tool | Notes |
+|---|---|---|
+| Who talked to whom, accept/reject, bytes | **VPC Flow Logs** (VPC, subnet or ENI level) to CloudWatch Logs, S3 or Firehose | Metadata only; no payloads; delayed (not real time) |
+| Is path A to B reachable, and which component blocks it? | **VPC Reachability Analyzer** | Static configuration analysis; does not send packets |
+| Full packet capture for IDS/forensics | **VPC Traffic Mirroring** | Mirrors Nitro ENI traffic to an NLB or ENI target (for example a Suricata/IDS fleet) |
+| Which resources are unintentionally reachable from outside? | **Network Access Analyzer** | Evaluates paths against scope definitions |
+| Global/TGW topology visibility and events | **Transit Gateway Network Manager** | Dashboards and route analyzer across Regions and on-premises |
+| Perimeter threats and DNS-based exfiltration | **GuardDuty**, **DNS Firewall**, **Network Firewall** | See Module 09 |
+| Application-level latency and errors | **CloudWatch**, **X-Ray**, ALB access logs | See Module 15 |
+
+```bash
+aws ec2 create-flow-logs --resource-type VPC --resource-ids vpc-0123 --traffic-type ALL \
+  --log-destination-type s3 --log-destination arn:aws:s3:::central-flowlogs/ \
+  --max-aggregation-interval 60
+aws ec2 create-network-insights-path --source eni-0abc --destination eni-0def --protocol tcp --destination-port 443
+aws ec2 start-network-insights-analysis --network-insights-path-id nip-0123
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Reading a Flow Log to Diagnose Asymmetric Blocking">
+
+Security groups are stateful; network ACLs are stateless. A pattern of ACCEPT on the inbound request and REJECT on the return traffic usually points to a network ACL that lacks an ephemeral-port (1024-65535) outbound rule. Flow logs show action and flow direction per ENI; the REJECT appearing on the subnet ENI of the responder identifies the NACL.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Centralized Egress and Inspection Patterns">
+
+1. **Centralized egress:** spokes route 0.0.0.0/0 to the TGW; an egress VPC holds NAT gateways (one per AZ) and the internet gateway. Saves NAT gateway counts but adds TGW data processing cost.
+2. **Centralized inspection:** route spoke traffic to an inspection VPC with AWS Network Firewall or GWLB-fronted appliances, with TGW appliance mode enabled.
+3. **Centralized endpoints:** shared interface endpoints in a services VPC, with Route 53 private hosted zones shared to spokes. Decide per endpoint by comparing hourly cost per VPC against TGW processing cost.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 5. Common Traps & Distractors
+
+- "On-premises must reach S3 privately without the internet": S3 interface endpoint over DX/VPN (a gateway endpoint cannot be reached from on-premises).
+- "Resolve on-premises DNS names from many VPCs in many accounts": outbound endpoint + forwarding rules shared via RAM.
+- "Audit which IPs were rejected": Flow Logs; "which rule is blocking": Reachability Analyzer.
+- "Deep packet inspection of payload": Traffic Mirroring or Network Firewall, since Flow Logs have no payloads.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can configure bidirectional DNS between a VPC and an on-premises resolver.
+<details>
+<summary>Explanation</summary>
+
+Create an outbound Resolver endpoint plus a forwarding rule for the on-premises domain (targets are the on-premises DNS IPs), and an inbound endpoint whose IPs the on-premises DNS server uses as forwarders for the AWS private zone. Ensure security groups allow UDP/TCP 53 and that DX/VPN routing exists in both directions.
+
+</details>
+
+- [ ] I can explain why a gateway endpoint cannot serve on-premises clients.
+<details>
+<summary>Explanation</summary>
+
+A gateway endpoint is a route table entry (prefix list target) inside the VPC, not an ENI with an IP address. Traffic from VPN, Direct Connect or a peered VPC cannot use it. Use an S3 interface endpoint (private IPs) or a proxy for those cases.
+
+</details>
+
+- [ ] I can choose the right troubleshooting tool for a connectivity complaint.
+<details>
+<summary>Explanation</summary>
+
+Reachability Analyzer checks configuration (route tables, SGs, NACLs, TGW) without traffic; Flow Logs show actual accept/reject history; Traffic Mirroring captures packets for forensic or IDS analysis. Pick by whether the question is about config, history or payload.
+
+</details>
+
+- [ ] I can describe how PrivateLink avoids CIDR overlap problems.
+<details>
+<summary>Explanation</summary>
+
+The consumer reaches the service through an ENI with an address from the consumer's own subnet. The provider's network is never routed, so overlapping CIDRs are irrelevant. Connections are unidirectional from consumer to provider.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/02-network-connectivity-vpc-tgw-vpn-direct-connect" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 02: Network Connectivity: VPC Peering, Transit Gateway, VPN & Direct Connect
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/04-multi-account-organizations-control-tower-ram" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 04: Multi-Account Governance: Organizations, Control Tower, SCPs & RAM →
+  </a>
+</div>

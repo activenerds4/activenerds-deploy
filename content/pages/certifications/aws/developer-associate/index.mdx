@@ -1,0 +1,255 @@
+---
+title: "AWS Certified Developer - Associate (DVA-C03) Study Guide (16 Modules)"
+description: "Complete 16-module study guide for AWS DVA-C03: Lambda, API Gateway, DynamoDB, IAM, Cognito, KMS, AI service security, CI/CD, and observability."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+totalModules: 16
+layout: "hub"
+---
+
+<Callout variant="tip" title="Track Overview & Exam Code: DVA-C03">
+Complete 16-module study guide for AWS DVA-C03: Lambda, API Gateway, DynamoDB, IAM, Cognito, KMS, AI service security, CI/CD, and observability. Follow this structured curriculum to gain hands-on proficiency and master scenario-based exam questions.
+</Callout>
+
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-4 my-6 not-prose">
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Exam Code</span>
+    <span className="font-mono text-sm font-bold text-primary">DVA-C03</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Credential Level</span>
+    <span className="font-mono text-sm font-bold text-foreground">Associate</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Study Duration</span>
+    <span className="font-mono text-sm font-bold text-foreground">~40 Hours</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Curriculum</span>
+    <span className="font-mono text-sm font-bold text-foreground">16 Modules</span>
+  </div>
+</div>
+
+<TrackResourceTabs
+  notesCount="16 Modules"
+  mockTestsCount="3 Practice Exams"
+  flashCardsCount="100+ Cards"
+  cheatSheetsCount="5 Reference Cards"
+>
+  <div className="space-y-3 my-4 not-prose">
+  <ModuleCard
+    moduleNumber="1"
+    domain="Development with AWS Services"
+    title="Module 01: Developing on AWS: SDKs, Resilience Patterns & AI-Assisted Development"
+    description="SDK credential chain, retries with backoff, pagination, serialization, sync vs async patterns, Kiro spec-driven development, and calling Amazon Bedrock."
+    readTime="25m read"
+    href="/certifications/aws/developer-associate/study-notes/01-developing-on-aws-sdks-resilience-ai-tools"
+  />
+  <ModuleCard
+    moduleNumber="2"
+    domain="Development with AWS Services"
+    title="Module 02: AWS Lambda Development, Configuration & Event Handling"
+    description="Execution lifecycle, memory and timeout limits, VPC access, event source mappings, destinations, DLQs, layers, and concurrency controls."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/02-aws-lambda-development"
+  />
+  <ModuleCard
+    moduleNumber="3"
+    domain="Development with AWS Services"
+    title="Module 03: Amazon API Gateway: REST vs HTTP APIs, Integrations & Validation"
+    description="REST vs HTTP APIs, proxy and non-proxy integrations, authorizers, request validation, mapping templates, throttling, caching, and stages."
+    readTime="25m read"
+    href="/certifications/aws/developer-associate/study-notes/03-amazon-api-gateway"
+  />
+  <ModuleCard
+    moduleNumber="4"
+    domain="Development with AWS Services"
+    title="Module 04: Messaging, Event-Driven Patterns & Streaming: SQS, SNS, EventBridge, Step Functions, Kinesis"
+    description="Decoupling with SQS, SNS fan-out, EventBridge rules, Step Functions workflows, S3 events, Kinesis Data Streams, and Data Firehose."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/04-messaging-events-and-streaming"
+  />
+  <ModuleCard
+    moduleNumber="5"
+    domain="Development with AWS Services"
+    title="Module 05: Amazon DynamoDB: Keys, Capacity Math, Indexes & Streams"
+    description="Partition key design, RCU and WCU calculations, consistency models, query vs scan, GSI vs LSI, transactions, TTL, and streams."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/05-amazon-dynamodb"
+  />
+  <ModuleCard
+    moduleNumber="6"
+    domain="Development with AWS Services"
+    title="Module 06: Choosing Data Stores: S3, RDS, Aurora, ElastiCache & Data Lifecycles"
+    description="Access-pattern-driven store selection, S3 storage classes and lifecycle rules, multipart uploads, RDS Proxy, ElastiCache strategies, and retention."
+    readTime="25m read"
+    href="/certifications/aws/developer-associate/study-notes/06-data-stores-caching-and-lifecycle"
+  />
+  <ModuleCard
+    moduleNumber="7"
+    domain="Security"
+    title="Module 07: IAM Policies, STS, Programmatic Access & Presigned URLs"
+    description="Policy evaluation logic, roles and trust policies, STS AssumeRole, credential providers, S3 presigned URLs, and CloudFront signed URLs."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/07-iam-sts-and-programmatic-access"
+  />
+  <ModuleCard
+    moduleNumber="8"
+    domain="Security"
+    title="Module 08: Amazon Cognito & Identity Federation"
+    description="User pools vs identity pools, JWT tokens, OAuth 2.0 flows, Lambda triggers, SAML and OIDC federation, and web identity federation."
+    readTime="25m read"
+    href="/certifications/aws/developer-associate/study-notes/08-amazon-cognito-and-identity-federation"
+  />
+  <ModuleCard
+    moduleNumber="9"
+    domain="Security"
+    title="Module 09: Encryption, KMS, Certificates & Secrets Management"
+    description="Envelope encryption, KMS key policies, ACM and Private CA, Secrets Manager vs Parameter Store, and masking PII and PHI."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/09-encryption-kms-and-secrets"
+  />
+  <ModuleCard
+    moduleNumber="10"
+    domain="Security"
+    title="Module 10: Securing AI Services & Agents: Bedrock Guardrails, PrivateLink & AgentCore"
+    description="Bedrock access control, private connectivity, Guardrails filters, prompt attack defense, AgentCore identity and policy, and protecting AI logs."
+    readTime="25m read"
+    href="/certifications/aws/developer-associate/study-notes/10-securing-ai-services-and-agents"
+  />
+  <ModuleCard
+    moduleNumber="11"
+    domain="Testing and Deployment"
+    title="Module 11: Application Artifacts, Configuration Management & Testing"
+    description="Container images with ECR, CodeArtifact, AppConfig, Parameter Store, SAM local testing, mock APIs, test events, aliases, and AI-generated tests."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/11-application-artifacts-config-and-testing"
+  />
+  <ModuleCard
+    moduleNumber="12"
+    domain="Testing and Deployment"
+    title="Module 12: Infrastructure as Code: CloudFormation, AWS SAM & AWS CDK"
+    description="Template anatomy, intrinsic functions, change sets, SAM transform and CLI, CDK constructs, and Lambda packaging methods."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/12-infrastructure-as-code-sam-cdk"
+  />
+  <ModuleCard
+    moduleNumber="13"
+    domain="Testing and Deployment"
+    title="Module 13: CI/CD, Container Deployments & Deployment Strategies"
+    description="CodeBuild buildspec, CodeDeploy appspec hooks, CodePipeline, ECS and EKS deployments, blue/green, canary, rolling, and rollbacks."
+    readTime="35m read"
+    href="/certifications/aws/developer-associate/study-notes/13-ci-cd-and-deployment-strategies"
+  />
+  <ModuleCard
+    moduleNumber="14"
+    domain="Troubleshooting and Optimization"
+    title="Module 14: Logging, Metrics, Alarms, Tracing & Health Checks"
+    description="Structured logging, custom metrics with EMF, alarm semantics, X-Ray segments and annotations, notifications, and health probes."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/14-logging-monitoring-and-tracing"
+  />
+  <ModuleCard
+    moduleNumber="15"
+    domain="Troubleshooting and Optimization"
+    title="Module 15: Root Cause Analysis & Troubleshooting Across AWS Services"
+    description="Logs Insights queries, error code catalog for Lambda, API Gateway, DynamoDB, S3, IAM, and containers, deployment failure triage, and AI-assisted debugging."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/15-root-cause-analysis-and-troubleshooting"
+  />
+  <ModuleCard
+    moduleNumber="16"
+    domain="Troubleshooting and Optimization"
+    title="Module 16: Performance Optimization: Concurrency, Memory Tuning & Caching"
+    description="Provisioned concurrency, Auto Scaling, connection pooling, memory right-sizing, messaging optimization, DAX, CloudFront, and bottleneck detection."
+    readTime="30m read"
+    href="/certifications/aws/developer-associate/study-notes/16-performance-optimization-and-concurrency"
+  />
+  </div>
+</TrackResourceTabs>
+
+---
+
+## Official Exam Blueprint & Domain Breakdown
+
+| Domain | Title | Weight |
+|---|---|---|
+| 1 | Development with AWS Services | 30% |
+| 2 | Security | 26% |
+| 3 | Testing and Deployment | 22% |
+| 4 | Troubleshooting and Optimization | 22% |
+
+---
+
+## Exam Format & Scoring (Per the Official Exam Guide)
+
+| Item | Detail |
+|---|---|
+| Exam code | **DVA-C03** (registration opens **December 1, 2026**; the last day to take DVA-C02 is **November 30, 2026**) |
+| Question types | **Multiple choice** (1 correct, 3 distractors) and **multiple response** (2 or more correct out of 5 or more options; **all** correct answers required for credit) |
+| Questions | **65 total: 50 scored + 15 unscored** (unscored items are not identified) |
+| Guessing | No penalty. Unanswered questions score as incorrect, so always answer |
+| Scoring | Scaled **100 to 1,000**; **minimum passing score 720**; pass/fail designation |
+| Scoring model | **Compensatory:** you do not need to pass each domain, only the overall exam |
+| Target candidate | **1+ years** of hands-on experience developing and maintaining AWS applications |
+
+> The exam guide does not list the exam duration or price. Confirm both on the AWS Certification site when you register.
+
+---
+
+## Blueprint-to-Module Map
+
+| Task | Focus | Module(s) |
+|---|---|---|
+| **1.1** Develop code for applications hosted on AWS | Decoupling, sync vs async, resilience, SDKs, streaming, serialization, events, **AI-assisted development**, **managed AI services** | 01, 03, 04 |
+| **1.2** Develop code for AWS Lambda | VPC access, configuration, event lifecycles, integrations | 02 |
+| **1.3** Use data stores | Lifecycles, store selection, caching, DynamoDB | 05, 06 |
+| **2.1** AuthN/AuthZ | Federation, access control, programmatic access, presigned URLs, assume role | 07, 08 |
+| **2.2** Encryption and sensitive data | Encryption, certificates, KMS, secrets, PII/PHI | 09 |
+| **2.3** AI security (**new**) | Access, privacy, filtering, agents, log protection | 10 |
+| **3.1** Prepare artifacts | Dependencies, container images, repositories, configuration, API Gateway stages | 03, 11 |
+| **3.2** Test and automate testing | Tests, mock APIs, test events, environments, **AI test tools** | 11 |
+| **3.3** Deploy with CI/CD | Packaging, containers, IaC, CodeDeploy, CodePipeline, strategies, rollback, **AI in CI/CD** | 12, 13 |
+| **4.1** Root cause analysis | Debugging, metrics/logs/traces, log queries, deployment failures, **AI troubleshooting** | 15 |
+| **4.2** Logging, monitoring, observability | Logging, custom metrics, alerts, tracing, health | 14 |
+| **4.3** Optimize applications | Concurrency, memory/compute, messaging, caching, bottlenecks, **AI optimization** | 16 (and 02, 06) |
+
+---
+
+## What Changed From DVA-C02 to DVA-C03
+
+| Area | Change |
+|---|---|
+| **Domain weights** | Development 32% to **30%**; Security 26% (unchanged); Deployment 24% to **Testing and Deployment 22%**; Troubleshooting and Optimization 18% to **22%** |
+| **New Task 2.3** | Five skills on securing AI services: access, data privacy, input/output filtering, agent security, protecting logs (**Module 10**) |
+| **AI in development** | AI-assisted dev tools (**Kiro**) and managed AI services (**Amazon Bedrock**, **Bedrock AgentCore**, **Amazon Quick**) |
+| **AI across domains** | AI tools for generating tests (3.2.5), CI/CD support (3.3.9), error analysis (4.1.5), and optimization (4.3.6) |
+| **Other additions** | Presigned URLs (S3 and CloudFront), container image build and management with ECR, container orchestration deployments (ECS, EKS, Fargate) |
+| **Moved** | Unit testing with SAM to Domain 3; Lambda performance tuning to Domain 4; serialization to Task 1.1; API Gateway stages and custom domains to Task 3.1 |
+| **Consolidated** | DynamoDB (4 skills to 1), security (13 to 7), testing (11 to 5), observability (8 to 5), optimization (9 to 6). The guide states these do **not** reduce emphasis |
+| **Out of scope (explicit)** | Designing architectures, designing CI/CD pipelines, administering IAM users and groups, selecting FMs / prompt engineering / designing RAG, AI safety framework design, ETL pipelines, networking design |
+
+**Services the guide lists as out of scope** include Amazon Polly, Amazon Rekognition, Amazon SageMaker AI, Strands Agents, AWS Shield, AWS Transfer Family, Storage Gateway, Snow Family, and Amazon Connect. Do not spend study time on them.
+
+---
+
+## Recommended 5-Week Study Plan (~40 Hours)
+
+| Week | Modules | Hands-On Lab |
+|---|---|---|
+| 1 | 01, 02, 03 | Build an API Gateway + Lambda + DynamoDB app with `sam deploy`; add request validation and a canary alias |
+| 2 | 04, 05, 06 | SQS + SNS fan-out with DLQ and redrive; DynamoDB with a GSI, TTL, and Streams trigger; S3 lifecycle rule |
+| 3 | 07, 08, 09, 10 | Cognito user pool + identity pool with per-user S3 prefix; KMS envelope encryption; Secrets Manager rotation; Bedrock call with a Guardrail |
+| 4 | 11, 12, 13 | Push a container to ECR with a lifecycle policy; CodePipeline with CodeBuild and CodeDeploy canary to Lambda; ECS Fargate service with circuit breaker |
+| 5 | 14, 15, 16 | X-Ray tracing, EMF metrics, and alarms; Logs Insights queries; DAX or ElastiCache in front of a table; Lambda Power Tuning |
+
+**Final week tips:** re-read each module's *Common Exam Traps* section, redo the self-assessment checks, and practice multiple-response questions (all correct options are required). Compare services on **limits, defaults, and which one is the managed shortcut**, since distractors usually offer custom code where a native feature exists.
+
+---
+
+## Sources & Currency Notes
+
+Content is based on the official **AWS Certified Developer - Associate (DVA-C03) Exam Guide**. Service limits and defaults change over time (for example SQS, SNS, and Lambda payload quotas have been raised recently, and AI services such as Bedrock AgentCore and Kiro evolve quickly), so verify specifics in the current AWS documentation before your exam date.

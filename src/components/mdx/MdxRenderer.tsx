@@ -58,12 +58,9 @@ export function MdxRenderer({ body, slug }: MdxRendererProps) {
   });
 
   useEffect(() => {
-    // If we already have a pre-compiled module, no effect needed.
-    if (state.status === "ready") return;
-
     let cancelled = false;
 
-    // Check again for pre-compiled module (in case it loaded after initial render).
+    // Fast path: check for pre-compiled module on mount or slug change
     if (slug) {
       const compiled = getCompiledPostModule(slug);
       if (compiled) {
@@ -123,7 +120,7 @@ export function MdxRenderer({ body, slug }: MdxRendererProps) {
     return () => {
       cancelled = true;
     };
-  }, [body, slug, state.status]);
+  }, [body, slug]);
 
   if (state.status === "loading") {
     return (

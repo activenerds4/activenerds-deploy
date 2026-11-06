@@ -1,0 +1,247 @@
+---
+title: "Module 14: Logging, Metrics, Alarms, Tracing & Health Checks"
+description: "Structured logging, custom metrics with EMF, alarm semantics, X-Ray segments and annotations, notifications, and health probes."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 14
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Troubleshooting and Optimization
+
+<Callout variant="info" title="Exam Focus: Troubleshooting and Optimization (Task 4.2, Skills 4.2.1 to 4.2.5)">
+DVA-C03 **consolidated eight observability skills into five**, with the same coverage: structured logging, custom metrics, notification alerts, tracing, and health monitoring. Domain 4 grew from 18% to **22%** of the exam, so this module and the next two matter more than they did on DVA-C02.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Logs, Metrics, Traces, and Audit Trails">
+
+| Signal | Answers | AWS Service |
+|---|---|---|
+| **Logs** | What happened, in detail? | CloudWatch Logs |
+| **Metrics** | How much, how fast, how often? | CloudWatch Metrics and Alarms |
+| **Traces** | Where did this request spend time and fail across services? | AWS X-Ray (or OpenTelemetry/ADOT) |
+| **Audit** | Who called which AWS API, when? | AWS CloudTrail |
+| **Config / events** | What changed? | AWS Config, EventBridge |
+
+* **Exam Trap:** "Find which downstream service is slowing a request" → **X-Ray**. "Find who deleted the bucket" → **CloudTrail**. "Alert when error rate exceeds 5%" → **CloudWatch alarm**. "Search application error messages" → **Logs Insights**.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Effective Logging Strategies (Skill 4.2.1)
+
+* **Structured logging:** emit **JSON** (one object per line) with consistent fields such as `timestamp`, `level`, `requestId`, `userId` (an ID, not PII), `operation`, `durationMs`, and `errorCode`. JSON is automatically discoverable by CloudWatch Logs Insights and metric filters.
+* **Correlation:** include the Lambda `aws_request_id` and the X-Ray **trace ID** in every log line to follow a request across services.
+* **Levels:** `DEBUG` (off in prod by default), `INFO`, `WARN`, `ERROR`. Lambda **advanced logging controls** let you choose JSON format and a log level per function without code changes.
+* **Retention:** log groups **never expire by default**; set a **retention period** to control cost. **Log classes:** Standard vs Infrequent Access.
+* **Never log** secrets, tokens, or sensitive personal data. Use **data protection policies** to mask accidentally logged values.
+* **Where logs go:** Lambda writes to `/aws/lambda/<function-name>` (execution role needs `logs:CreateLogGroup`, `CreateLogStream`, `PutLogEvents`). ECS uses the `awslogs` driver; EC2 needs the **CloudWatch agent**.
+
+```python
+import json, time
+def log(level, msg, **fields):
+    print(json.dumps({"level": level, "message": msg, "ts": time.time(), **fields}))
+
+def handler(event, context):
+    log("INFO", "order received", requestId=context.aws_request_id, orderId=event["orderId"])
+```
+
+```bash
+aws logs tail /aws/lambda/orders-fn --follow --since 15m
+aws logs filter-log-events --log-group-name /aws/lambda/orders-fn --filter-pattern '"ERROR"'
+aws logs put-retention-policy --log-group-name /aws/lambda/orders-fn --retention-in-days 30
+```
+
+| Log Processing Feature | Use |
+|---|---|
+| **Logs Insights** | Interactive query language across log groups (Module 15) |
+| **Metric filters** | Turn log patterns into CloudWatch **metrics** (for example count of `ERROR`) |
+| **Subscription filters** | Stream logs in near real time to **Lambda, Kinesis, Data Firehose** (up to 2 filters per log group) |
+| **Export to S3** | Batch archive (not real time) |
+| **Contributor Insights** | Find top contributors (heaviest callers, noisiest errors) |
+
+---
+
+## 2. Custom Metrics (Skill 4.2.2)
+
+* **Namespace + MetricName + Dimensions** identify a metric (for example namespace `Orders`, metric `OrdersPlaced`, dimension `Env=prod`). Each unique dimension combination is a **separate metric**; avoid **high-cardinality dimensions** such as user IDs.
+* **`PutMetricData`** publishes data points directly (batch them; there are API limits and cost per metric).
+* **Embedded Metric Format (EMF):** write a specially structured **JSON log line** and CloudWatch **extracts metrics automatically**, with no extra API call and no added latency, ideal for Lambda. Libraries: Powertools for AWS Lambda metrics, `aws-embedded-metrics`.
+* **Resolution:** **standard** = 1-minute; **high-resolution** = down to **1 second** (`StorageResolution=1`), alarms can evaluate at 10 or 30 seconds.
+* **Retention (rolled up automatically):** 1-second data for 3 hours, 1-minute for 15 days, 5-minute for 63 days, 1-hour for **455 days**.
+* **Default metrics:** EC2 basic monitoring is 5-minute (**detailed** monitoring = 1-minute); **memory and disk are not reported by default** (install the **CloudWatch agent**). Lambda reports `Invocations`, `Errors`, `Duration`, `Throttles`, `ConcurrentExecutions`, `IteratorAge`, `AsyncEventAge`, `DeadLetterErrors` automatically.
+
+```json
+{
+  "_aws": { "Timestamp": 1730000000000,
+    "CloudWatchMetrics": [{ "Namespace": "Orders", "Dimensions": [["Env"]],
+      "Metrics": [{ "Name": "OrdersPlaced", "Unit": "Count" }] }] },
+  "Env": "prod", "OrdersPlaced": 1
+}
+```
+
+```bash
+aws cloudwatch put-metric-data --namespace Orders --metric-name OrdersPlaced --value 1 --unit Count --dimensions Env=prod
+```
+
+---
+
+## 3. Alarms and Notifications (Skill 4.2.3)
+
+**Alarm states:** `OK`, `ALARM`, `INSUFFICIENT_DATA`. Configure the **statistic** (Average, Sum, p99...), **period**, **evaluation periods**, **datapoints to alarm** (M out of N), and **treat missing data** (`missing`, `notBreaching`, `breaching`, `ignore`).
+
+| Alarm Action Target | Use |
+|---|---|
+| **SNS topic** | Email, SMS, HTTP, Lambda, chat integrations |
+| **EC2 action** | Stop, terminate, reboot, recover |
+| **Auto Scaling policy** | Scale out and in |
+| **Systems Manager** | Create OpsItems or incidents |
+
+* **Composite alarms** combine alarms with AND/OR logic to reduce noise. **Anomaly detection** alarms use learned bands. **Metric math** computes ratios (for example `Errors / Invocations`).
+* **Specific-action notifications:**
+
+| Event to Notify On | Mechanism |
+|---|---|
+| **Service quota approaching limit** | **Service Quotas** with CloudWatch alarms on `AWS/Usage` metrics (for supported quotas), and Trusted Advisor checks |
+| **Deployment or pipeline completion/failure** | **CodePipeline, CodeBuild, CodeDeploy notification rules** or **EventBridge** events to SNS/Lambda/chat |
+| **API activity (for example root login, security group change)** | **CloudTrail** events through **EventBridge** rule to SNS |
+| **Cost thresholds** | AWS Budgets alerts |
+| **Scheduled or state changes** | EventBridge rules (EC2 state, ECS task state, S3 events) |
+
+---
+
+## 4. Distributed Tracing with AWS X-Ray (Skill 4.2.4)
+
+| Term | Meaning |
+|---|---|
+| **Trace** | End-to-end record of one request (shared **trace ID** in the `X-Amzn-Trace-Id` header) |
+| **Segment** | Work done by one service/resource for the request |
+| **Subsegment** | Detail inside a segment: downstream AWS SDK calls, HTTP calls, SQL, custom code blocks |
+| **Annotations** | **Indexed** key-value pairs (strings, numbers, booleans) you can **filter and group by** |
+| **Metadata** | **Not indexed** extra data (objects) for debugging |
+| **Service map** | Graph of services with latency, error, fault, and throttle rates |
+| **Sampling rules** | Control what fraction of requests is traced (default: first request each second plus 5% of the rest) |
+| **Groups** | Filter expressions with their own metrics and alarms |
+
+**Error categories:** *Error* = client errors (4xx), *Fault* = server errors (5xx), *Throttle* = 429.
+
+How to enable:
+
+* **Lambda:** turn on **active tracing** (`TracingConfig: Mode: Active`); execution role needs `xray:PutTraceSegments` and `xray:PutTelemetryRecords` (managed policy `AWSXRayDaemonWriteAccess`). Instrument the SDK (for example `patch_all()` in Python) to see downstream calls as subsegments.
+* **API Gateway (REST):** enable **tracing** on the stage.
+* **EC2/ECS/EKS:** run the **X-Ray daemon** (listens on **UDP port 2000**) or the **AWS Distro for OpenTelemetry (ADOT) collector** as a sidecar/agent; instance or task role needs X-Ray write permissions.
+* **Elastic Beanstalk:** enable the X-Ray daemon option.
+* **OpenTelemetry direction:** AWS increasingly recommends **ADOT/OpenTelemetry** instrumentation with X-Ray or CloudWatch as the backend (the X-Ray SDKs are moving toward maintenance mode; check current documentation). The exam concepts (segments, annotations, sampling, service map) are unchanged.
+
+```python
+from aws_xray_sdk.core import xray_recorder, patch_all
+patch_all()                                           # auto-instrument boto3, requests, etc.
+
+@xray_recorder.capture("price_lookup")
+def lookup(sku):
+    xray_recorder.current_subsegment().put_annotation("sku", sku)     # indexed, searchable
+    xray_recorder.current_subsegment().put_metadata("raw", {"detail": "not indexed"})
+```
+
+**Filter example:** `annotation.sku = "ABC-1" AND responsetime > 2`.
+
+---
+
+## 5. Monitoring Workload Health (Skill 4.2.5)
+
+| Mechanism | What It Checks | Outcome on Failure |
+|---|---|---|
+| **ELB target group health checks** | HTTP path, port, interval, timeout, healthy/unhealthy thresholds | Stop routing traffic to the target; Auto Scaling can replace if ELB health checks are enabled for the group |
+| **EC2 status checks** | Instance and system reachability | Auto Scaling replaces unhealthy instances; alarm can recover |
+| **ECS container health check** | Command run inside the container | Task marked unhealthy and replaced |
+| **Route 53 health checks** | Endpoint availability (HTTP, HTTPS, TCP), calculated and CloudWatch-alarm checks | DNS failover |
+| **Elastic Beanstalk enhanced health** | Health agent reports (OK, Warning, Degraded, Severe) with causes | Visual status, alarms |
+| **Kubernetes probes (EKS)** | See below | Restart or remove from service |
+| **CodeDeploy ValidateService hook / CloudWatch Synthetics canaries** | Scripted checks | Fail deployment or alert |
+
+### Liveness, Readiness, and Startup Probes
+
+| Probe | Question | On Failure |
+|---|---|---|
+| **Liveness** | "Is the process stuck or dead?" | Container is **restarted** |
+| **Readiness** | "Can it serve traffic right now?" | Pod is **removed from Service endpoints** (not restarted) |
+| **Startup** | "Has a slow-starting app finished booting?" | Holds off liveness/readiness checks until success |
+
+**Design tip:** make a `/health` endpoint that checks critical dependencies for **readiness** but keep **liveness** shallow, or a database blip will cause restart loops.
+
+---
+
+## 6. Common Exam Traps and Scenario Distractors
+
+* "Create a metric from a log pattern" → **metric filter**; "emit metrics from Lambda with no API calls" → **EMF**.
+* "Memory utilization of EC2 not appearing in CloudWatch" → install the **CloudWatch agent**.
+* "Search traces by customer ID" → X-Ray **annotation** (indexed), not metadata.
+* "X-Ray shows no traces from Lambda" → active tracing disabled or role lacks **X-Ray write permissions**.
+* "Alarm flaps on a single bad data point" → use **M out of N datapoints** and tune period.
+* "Get notified when a CodeDeploy deployment fails" → notification rule or **EventBridge** rule to SNS.
+* "App starts slowly and gets killed by liveness checks" → **startup probe** or longer initial delay.
+* "Logs cost a fortune" → set **retention**, reduce verbosity, use Infrequent Access class.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] You want to find all traces for a specific order ID in X-Ray. What do you add in code?
+<details>
+<summary>Explanation</summary>
+
+Add the order ID as an **annotation** (indexed) on a segment or subsegment, then filter with `annotation.orderId = "..."`. Metadata is not searchable.
+
+</details>
+- [ ] A Lambda function must publish a business metric per invocation with minimal overhead and latency. What is the best approach?
+<details>
+<summary>Explanation</summary>
+
+Use the **Embedded Metric Format**: print a structured JSON log line; CloudWatch extracts the metric asynchronously (Powertools makes this easy).
+
+</details>
+- [ ] A readiness probe fails on a pod. What happens?
+<details>
+<summary>Explanation</summary>
+
+The pod is **removed from the Service's endpoints** so it gets no traffic, but it is **not restarted** (that is the liveness probe's job).
+
+</details>
+- [ ] Your team wants a warning at 80% of a service quota. Which AWS capability?
+<details>
+<summary>Explanation</summary>
+
+**Service Quotas** CloudWatch alarms on usage metrics (where supported), notifying through SNS.
+
+</details>
+- [ ] How do you stream CloudWatch Logs in near real time to Amazon Data Firehose for delivery to S3?
+<details>
+<summary>Explanation</summary>
+
+Create a **subscription filter** on the log group that targets the Firehose delivery stream (with an IAM role CloudWatch Logs can assume).
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/13-ci-cd-and-deployment-strategies" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 13: CI/CD, Container Deployments & Deployment Strategies
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/15-root-cause-analysis-and-troubleshooting" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 15: Root Cause Analysis & Troubleshooting Across AWS Services →
+  </a>
+</div>

@@ -1,0 +1,179 @@
+---
+title: "Module 07: Loosely Coupled & Event-Driven Architectures"
+description: "SQS, SNS, EventBridge, Step Functions, API Gateway, Amazon MQ, caching strategies, and stateless design."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 7
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 2.1 — SQS, SNS, EventBridge, Step Functions, API Gateway, Amazon MQ, AWS Transfer Family, caching strategies, stateless design, and multi-tier architectures
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 2, Task 2.1 — Design scalable and loosely coupled architectures">
+Questions give a tightly coupled design (direct synchronous calls, shared state on servers) and ask how to decouple it. Identify the communication pattern first: queue (one consumer group, buffering), pub/sub (fan-out), event routing (rules and targets), or orchestration (ordered workflow with state).
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: SQS mechanics that appear on the exam">
+
+* **Visibility timeout:** default 30 seconds (0 seconds to 12 hours). A received message is hidden; if not deleted before it expires, it becomes visible again. Set it longer than worst-case processing time.
+* **Retention:** default 4 days, configurable from 1 minute to 14 days.
+* **Long polling:** set `WaitTimeSeconds` up to 20 seconds to reduce empty receives and cost.
+* **Dead-letter queue (DLQ):** receives messages after `maxReceiveCount` failures; the DLQ type must match the source queue type.
+* **Delay queues:** postpone delivery up to 15 minutes.
+* **Message size:** historically 256 KB (larger payloads use the S3 extended client); recent updates raise this, so confirm the current limit in documentation.
+* **Standard** queues: nearly unlimited throughput, at-least-once delivery, best-effort ordering. **FIFO** queues: exactly-once processing and strict ordering per message group ID, with 300 messages per second per API action (3,000 with batching) unless high-throughput mode is enabled.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Stateless versus stateful tiers">
+
+Stateless web tiers scale horizontally behind a load balancer because any instance can serve any request. Move session state to **ElastiCache** or **DynamoDB**, uploads to **S3**, and shared files to **EFS**. Sticky sessions are a workaround, not a decoupling strategy, and reduce elasticity.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Service | Pattern | Delivery | Choose when |
+|---|---|---|---|
+| Amazon SQS | Queue (pull) | Consumers poll | Buffer spikes, decouple producer from consumer, worker pools |
+| Amazon SNS | Pub/sub (push) | Fan-out to SQS, Lambda, HTTP/S, email, SMS, Firehose | One event to many subscribers; message filtering |
+| Amazon EventBridge | Event bus with rules | Targets include Lambda, SQS, Step Functions, and more | Route events by content, SaaS events, schedules, cross-account buses, archive and replay |
+| AWS Step Functions | Workflow orchestration | State machine | Multi-step ordered processes with retries, branching, human approval |
+| Amazon MQ | Managed ActiveMQ or RabbitMQ | JMS, AMQP, MQTT, STOMP | Migrating existing brokers with no code changes |
+| Amazon Kinesis Data Streams | Ordered streaming with replay | Consumers read shards | High-volume streaming, multiple consumers replay data |
+| Amazon API Gateway | Managed API front door | REST, HTTP, WebSocket | Throttle, authorize, cache, and version APIs |
+| AWS Transfer Family | Managed SFTP, FTPS, FTP, AS2 | Backed by S3 or EFS | Replace self-managed file transfer servers |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+Order API --> SNS topic "order-created"
+                |-- (filter: type=physical) --> SQS fulfillment queue --> ASG workers
+                |-- (filter: type=digital)  --> Lambda license generator
+                `-- all --> SQS analytics queue --> Firehose --> S3
+
+Web tier (stateless, ASG) --> ALB
+        |-- sessions --> ElastiCache
+        |-- files    --> S3
+        `-- jobs     --> SQS --> worker ASG (scale on queue depth per instance)
+```
+
+### Step Functions Standard versus Express
+
+| Attribute | Standard | Express |
+|---|---|---|
+| Max duration | Up to 1 year | Up to 5 minutes |
+| Execution semantics | Exactly-once | At-least-once (async) or at-most-once (sync) |
+| Best for | Long-running, auditable workflows | High-volume event processing |
+| Billing | Per state transition | Per request count and duration |
+
+### API Gateway types
+
+| Type | Notes |
+|---|---|
+| REST API | Full features: usage plans, API keys, caching, request validation, WAF, private endpoints |
+| HTTP API | Cheaper, lower latency, simpler; JWT authorizers; fewer features |
+| WebSocket API | Persistent two-way connections for chat and live updates |
+
+Endpoint types: **edge-optimized** (CloudFront), **Regional**, **private** (VPC endpoint). Default integration timeout is 29 seconds, so long jobs should return quickly and process asynchronously through SQS or Step Functions.
+
+### Caching strategies
+
+| Strategy | How it works | Trade-off |
+|---|---|---|
+| Lazy loading (cache-aside) | Read cache, on miss read DB and populate cache | Only requested data cached; stale data possible; miss penalty |
+| Write-through | Write to cache and DB together | Fresh cache; extra write latency and unused cached data |
+| TTL | Expire entries after a set time | Bounds staleness |
+| Edge caching (CloudFront) | Cache at edge locations | Reduces origin load and latency for global users |
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```bash
+# Create a queue with a DLQ redrive policy and long polling
+aws sqs create-queue --queue-name orders --attributes '{
+  "ReceiveMessageWaitTimeSeconds":"20",
+  "VisibilityTimeout":"120",
+  "RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:111111111111:orders-dlq\",\"maxReceiveCount\":\"5\"}"
+}'
+
+# Subscribe the queue to a topic with a filter policy
+aws sns subscribe --topic-arn arn:aws:sns:us-east-1:111111111111:order-created \
+  --protocol sqs --notification-endpoint arn:aws:sqs:us-east-1:111111111111:orders \
+  --attributes '{"FilterPolicy":"{\"type\":[\"physical\"]}"}'
+```
+
+**Scaling workers on queue depth:** publish a custom metric of backlog per instance (queue length divided by running instances) and use target tracking, so capacity follows the backlog rather than CPU.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Using SNS when consumers need to process at their own pace with buffering. That is SQS (or SNS fan-out into SQS).
+- **Trap 2:** Using SQS Standard when the stem requires strict ordering or exactly-once processing. Choose FIFO.
+- **Trap 3:** Replacing an existing JMS or AMQP broker with SQS when the stem says "without changing application code". Choose Amazon MQ.
+- **Trap 4:** Using Step Functions Express for a workflow that runs for hours.
+- **Trap 5:** Using sticky sessions to solve scaling instead of externalizing state.
+- **Trap 6:** Forgetting that API Gateway integrations time out at 29 seconds by default.
+- **Trap 7:** Using Lambda to chain steps with custom code when Step Functions provides orchestration, retries, and error handling natively.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can pick between SQS, SNS, EventBridge, Kinesis, and Step Functions for a scenario.
+<details>
+<summary>Explanation</summary>
+
+SQS buffers work for pull-based consumers. SNS pushes one message to many subscribers. EventBridge routes events by content with rules and supports SaaS and cross-account events. Kinesis handles ordered high-throughput streams with replay. Step Functions orchestrates ordered multi-step workflows with state, retries, and branching.
+
+</details>
+
+- [ ] I can configure SQS to avoid duplicate processing and handle poison messages.
+<details>
+<summary>Explanation</summary>
+
+Set the visibility timeout above worst-case processing time, delete messages after successful processing, make consumers idempotent (Standard queues deliver at least once), and use a DLQ with a maxReceiveCount so failing messages are isolated for analysis.
+
+</details>
+
+- [ ] I can make a web tier stateless and scalable.
+<details>
+<summary>Explanation</summary>
+
+Store sessions in ElastiCache or DynamoDB, static and uploaded content in S3 (served through CloudFront), and shared files in EFS. Then any instance can handle any request, allowing horizontal scaling behind an ALB with Auto Scaling.
+
+</details>
+
+- [ ] I can choose a caching strategy and place for a read-heavy workload.
+<details>
+<summary>Explanation</summary>
+
+Use CloudFront for global static and cacheable dynamic content, ElastiCache (lazy loading with TTL, or write-through for freshness) in front of relational databases, and DynamoDB Accelerator for DynamoDB read acceleration. Read replicas help scale reads but do not provide in-memory latency.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/06-data-protection-encryption" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 06: Data Protection: KMS, ACM, Backups & Retention
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/08-containers-serverless-compute-scaling" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 08: Containers, Serverless & Elastic Compute →
+  </a>
+</div>

@@ -1,0 +1,219 @@
+---
+title: "Module 10: Securing AI Services & Agents: Bedrock Guardrails, PrivateLink & AgentCore"
+description: "Bedrock access control, private connectivity, Guardrails filters, prompt attack defense, AgentCore identity and policy, and protecting AI logs."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 10
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Security
+
+<Callout variant="info" title="Exam Focus: Security (Task 2.3, Skills 2.3.1 to 2.3.5) - New in DVA-C03">
+This is an entirely **new task** with five dedicated skills. It tests how a **developer** securely integrates AI services: request and manage access, transmit data privately, filter inputs and outputs, secure agent interactions, and protect logs. **Out of scope:** selecting foundation models, engineering prompts, designing RAG architectures, designing AI safety frameworks, and AI governance programs.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: The AI Threat Model a Developer Must Handle">
+
+* **Prompt injection:** untrusted text (a user message, a retrieved document, a web page) contains instructions that try to override your system prompt or trigger tools.
+* **Sensitive data leakage:** PII or PHI sent in prompts, echoed in outputs, or written to logs.
+* **Excessive agency:** an agent with broad tool permissions performs a damaging action because it was tricked or mistaken.
+* **Data exposure in transit or to model training:** prompts crossing the public internet, or being used to train models.
+* **Unauthorized model use:** over-permissive IAM that lets any principal invoke any model (cost and data risks).
+
+**Defense in depth** is the answer pattern: least-privilege IAM, private network paths, **Bedrock Guardrails** on inputs and outputs, **deterministic policy checks outside the model** for tool calls, **human approval** for sensitive actions, and **protected logging**.
+
+* **Exam Trap:** Instructions in the system prompt such as "never reveal secrets" are **not** security controls. Use enforcement outside the model (guardrails, IAM, policy, approval flows).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Request and Manage Access to AI Services (Skill 2.3.1)
+
+* **IAM permissions** control model invocation: `bedrock:InvokeModel` (also required for the `Converse` API) and `bedrock:InvokeModelWithResponseStream`. Scope the `Resource` to **specific foundation-model or inference-profile ARNs**, not `*`.
+* **Model availability:** some models need you to accept terms or provide use-case details, and third-party models may be offered through **AWS Marketplace** subscriptions. Treat enabling a model as a controlled action (restrict `aws-marketplace:Subscribe`-type permissions to a small group).
+* **Guardrail enforcement:** IAM condition keys (for example `bedrock:GuardrailIdentifier`) can **require** that invocations use an approved guardrail, so developers cannot bypass safety filters.
+* **Organization controls:** **SCPs** can limit which Regions and which Bedrock actions member accounts may use.
+* **Quotas:** model invocation has **tokens-per-minute and requests-per-minute quotas**; handle `ThrottlingException` with backoff and request increases. **Cross-Region inference profiles** pool capacity across Regions (check data-residency requirements first).
+* **Credentials:** prefer **roles** (Lambda execution role, task role). If your organization uses Bedrock API keys for quick experiments, treat them like any long-lived secret (short expiry, store in Secrets Manager, never in code).
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+  "Resource": "arn:aws:bedrock:us-east-1::foundation-model/APPROVED_MODEL_ID",
+  "Condition": { "StringEquals": { "bedrock:GuardrailIdentifier": "arn:aws:bedrock:us-east-1:111122223333:guardrail/abc123xyz:1" } }
+}
+```
+
+---
+
+## 2. Data Privacy Controls for Transmitting Data to AI Services (Skill 2.3.2)
+
+| Concern | Control |
+|---|---|
+| Prompts travel over the public internet | **Interface VPC endpoints (AWS PrivateLink)** for Bedrock: `bedrock-runtime` (inference), `bedrock` (control plane), `bedrock-agent`, `bedrock-agent-runtime`. Add **endpoint policies** to restrict which principals and models can be called through them |
+| Interception in transit | **TLS** is always used for Bedrock API calls |
+| Training on your data | Amazon Bedrock **does not use your prompts and completions to train the underlying base models** and does not share them with model providers; fine-tuning data stays in your account |
+| Data at rest (custom models, knowledge bases, agent artifacts, S3 data) | **Customer managed KMS keys** with key policies limiting who can use them |
+| Visibility into who called what | **CloudTrail** records Bedrock API activity (metadata, not prompt content) |
+| Private compute for Lambda calling Bedrock | Lambda in a **private subnet** + VPC endpoint (no NAT or internet needed) + security groups limiting egress |
+
+```
+Lambda (private subnet) ──PrivateLink──> bedrock-runtime VPC endpoint ──> Amazon Bedrock
+         └─ endpoint policy: allow only bedrock:InvokeModel on approved model ARNs
+```
+
+Minimize what you send: **redact or tokenize PII before** the prompt where the use case allows, and send only the fields needed.
+
+---
+
+## 3. Filtering and Controlling Model Inputs and Outputs (Skill 2.3.3)
+
+**Amazon Bedrock Guardrails** provides configurable safeguards applied to **both prompts and responses**, independent of the model:
+
+| Safeguard | What It Does | Notes |
+|---|---|---|
+| **Content filters** | Detect harmful content in categories **Hate, Insults, Sexual, Violence, Misconduct**, plus **Prompt Attack** | Strength per category: NONE, LOW, MEDIUM, HIGH; categories are evaluated on input and output (prompt attack applies to **input**) |
+| **Denied topics** | Block subjects you define in natural language (name, definition, examples) | Define topics **affirmatively and precisely**; they match themes, not specific words |
+| **Word filters** | Block exact words, phrases, profanity, competitor names | Exact match |
+| **Sensitive information filters** | **Detect PII and block or mask it**; add **custom regex** patterns | Handles identifiers such as SSN, email, phone, addresses |
+| **Contextual grounding checks** | Score a response for **grounding** in provided source and **relevance** to the query; filter hallucinations below thresholds | For RAG and summarization |
+| **Automated Reasoning checks** | Validate responses against formal logic rules | Reduces factual errors in rule-based domains |
+
+**How to apply a guardrail**
+
+1. Attach it to model invocations by passing the **guardrail ID and version** (`guardrailConfig` in `Converse`, or `guardrailIdentifier` and `guardrailVersion` in `InvokeModel`). Use a **numbered version** in production, not `DRAFT`.
+2. Call the **`ApplyGuardrail` API** to check any text **without invoking a model**, including text from non-Bedrock models, user uploads, or your own post-processing.
+3. Use **input tags** (`guardContent` blocks in Converse) so that only the **user-supplied portion** is evaluated for prompt attacks, avoiding false positives on your own system prompt.
+
+```python
+resp = brt.converse(
+    modelId=MODEL_ID,
+    system=[{"text": "You are a support assistant for Acme."}],
+    messages=[{"role": "user", "content": [
+        {"guardContent": {"text": {"text": user_input}}}          # evaluated by the guardrail
+    ]}],
+    guardrailConfig={"guardrailIdentifier": "abc123xyz", "guardrailVersion": "1", "trace": "enabled"},
+)
+if resp.get("stopReason") == "guardrail_intervened":
+    return "Sorry, I can't help with that request."
+```
+
+**Prompt injection and manipulation protection** is layered: the **Prompt Attack content filter** (jailbreaks, injection, prompt leakage), **separating trusted instructions from untrusted data** (tags), validating and constraining model output (for example JSON schema) before using it, **never executing model output as code or SQL without validation**, and giving tools **least privilege**.
+
+---
+
+## 4. Securing AI Agent Interactions (Skill 2.3.4)
+
+An **agent** lets a model decide to call tools. **Amazon Bedrock AgentCore** is a modular platform for deploying and operating agents securely, and works with any framework or model:
+
+| Component | Security Role |
+|---|---|
+| **AgentCore Runtime** | Serverless hosting with **session isolation** (each session runs isolated, preventing cross-user data leakage); supports VPC connectivity |
+| **AgentCore Identity** | **Inbound authentication** (who may call the agent, via OAuth/JWT with providers such as Cognito) and **outbound credentials** (the agent obtains scoped tokens to call third-party tools or APIs **on behalf of a user** without embedding secrets) |
+| **AgentCore Gateway** | Converts APIs, Lambda functions, and services into **agent-callable tools** behind one authenticated endpoint |
+| **AgentCore Policy** | **Deterministic, tool-use authorization** evaluated **outside the agent's code** (Cedar policies) at the Gateway before a tool call executes |
+| **AgentCore Memory** | Short-term and long-term memory; scope by actor and session so users cannot read each other's memories |
+| **AgentCore Observability** | Traces and metrics of agent steps and tool calls for audit |
+| **Code Interpreter and Browser** | **Sandboxed** execution environments for model-generated code and web actions |
+
+**Design rules for agents**
+
+* **Least-privilege tools:** each tool's IAM role grants only what that tool needs. Prefer many narrow tools over one powerful "run anything" tool.
+* **Tool-use authorization:** authorize **every tool call** against the **end user's** permissions (not just the agent's), using AgentCore Identity and Policy.
+* **Session isolation:** never share state, credentials, or memory across user sessions.
+* **Human-in-the-loop** for sensitive or irreversible actions (payments, deletions, data export, permission changes): require explicit approval before execution. In **Bedrock Agents** use **return of control**; in workflows use **Step Functions `.waitForTaskToken`**; or build an approval step in your UI.
+* **Validate parameters** the model produced (types, ranges, allow-lists) before calling downstream systems.
+* **Rate-limit and budget-limit** agent loops to contain runaway cost.
+
+---
+
+## 5. Protecting Sensitive Content in Monitoring Logs (Skill 2.3.5)
+
+Observability for AI means logging prompts and responses, which **often contain PII, PHI, or secrets**. Treat these logs as sensitive data:
+
+* **Model invocation logging** in Bedrock (to **S3 and/or CloudWatch Logs**) is **off by default**; enable it deliberately and only when needed for audit or evaluation.
+* **Encrypt** the destination (KMS on the log group or bucket) and **restrict access** with narrow IAM and resource policies; separate the security-audit audience from the developer audience.
+* Apply **CloudWatch Logs data protection policies** to detect and **mask** sensitive entities, and use Guardrails sensitive-information masking so that **masked** content is what gets logged.
+* **Set short retention** and lifecycle policies on log groups and buckets.
+* **Do not log** secrets, tokens, or full prompts in application logs and traces (X-Ray annotations and OpenTelemetry attributes are searchable); log IDs, sizes, latency, token counts, and guardrail outcomes instead.
+* Use **CloudTrail** for who-called-what, and alarms on unusual invocation volume.
+
+---
+
+## 6. Common Exam Traps and Scenario Distractors
+
+* "Keep Bedrock traffic off the public internet" → **interface VPC endpoint (PrivateLink)** (plus a private subnet).
+* "Ensure customer prompts are never used to train models" → Bedrock does not train base models on your inputs; still document it, and restrict logging.
+* "Block a chatbot from giving legal advice" → Guardrails **denied topic**.
+* "Remove credit card numbers from model responses" → Guardrails **sensitive information filter** (mask or block).
+* "Detect jailbreak attempts" → **Prompt Attack** content filter.
+* "Check text from a non-Bedrock model against the same policies" → **ApplyGuardrail** API.
+* "Agent must not be able to delete records without manager approval" → **human-in-the-loop approval** and tool-use authorization policy.
+* "Prompts and responses logged in plaintext to a shared bucket" → encrypt, restrict, **mask**, and shorten retention.
+* "Developers may call any model in the account" → scope IAM to specific model ARNs and require a guardrail with a condition key.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A healthcare app sends clinical notes to a Bedrock model from a Lambda function in a private subnet. What controls keep the data off the internet and out of unauthorized hands?
+<details>
+<summary>Explanation</summary>
+
+A **bedrock-runtime interface VPC endpoint** with an endpoint policy, IAM scoped to approved model ARNs, KMS customer managed keys for stored artifacts, Guardrails PII filters (or pre-redaction), and protected, masked logging.
+
+</details>
+- [ ] Users report the assistant sometimes follows instructions embedded in uploaded documents. Which mitigations apply?
+<details>
+<summary>Explanation</summary>
+
+Enable the **Prompt Attack** filter, tag untrusted content as user input (`guardContent`) so it is evaluated, keep tools least-privileged, validate model output before acting, and require approval for sensitive actions.
+
+</details>
+- [ ] An agent can issue refunds. How do you ensure it only refunds up to a user's allowed limit and requires approval above a threshold?
+<details>
+<summary>Explanation</summary>
+
+Enforce a **deterministic policy** at the tool boundary (AgentCore Policy/Gateway, or application logic) using the **end user's** identity and the requested amount, and route above-threshold requests to a **human approval** step.
+
+</details>
+- [ ] Invocation logs containing prompts are stored in S3. What should you do to reduce risk?
+<details>
+<summary>Explanation</summary>
+
+Encrypt with a customer managed KMS key, restrict bucket access, mask sensitive data (Guardrails and logs data protection), apply short lifecycle retention, and log only what is required.
+
+</details>
+- [ ] How do you force every Bedrock invocation in an account to use an approved guardrail?
+<details>
+<summary>Explanation</summary>
+
+Use an IAM policy (or SCP) with a **condition on the guardrail identifier** so `InvokeModel` calls without the approved guardrail are denied.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/09-encryption-kms-and-secrets" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 09: Encryption, KMS, Certificates & Secrets Management
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/11-application-artifacts-config-and-testing" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 11: Application Artifacts, Configuration Management & Testing →
+  </a>
+</div>

@@ -1,0 +1,154 @@
+---
+title: "Module 09: AMIs, EC2 Image Builder, Deployment Strategies & Terraform"
+description: "AMI lifecycle and sharing, Image Builder pipelines, rolling/immutable/blue-green/canary deployments, Terraform state, and Git workflows."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 9
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 3.1 (Skills 3.1.1, 3.1.5, 3.1.6): AMIs and container images, deployment strategies, and third-party tooling such as Terraform and Git.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 3.1 (Domain 3, 22%)">
+Skill 3.1.5 ("implement deployment strategies and services") is broad. Services such as CodeDeploy and Elastic Beanstalk are **not** in the published in-scope list, so expect strategies to be implemented with **ELB, Auto Scaling, Route 53, Lambda aliases, ECS, and CloudFormation**.
+</Callout>
+
+---
+
+## 1. AMIs and Container Images
+
+* An **AMI** is Region-specific. Copy with `aws ec2 copy-image` to use elsewhere; AMIs are backed by EBS snapshots.
+* **Sharing:** with specific accounts, organizations/OUs, or publicly. If the AMI uses an encrypted snapshot, the **KMS customer managed key must also be shared** (AWS-managed keys cannot be shared).
+* **Deregister** an AMI and delete its snapshots to stop charges; deprecation dates and the Recycle Bin help housekeeping.
+* **Golden AMI** pattern: patched, hardened baseline used by launch templates.
+
+### EC2 Image Builder
+
+| Element | Role |
+|---|---|
+| Image recipe | Parent image + ordered **components** (build and test scripts) |
+| Infrastructure configuration | Instance type, subnet, security group, instance profile used during the build |
+| Distribution settings | Regions and accounts, license config, launch permissions |
+| Pipeline | Schedule or trigger, tests, outputs; automatic rebuilds when the parent image updates |
+| Container image recipe | Builds **Docker images** and publishes to **Amazon ECR** |
+
+```
+ Parent image --> Build instance + components --> Test instance --> Output AMI/container --> Distribute (Regions/accounts)
+                                                                         |
+                                                                   SNS notification / EventBridge
+```
+
+**ECR operations:** lifecycle policies expire old tags/untagged images, image scanning (basic or Inspector enhanced), cross-Region/cross-account replication, pull-through cache, immutable tags. Pull failures usually trace to IAM permissions (`ecr:GetAuthorizationToken`) or missing network path (NAT or VPC endpoints for `ecr.api`, `ecr.dkr`, and S3).
+
+---
+
+## 2. Deployment Strategies
+
+| Strategy | How | Rollback | Downtime / risk |
+|---|---|---|---|
+| All-at-once | Replace everything | Redeploy | Highest risk, fastest |
+| Rolling | Batches replaced in place | Redeploy (slow) | Reduced capacity during update |
+| Rolling with additional batch | Add temporary instances to keep full capacity | Slow | Cost of extra batch |
+| **Immutable** | New ASG/instances, swap when healthy | Terminate new fleet | Safe, higher cost |
+| **Blue/green** | Parallel environment, switch traffic (Route 53, ALB listener/target group) | Switch back instantly | Double resources briefly |
+| **Canary** | Small percent of traffic first (weighted routing) | Shift weight back | Limited blast radius |
+| **Linear** | Increase traffic in equal steps | Stop and revert | Gradual |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Implementing these patterns with in-scope services">
+
+* **ALB weighted target groups:** forward rule with two target groups and weights (for example 90/10) gives canary or blue/green cutover without DNS delays.
+* **Route 53 weighted records:** shift percentages across endpoints or Regions; mind DNS TTL caching.
+* **Auto Scaling instance refresh:** rolling replacement with `MinHealthyPercentage` and optional checkpoints; or create a new ASG with the new launch template and attach it to the same target group.
+* **Lambda aliases:** weighted alias (for example 95% v1 and 5% v2) for canary.
+* **ECS:** rolling update via `minimumHealthyPercent` and `maximumPercent`; the deployment circuit breaker rolls back failed deployments.
+* **CloudFormation:** `UpdatePolicy` with `AutoScalingRollingUpdate` for ASGs (`MinInstancesInService`, `MaxBatchSize`, `PauseTime`) and `cfn-signal`.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Third-Party Tools: Terraform and Git
+
+* **Terraform** workflow: `init`, `plan`, `apply`, `destroy`. **State** tracks real resources; store it remotely (S3 backend) with **locking** to prevent concurrent applies (DynamoDB lock table, or S3 native lockfile in recent Terraform versions), encryption, and versioning. Never commit state or secrets to Git.
+* **Drift** shows in `terraform plan`; importing existing resources brings them under management.
+* Provider authentication uses the AWS credential chain; prefer roles over long-lived keys.
+* **Git** basics expected: branches, pull requests and code review, tags for releases, `.gitignore`, never committing credentials, and GitOps (merge triggers the pipeline). Designing the pipelines is out of scope.
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket       = "tf-state-111122223333"
+    key          = "prod/network.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}
+```
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Sharing an AMI with encrypted snapshots but not sharing the KMS key.
+- **Trap 2:** Assuming an AMI is usable in another Region without copying.
+- **Trap 3:** Blue/green with DNS only and ignoring TTL caching; weighted ALB target groups switch immediately.
+- **Trap 4:** Storing Terraform state locally or in Git for a team.
+- **Trap 5:** Choosing rolling when the requirement says **no reduction in capacity** (use additional batch, immutable, or blue/green).
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can automate monthly patched AMI creation and distribution to two Regions.
+<details>
+<summary>Explanation</summary>
+
+Create an Image Builder pipeline with a recipe using the latest parent image plus patching/hardening components and tests, add distribution settings for both Regions (and accounts), schedule monthly, and notify via SNS/EventBridge. Update launch templates to the new AMI (for example by SSM parameter) and use instance refresh.
+
+</details>
+
+- [ ] I can choose between canary, linear, and blue/green for a risky release.
+<details>
+<summary>Explanation</summary>
+
+Blue/green: instant switch and instant rollback with temporary double capacity. Canary: validate with a small slice first. Linear: gradual even increments for steady monitoring. All rely on health metrics and alarms to trigger rollback.
+
+</details>
+
+- [ ] I understand how to keep Terraform safe for a team.
+<details>
+<summary>Explanation</summary>
+
+Remote state in an encrypted, versioned S3 bucket with locking, least-privilege roles for plan/apply, code review of plans, and separate state per environment.
+
+</details>
+
+- [ ] I can fix ECS tasks failing to pull images from ECR in a private subnet.
+<details>
+<summary>Explanation</summary>
+
+Provide a path: NAT gateway or interface endpoints for ECR API and ECR DKR plus the S3 gateway endpoint (image layers are in S3), allow outbound 443 in security groups, and ensure the task execution role has ECR pull permissions.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/08-cloudformation-cdk-and-multi-account-provisioning" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 08: CloudFormation, CDK, StackSets & RAM
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/10-systems-manager-and-event-driven-automation" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 10: Systems Manager Operations & Event-Driven Automation →
+  </a>
+</div>

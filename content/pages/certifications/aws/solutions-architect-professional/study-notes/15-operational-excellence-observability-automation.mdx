@@ -1,0 +1,166 @@
+---
+title: "Module 15: Operational Excellence: Observability, Configuration & Automation"
+description: "CloudWatch, Logs Insights, X-Ray, CloudTrail, Config, Systems Manager automation, alerting with auto-remediation and failure-injection exercises."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 15
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** CloudWatch, Logs Insights, X-Ray, CloudTrail, Config, Systems Manager automation, alerting with auto-remediation and failure-injection exercises.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 3.1 Operational Excellence">
+Choose the right logging and monitoring approach, automate alerts with remediation, evaluate deployment processes for improvement and exercise recovery through failure scenarios. Systems Manager and EventBridge are the connective tissue in most correct answers.
+</Callout>
+
+---
+
+## 1. Observability Services
+
+| Service | Role | Exam nuance |
+|---|---|---|
+| CloudWatch Metrics | Time series from AWS services and custom metrics | Standard resolution 1 minute; high-resolution to 1 second; EC2 basic monitoring 5 minutes, detailed 1 minute; memory and disk need the CloudWatch agent |
+| CloudWatch Alarms | Threshold, anomaly detection and composite alarms | Actions: SNS, Auto Scaling, EC2 actions (stop, terminate, reboot, recover), Systems Manager OpsItems; missing data treatment settings |
+| CloudWatch Logs | Log collection, retention, metric filters, subscription filters (to Kinesis, Firehose, Lambda, OpenSearch) | Logs Insights queries; export to S3; cross-account centralization |
+| Logs Insights | Ad-hoc query language over log groups | `fields`, `filter`, `stats`, `sort`, `limit`, `parse` |
+| Contributor Insights | Top-N contributors (noisy IPs) | Rule-based |
+| Synthetics / RUM / Application Signals | Canaries, real user monitoring, SLO tracking | Proactive detection |
+| Cross-account observability | Central monitoring account across source accounts (Observability Access Manager) | Single pane of glass |
+| X-Ray | Distributed tracing, service map, annotations (indexed) vs metadata | Sampling rules; works with Lambda, ECS, API Gateway |
+| CloudTrail | API audit; management and data events; Insights; CloudTrail Lake | Organization trail |
+| AWS Config | Resource inventory/history and compliance | Not real-time prevention |
+| Health Dashboard | Account-specific AWS service events | EventBridge integration for AWS Health events |
+| Managed Grafana / Managed Prometheus | Dashboards and metrics for containers/Kubernetes | Open-source tooling compatibility |
+| EventBridge | React to state changes and schedules | Backbone of automation |
+
+```
+ Metric breach -> CloudWatch alarm -> SNS -> (email / chat / ticket)
+                                  \-> EventBridge -> SSM Automation runbook (restart, scale, rollback)
+ Config noncompliance -> auto-remediation (SSM Automation) -> re-evaluate
+```
+
+```bash
+aws logs put-metric-filter --log-group-name /app/web --filter-name 5xx --filter-pattern '[ip, id, user, ts, req, status=5*, size]' \
+  --metric-transformations metricName=Http5xx,metricNamespace=App,metricValue=1
+aws logs put-subscription-filter --log-group-name /app/web --filter-name toKinesis --filter-pattern "" \
+  --destination-arn arn:aws:kinesis:us-east-1:999988887777:stream/central-logs --role-arn arn:aws:iam::111122223333:role/cwl-to-kinesis
+aws cloudwatch put-metric-alarm --alarm-name ec2-recover --namespace AWS/EC2 --metric-name StatusCheckFailed_System \
+  --statistic Maximum --period 60 --evaluation-periods 2 --threshold 1 --comparison-operator GreaterThanOrEqualToThreshold \
+  --alarm-actions arn:aws:automate:us-east-1:ec2:recover --dimensions Name=InstanceId,Value=i-0abc
+```
+
+```
+fields @timestamp, @message
+| filter @message like /ERROR/
+| stats count(*) as errors by bin(5m)
+| sort errors desc
+```
+
+## 2. AWS Systems Manager as the Operations Hub
+
+| Capability | Use |
+|---|---|
+| Session Manager | Shell access with no inbound ports, no bastion, no SSH keys; IAM-controlled, logged to CloudWatch/S3 |
+| Run Command | Execute commands at scale |
+| Patch Manager | Patch baselines (auto-approval rules), patch groups (tags), maintenance windows, compliance reporting; scans or installs |
+| State Manager | Enforce desired state associations |
+| Automation | Runbooks (AWS-owned and custom), approvals, cross-account/Region execution; remediation target for Config and EventBridge |
+| Inventory | Software and configuration inventory |
+| Parameter Store | Configuration and secrets values (Standard vs Advanced tier; SecureString with KMS) |
+| AppConfig | Safe configuration/feature-flag deployment with validators and alarm rollback |
+| OpsCenter / Incident Manager | Operational issue tracking and incident response |
+| Fleet Manager, Distributor | Remote management; package distribution |
+| Hybrid activations | Manage on-premises servers as managed nodes |
+
+Requirements: SSM Agent installed, an instance profile with `AmazonSSMManagedInstanceCore`, and network path to SSM endpoints (internet/NAT or interface endpoints `ssm`, `ssmmessages`, `ec2messages` in private subnets).
+
+## 3. Improving Deployment and Release Processes
+
+Evaluate current processes: manual console changes (introduce IaC), long lead time (CI/CD pipelines), big-bang releases (canary/blue-green), snowflake servers (immutable AMIs via EC2 Image Builder), no rollback (CodeDeploy alarms), configuration drift (Config, CloudFormation drift detection, State Manager).
+
+**Prioritizing automation:** rank by frequency x risk x effort. Typical order: provisioning (IaC), patching, deployments, backups, remediation of top recurring incidents, then access requests.
+
+## 4. Failure Scenario Exercises
+
+- **Game days** simulating AZ loss, dependency outage and Region failover; **chaos engineering** by injecting failures (for example with AWS Fault Injection Service, a managed capability for fault injection experiments, although it is not named in this exam guide's service list); measure RTO/RPO achieved.
+- Verify alarms fire, runbooks work, and Auto Scaling/Multi-AZ failovers behave as designed.
+- Post-incident reviews feed a continuous improvement backlog and update runbooks.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: CloudWatch Logs Centralization Options">
+
+1. **Subscription filter to Kinesis/Firehose in a central account** for streaming into S3/OpenSearch (needs a cross-account destination policy).
+2. **CloudWatch cross-account observability** to view logs and metrics from a monitoring account without copying.
+3. **S3 export** for batch/archival (not real time).
+4. **Organization-level logging for services** (VPC Flow Logs, ELB, CloudTrail) directly to a central S3 bucket.
+Pick streaming for near-real-time SIEM ingestion, observability links for operational visibility, S3 for cost-efficient retention.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: CloudTrail Event Types and Costs">
+
+Management events (control plane) are recorded by default for 90 days in Event history; one management-event trail per Region is free (additional copies are charged). Data events (S3 object-level, Lambda invoke, DynamoDB item-level) cost extra and are opt-in. Insights events detect unusual API call volume. CloudTrail Lake provides managed SQL-queryable event data stores with long retention. Enable log file validation to prove integrity.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 5. Common Traps & Distractors
+
+- "Troubleshoot memory pressure on EC2": install the CloudWatch agent; memory is not a default metric.
+- "Access private instances without opening SSH": Session Manager.
+- "Automatically fix a noncompliant security group": Config rule with SSM Automation remediation.
+- "Trace latency across microservices": X-Ray, not CloudWatch alone.
+- "Who deleted the bucket?": CloudTrail; "what did the configuration look like last month?": Config.
+- "Central logging for all accounts with minimal effort": organization trail plus central S3 and log subscription/observability sharing.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can design an alert-to-remediation pipeline.
+<details>
+<summary>Explanation</summary>
+
+A CloudWatch alarm, Config rule or GuardDuty finding emits an event; EventBridge routes it to an SSM Automation runbook or Lambda that performs the fix, with SNS notification and an OpsItem for audit. Use least-privilege roles for the automation and test in a staging account.
+
+</details>
+
+- [ ] I know the prerequisites for Systems Manager to manage an instance.
+<details>
+<summary>Explanation</summary>
+
+SSM Agent running, an instance profile granting SSM core permissions, and connectivity to the Systems Manager endpoints (public path via NAT or interface VPC endpoints). Hybrid servers require a hybrid activation.
+
+</details>
+
+- [ ] I can pick between CloudTrail, Config, CloudWatch and X-Ray for an investigation.
+<details>
+<summary>Explanation</summary>
+
+CloudTrail answers who called which API; Config answers what a resource looked like and whether it complied; CloudWatch provides metrics, logs and alarms for performance and health; X-Ray traces request paths for latency and errors across services.
+
+</details>
+
+- [ ] I can describe how to exercise failure recovery safely.
+<details>
+<summary>Explanation</summary>
+
+Define steady-state metrics and hypotheses, run controlled experiments (AZ impairment, instance termination, dependency latency), use stop conditions tied to alarms, record measured RTO/RPO and fix gaps. Start in non-production and progress to production with guardrails.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/14-cost-optimization-visibility-purchasing" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 14: Cost Optimization, Visibility & Purchasing Options
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/16-continuous-improvement-security-performance-reliability" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 16: Continuous Improvement Playbook: Hardening, Secrets, Patching & Bottleneck Analysis →
+  </a>
+</div>

@@ -77,7 +77,9 @@ export function getCompiledPostModule(slug: string): ComponentType<{
   const postKey = Object.keys(compiledPostModules).find((k) => k.endsWith(`/${slug}.js`));
   if (postKey) return compiledPostModules[postKey]?.default ?? null;
 
-  const pageKey = Object.keys(compiledPageModules).find((k) => k.endsWith(`/${slug}.js`));
+  const pageKey = Object.keys(compiledPageModules).find(
+    (k) => k.endsWith(`/${slug}.js`) || k.endsWith(`/${slug}/index.js`),
+  );
   if (pageKey) return compiledPageModules[pageKey]?.default ?? null;
 
   return null;

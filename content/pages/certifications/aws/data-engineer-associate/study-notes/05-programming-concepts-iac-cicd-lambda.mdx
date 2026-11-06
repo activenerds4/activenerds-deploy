@@ -1,0 +1,228 @@
+---
+title: "Module 05: Programming Concepts: Lambda, IaC (SAM, CDK, CloudFormation) & CI/CD"
+description: "Lambda concurrency and storage, SAM/CDK/CloudFormation, CodePipeline CI/CD, Git, testing, distributed computing, and data structures."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 5
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 1.4: Lambda configuration for concurrency and performance, languages and frameworks, software engineering practices (Git, testing, logging), IaC with CloudFormation, CDK, and SAM, CI/CD for data pipelines, mounting storage from Lambda, distributed computing, and data structures and algorithms (Skills 1.4.1–1.4.11).
+
+<Callout variant="info" title="Exam Blueprint Focus: Programming Concepts">
+The exam is **language-agnostic** (programming-language-specific syntax is explicitly out of scope). Expect questions on Lambda tuning, deploying pipelines repeatably, and recognizing concepts such as graphs, trees, and partitioned distributed processing.
+</Callout>
+
+---
+
+## 1. Lambda for Data Engineering (Skills 1.4.1, 1.4.2, 1.4.7)
+
+| Setting | Range / behavior | Data-engineering relevance |
+|---|---|---|
+| Memory | 128 MB – 10,240 MB; CPU scales proportionally | More memory often *reduces* cost by finishing faster |
+| Timeout | Up to 15 minutes | Longer jobs go to Glue/ECS/EMR |
+| Ephemeral storage (`/tmp`) | 512 MB – 10,240 MB | Staging files, unzip, temp Parquet |
+| Reserved concurrency | Guarantees and caps concurrency for a function | Protect a downstream DB; guarantee capacity |
+| Provisioned concurrency | Pre-initialized environments | Remove cold starts for latency-sensitive APIs |
+| Event source mapping (Kinesis, SQS, DynamoDB) | Batch size, batching window, parallelization factor, max concurrency (SQS) | Throughput vs ordering trade-offs |
+| Architecture | x86_64 or arm64 (Graviton) | arm64 is cheaper and often faster |
+| Layers / container images | Layers up to 5; images up to 10 GB | Package pandas, pyarrow, or custom libs |
+| **Amazon EFS mount** | Mount via VPC-attached function and access point | Shared large files/models; persistent storage beyond `/tmp` |
+| S3 access via SDK | Read/write objects with boto3 | Typical object I/O; stream large objects |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Lambda concurrency model and throttling">
+
+* **Concurrency** = in-flight invocations. Account default regional quota is 1,000 (can be raised). Throttled synchronous calls return 429; asynchronous invocations are retried (up to 6 hours) and can use DLQ/on-failure destinations.
+* **SQS source:** Lambda scales polling up to 1,000 concurrent batches by default; set **maximum concurrency** on the event source mapping (min 2) to protect downstream systems.
+* **Kinesis/DynamoDB Streams:** concurrency = shards × parallelization factor (1–10).
+* To avoid overwhelming an RDS database, use **RDS Proxy** and **reserved concurrency**.
+* **Optimizing runtime (Skill 1.4.1):** initialize SDK clients and connections outside the handler, reuse connections, batch records, stream data instead of loading entire objects, use compiled/columnar libs, tune memory with **AWS Lambda Power Tuning**.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Mounting EFS in Lambda (Skill 1.4.7)">
+
+1. Create an EFS file system and an **access point** (POSIX user, root directory).
+2. Attach the Lambda function to the **same VPC**, subnets, and a security group allowing NFS (TCP 2049).
+3. Configure the file system config: access point ARN and local mount path under `/mnt/` (for example `/mnt/data`).
+4. Grant the execution role `elasticfilesystem:ClientMount` (and `ClientWrite`).
+
+Use EFS when data exceeds `/tmp` or must be shared across invocations; otherwise prefer S3.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Languages and Software Engineering Practices (Skills 1.4.3, 1.4.4)
+
+* **Languages:** Python (PySpark, boto3, pandas), SQL (Athena, Redshift, Spark SQL), Scala/Java (Spark, Flink), R (analytics), Bash/PowerShell (CLI automation). Choose by ecosystem: Python/SQL dominate.
+* **Version control:** Git branching (feature branches, pull requests), tagging releases, storing pipeline code, SQL, and IaC together. (CodeCommit has been removed from the in-scope list; use any Git provider with CodePipeline integration, for example GitHub through CodeConnections.)
+* **Testing:** unit tests for transforms (pytest), integration tests in a staging account, data-contract and quality tests (Module 12), synthetic data.
+* **Logging and monitoring:** structured JSON logs to CloudWatch Logs, metrics, alarms (Module 11).
+* **Other good practices:** idempotent jobs, parameterization, secrets outside code, small modular functions.
+
+---
+
+## 3. Infrastructure as Code (Skills 1.4.5, 1.4.6, 1.4.8)
+
+| Tool | Abstraction | Language | Output | Use when |
+|---|---|---|---|---|
+| **AWS CloudFormation** | Declarative templates | JSON/YAML | Stacks, change sets, drift detection | Native, widely supported, baseline IaC |
+| **AWS CDK** | Imperative constructs | TypeScript, Python, Java, C#, Go | Synthesizes to CloudFormation | Developers; loops, reuse, higher-level constructs |
+| **AWS SAM** | CloudFormation extension for serverless | YAML (`Transform: AWS::Serverless-2016-10-31`) | Functions, APIs, state machines, tables | Packaging and deploying serverless data pipelines |
+
+```yaml
+# template.yaml (SAM): S3 event -> Lambda, plus DynamoDB table
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  RawBucket:
+    Type: AWS::S3::Bucket
+  Ingest:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      Runtime: python3.12
+      Architectures: [arm64]
+      MemorySize: 1024
+      Timeout: 300
+      Policies:
+        - S3ReadPolicy: { BucketName: !Ref RawBucket }
+        - DynamoDBCrudPolicy: { TableName: !Ref Audit }
+      Events:
+        Upload:
+          Type: S3
+          Properties: { Bucket: !Ref RawBucket, Events: s3:ObjectCreated:* }
+  Audit:
+    Type: AWS::Serverless::SimpleTable
+```
+
+```bash
+sam build && sam deploy --guided      # package, upload artifacts to S3, deploy a CloudFormation stack
+sam local invoke Ingest -e event.json # test locally
+cdk synth && cdk deploy               # CDK flow
+aws cloudformation deploy --template-file template.yaml --stack-name dea-pipeline --capabilities CAPABILITY_IAM
+```
+
+---
+
+## 4. CI/CD for Data Pipelines (Skill 1.4.9)
+
+```
+ Git push --> CodePipeline --> CodeBuild (lint, unit tests, sam build / cdk synth)
+                                   |
+                                   v
+                      Deploy to dev (CloudFormation / CodeDeploy)
+                                   |  integration + data quality tests
+                                   v
+                      Manual approval --> Deploy to prod (canary / linear Lambda alias shift)
+```
+
+* **CodePipeline** orchestrates stages; **CodeBuild** runs builds/tests (`buildspec.yml`); **CodeDeploy** shifts Lambda alias traffic (canary, linear, all-at-once) with automatic rollback on CloudWatch alarms.
+* **CloudFormation change sets** preview updates; **drift detection** finds manual changes.
+* Promote the same artifact across environments; keep environment config in parameters or Parameter Store.
+
+---
+
+## 5. Distributed Computing, Data Structures, and Algorithms (Skills 1.4.10, 1.4.11)
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Distributed computing concepts">
+
+* **Distributed computing:** splitting work across many nodes (Spark, Hadoop MapReduce, Flink). A **driver/coordinator** plans; **executors/workers** process **partitions** in parallel.
+* **Shuffle** (data movement between nodes for joins/group-bys) is the main cost; minimize with broadcast joins, partition-aware writes, and filtering early.
+* **Data locality**, **fault tolerance** (recompute lost partitions from lineage, checkpoints), **horizontal scaling**, **CAP trade-offs** in distributed stores.
+* **Skew** and **stragglers** limit speedup.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Data structures and algorithms">
+
+| Structure | Data-engineering use |
+|---|---|
+| **Tree** (B-tree, hierarchy) | Database indexes, directory/partition hierarchies, org/category trees, decision trees |
+| **Graph** | Relationships and lineage (Amazon Neptune), dependency DAGs in Airflow/Step Functions, network analysis |
+| **Hash table** | Partitioning by hash (Kinesis, DynamoDB), joins, deduplication |
+| **Queue / stack** | SQS-style buffering, processing order |
+| **Bloom filter** | Probabilistic membership (skip files in Parquet/ORC, join pruning) |
+| **Sorted structures / skip lists** | Sort keys, range queries |
+
+Algorithms: hashing, sorting/merge, **BFS/DFS** and **topological sort** for DAG dependency order, binary search, windowing.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 6. Common Traps and Watchouts
+
+* **"Deploy serverless pipeline repeatably"** → SAM or CDK/CloudFormation, not manual console clicks.
+* **"Developers prefer a programming language over YAML"** → CDK.
+* **Lambda `/tmp` too small** → raise ephemeral storage or mount EFS.
+* **Reserved concurrency of 0 effectively disables a function.**
+* **Lambda in a VPC needs NAT or VPC endpoints** to reach S3/Secrets Manager/internet.
+* **Dependency order in a pipeline is a DAG** (graph concept).
+* **Do not put secrets in templates or environment variables in plain text**; reference Secrets Manager or Parameter Store.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can tune a Lambda function for throughput and protect a downstream database.
+<details>
+<summary>Explanation</summary>
+
+Right-size memory (CPU scales with it), batch records, reuse connections, set reserved concurrency or SQS maximum concurrency, and put RDS Proxy in front of relational databases. Use on-failure destinations or DLQs for errors.
+
+</details>
+
+- [ ] I can distinguish CloudFormation, CDK, and SAM.
+<details>
+<summary>Explanation</summary>
+
+CloudFormation is the declarative engine. CDK lets you define infrastructure in a programming language and synthesizes to CloudFormation. SAM is a CloudFormation transform with shorthand resources for serverless apps and a CLI for build, local test, and deploy.
+
+</details>
+
+- [ ] I can describe a CI/CD pipeline for a data pipeline.
+<details>
+<summary>Explanation</summary>
+
+Source in Git → CodePipeline → CodeBuild (tests, build) → deploy via CloudFormation/SAM to dev → automated and data-quality tests → approval → prod with CodeDeploy canary/linear traffic shifting and rollback alarms.
+
+</details>
+
+- [ ] I can explain when to mount EFS in Lambda.
+<details>
+<summary>Explanation</summary>
+
+When you need shared or large persistent file storage beyond `/tmp` (up to 10 GB). Requires a VPC-attached function, an EFS access point, an NFS-allowing security group, and mount path under `/mnt`.
+
+</details>
+
+- [ ] I can connect graph and tree structures to data engineering tasks.
+<details>
+<summary>Explanation</summary>
+
+Graphs model relationships, lineage, and DAG dependencies (Neptune, Airflow). Trees model hierarchies and indexes (B-trees). Topological sort determines valid execution order in a DAG.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/04-pipeline-orchestration-step-functions-mwaa" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 04: Pipeline Orchestration: Step Functions, MWAA, Glue Workflows & Eventing
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/06-choosing-a-data-store" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 06: Choosing the Right Data Store & Migration Tools →
+  </a>
+</div>

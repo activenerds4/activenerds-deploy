@@ -1,0 +1,196 @@
+---
+title: "Module 15: Cost & Performance Optimization: Tokens, Caching, Throughput & Retrieval Tuning"
+description: "Token efficiency, tiered model selection, prompt and semantic caching, batching, latency tuning, and inference parameters (Tasks 4.1, 4.2)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 15
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 4.1 (Skills 4.1.1 - 4.1.4) and Task 4.2 (Skills 4.2.1 - 4.2.6): token efficiency, cost-aware model selection, throughput, caching, latency, retrieval tuning, and inference parameters.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 4 (12% of scored content)">
+Domain 4 trades off **cost, latency, and quality**. For each scenario identify the dominant cost driver (input tokens, output tokens, idle capacity, repeated work) and choose the technique that removes it: compression, caching, tiering, batching, or right-sizing.
+</Callout>
+
+---
+
+## 1. Token Efficiency (Skill 4.1.1)
+
+Cost is roughly (input tokens x input price) + (output tokens x output price). Output tokens are usually priced higher and drive latency.
+
+| Technique | Effect |
+|---|---|
+| Token estimation and tracking | Count before sending; record `usage` from each response; alarm on bursts |
+| Context window optimization | Include only necessary instructions, examples, and history |
+| Prompt compression | Remove redundancy; shorter system prompts; summarize long documents |
+| Context pruning | Retrieve fewer, better chunks (rerank, lower top-k); drop stale history |
+| Response limiting | Set `maxTokens`, request concise formats, use stop sequences |
+| Structured output | JSON with short keys over verbose prose |
+
+```python
+usage = resp["usage"]   # inputTokens, outputTokens, totalTokens
+cw.put_metric_data(Namespace="GenAI/App", MetricData=[
+  {"MetricName": "InputTokens", "Value": usage["inputTokens"], "Unit": "Count",
+   "Dimensions": [{"Name": "Feature", "Value": "support-bot"}]},
+  {"MetricName": "OutputTokens", "Value": usage["outputTokens"], "Unit": "Count",
+   "Dimensions": [{"Name": "Feature", "Value": "support-bot"}]}])
+```
+
+---
+
+## 2. Cost-Effective Model Selection (Skill 4.1.2)
+
+| Framework element | Detail |
+|---|---|
+| Cost-capability trade-off | Evaluate candidates on your golden dataset; compute quality per dollar |
+| **Tiered FM usage** | Small model for simple queries; larger model only for complex ones |
+| Price-to-performance ratio | Cost per successful task, not cost per token |
+| Latency-cost-quality balance | Pick the cheapest model that meets the quality and latency SLA |
+| Efficient inference patterns | Batch inference, prompt routing, distilled models |
+
+Bedrock options: **Intelligent Prompt Routing** (managed routing within a model family), **batch inference** (discounted asynchronous), **model distillation** (a smaller student model learns from a larger teacher on your task), and on-demand versus provisioned.
+
+---
+
+## 3. High-Performance Systems and Throughput (Skills 4.1.3, 4.2.3, 4.2.5)
+
+| Concern | Technique |
+|---|---|
+| Resource utilization | Utilization monitoring; right-size provisioned model units; avoid idle capacity |
+| Capacity planning | Estimate requests per minute x tokens per request; compare with quotas (tokens-per-minute and requests-per-minute) |
+| Batching | Bedrock batch inference for non-interactive; application-side micro-batching of embedding calls |
+| Auto-scaling | Scale SageMaker endpoints on concurrency or queue depth; Lambda concurrency controls; ECS/Fargate scaling |
+| Concurrency management | Limit parallel model calls to stay under quotas; queue with SQS and bounded worker concurrency |
+| Quota awareness | Request Service Quotas increases ahead of launches |
+
+```
+Peak planning example:
+ 200 req/min x (1,500 in + 400 out tokens) = 300,000 input TPM, 80,000 output TPM
+ Compare with model quotas (note: some models count output tokens with a burn-down multiplier)
+ --> request increase, add cross-Region inference, or buy provisioned throughput
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Provisioned throughput utilization math">
+
+A model unit delivers a fixed rate of input and output tokens per minute for a given model. Hourly cost is constant regardless of use, so utilization determines effective price per token. If steady demand fills most of a model unit, the effective per-token cost can beat on-demand and you gain guaranteed capacity. If average utilization is low and peaks are short, on-demand (possibly with cross-Region inference for bursts) is cheaper. Monitor invocations and token counts against provisioned capacity, and right-size units or terminate commitments that are not earning their keep.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Intelligent Caching (Skill 4.1.4)
+
+| Cache type | What it avoids | Implementation |
+|---|---|---|
+| **Prompt caching (Bedrock)** | Reprocessing a long, repeated prompt prefix | Mark `cachePoint` after stable content (system prompt, documents); cached tokens are cheaper and faster on cache hits, within a short time-to-live |
+| **Exact / deterministic request hashing** | Calling the FM for identical requests | Hash model + params + prompt; store response in ElastiCache or DynamoDB |
+| **Semantic caching** | Repeated questions phrased differently | Embed the query; vector similarity search in a cache (ElastiCache with vector search, OpenSearch); return cached answer above a threshold |
+| **Edge caching** | Origin calls for cacheable responses | CloudFront in front of APIs for public, non-personalized content |
+| **Result fingerprinting** | Recomputing derived results | Key by content hash |
+| Pre-computation | Latency on predictable queries | Generate answers in advance (EventBridge Scheduler plus batch) |
+
+```python
+messages = [{"role": "user", "content": [
+    {"text": LONG_REFERENCE_DOCUMENT},
+    {"cachePoint": {"type": "default"}},          # everything above is cacheable
+    {"text": user_question}]}]                     # varies per request
+```
+
+<Callout variant="warning" title="Exam Trap: Caching and correctness">
+Never cache personalized or permission-scoped answers in a shared cache without keying by user or role. Choose similarity thresholds carefully; too low returns wrong answers. Set TTLs so changed source data does not leave stale cached responses.
+</Callout>
+
+---
+
+## 5. Latency and Performance (Skills 4.2.1, 4.2.2, 4.2.4, 4.2.6)
+
+| Area | Techniques |
+|---|---|
+| Responsiveness | Response streaming; latency-optimized Bedrock models or inference options for time-sensitive paths; pre-computation; parallel requests for independent sub-tasks (Step Functions Map, `asyncio`) |
+| Retrieval speed | Index tuning (HNSW parameters, shard layout), smaller embedding dimensions, query preprocessing, hybrid search with custom scoring, filter-aware search |
+| Model parameters | Lower `temperature` for deterministic tasks; `topP` or top-k to control diversity; `maxTokens` to bound cost; stop sequences |
+| A/B testing | Compare parameter and prompt variants on quality, latency, cost |
+| Profiling | Measure prompt-completion token patterns, time to first token, retrieval latency, and per-hop latency with X-Ray |
+| Efficient communication | Connection reuse, keep-alive clients outside the Lambda handler, VPC endpoints, avoid chatty service calls |
+
+| Parameter | Lower value | Higher value |
+|---|---|---|
+| `temperature` | More deterministic, factual | More varied, creative |
+| `topP` | Narrower token pool | Broader pool |
+| `maxTokens` | Cheaper, may truncate | More complete, costlier |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Where latency hides in a RAG request">
+
+A typical RAG request includes: query rewriting (an FM call), embedding the query, vector search with filters, optional reranking, prompt assembly, the generation call (time to first token plus output length), and guardrail evaluation. Profile each stage. Common wins: skip rewriting for simple queries, reduce candidate counts before reranking, cache embeddings of frequent queries, stream the final generation, run independent steps in parallel, and use a smaller model for rewriting or classification stages.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 6. Exam Traps & Common Distractors
+
+- **Trap 1:** Choosing the largest model "for quality" when a cascade meets the SLA at far lower cost.
+- **Trap 2:** Buying Provisioned Throughput for low utilization.
+- **Trap 3:** Increasing `maxTokens` to fix truncated answers without considering cost and latency.
+- **Trap 4:** Semantic caching on personalized data without key isolation.
+- **Trap 5:** Over-retrieving (top-k too high) and paying for irrelevant context tokens.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can identify the dominant cost driver and match a technique.
+<details>
+<summary>Explanation</summary>
+
+Large repeated prefix: prompt caching. Repeated identical or similar questions: exact or semantic caching. Simple queries on a big model: tiering or routing. Idle capacity: right-size or switch to on-demand. Offline workloads: batch inference. Verbose outputs: response limits and structured formats.
+
+</details>
+
+- [ ] I can compare prompt caching, request hashing, and semantic caching.
+<details>
+<summary>Explanation</summary>
+
+Prompt caching saves repeated prefix processing within the same model call path. Request hashing returns stored responses for byte-identical requests. Semantic caching matches similar queries by embedding similarity, giving higher hit rates but risking incorrect matches, so it needs thresholds and isolation.
+
+</details>
+
+- [ ] I can do basic capacity planning for token throughput.
+<details>
+<summary>Explanation</summary>
+
+Multiply request rate by average input and output tokens to get tokens per minute, compare with quotas, and then choose quota increases, cross-Region inference, queue-based smoothing, or provisioned throughput depending on predictability and utilization.
+
+</details>
+
+- [ ] I can pick inference parameters for a use case.
+<details>
+<summary>Explanation</summary>
+
+Use low temperature for extraction, classification, and factual Q&A; moderate to high for brainstorming. Bound `maxTokens` to control cost. Validate choices with A/B tests measuring quality, latency, and cost.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/14-governance-compliance-responsible-ai" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 14: Governance, Compliance & Responsible AI
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/16-monitoring-observability-genai" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 16: Monitoring & Observability for GenAI Applications →
+  </a>
+</div>

@@ -1,0 +1,155 @@
+---
+title: "Module 10: Systems Manager Operations & Event-Driven Automation"
+description: "Run Command, Session Manager, Patch Manager, State Manager, Parameter Store, S3 event notifications, Lambda triggers, and Step Functions."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 10
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 3.2 (Skills 3.2.1–3.2.2): Systems Manager operations and event-driven automation with Lambda, S3 Event Notifications, EventBridge, and Step Functions.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 3.2 (Domain 3, 22%)">
+Skill 3.2.2 now explicitly includes **EventBridge** and **AWS DevOps Agent**. Systems Manager appears across domains (Modules 01, 02, 12 as well); this module covers the operations capabilities.
+</Callout>
+
+---
+
+## 1. Systems Manager Capabilities
+
+| Capability | What it does | Exam hook |
+|---|---|---|
+| **Run Command** | Execute documents on many instances by tag, no SSH | Rate controls, output to S3/CloudWatch |
+| **Session Manager** | Shell without SSH keys, bastions or open port 22 | IAM-controlled, session logs to S3/CloudWatch Logs, audited in CloudTrail |
+| **Patch Manager** | Patch baselines, patch groups (tag `Patch Group`), `AWS-RunPatchBaseline` Scan or Install | Run in a **maintenance window** |
+| **State Manager** | Associations enforce desired state on a schedule | Keep agent installed, config applied |
+| **Inventory** | Collect software/config metadata | Compliance reporting |
+| **Parameter Store** | Hierarchical config and secrets | Standard (4 KB) and Advanced (8 KB); `SecureString` uses KMS |
+| **Maintenance Windows** | Scheduled tasks with targets | Patching, AMI creation |
+| **Automation** | Runbooks (Module 02) | Remediation and orchestration |
+| Fleet Manager / hybrid | Manage on-premises servers through **hybrid activations** (managed instance IDs start with `mi-`) | Same tooling for hybrid |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why an instance does not appear as a managed node">
+
+Checklist, in order:
+
+1. **SSM Agent** installed and running (preinstalled on Amazon Linux and recent Windows/Ubuntu AMIs).
+2. **Instance profile** with `AmazonSSMManagedInstanceCore` (or equivalent) attached; role changes can take minutes to be picked up.
+3. **Network path** to the `ssm`, `ssmmessages`, and `ec2messages` endpoints: internet/NAT or **three interface VPC endpoints** (plus S3 gateway endpoint for some documents) with security groups allowing 443 from the instance.
+4. DNS: private DNS enabled on endpoints.
+5. For hybrid servers: activation code and ID, and role for the managed instance.
+6. Instance metadata service issues, agent version, or proxy settings.
+
+</AccordionItem>
+</AccordionGroup>
+
+```bash
+aws ssm send-command --document-name AWS-RunShellScript \
+  --targets Key=tag:Role,Values=web \
+  --parameters 'commands=["systemctl restart nginx"]' \
+  --max-concurrency 20% --max-errors 1
+
+aws ssm start-session --target i-0abc1234567890def
+
+aws ssm put-parameter --name /prod/app/dbhost --type String --value db.internal
+aws ssm get-parameter --name /prod/app/dbpass --with-decryption
+```
+
+**Patching flow:**
+
+```
+ Patch baseline (rules, approval delay) --> Patch group (tag) --> Maintenance window
+        --> AWS-RunPatchBaseline (Install) --> Compliance report in Patch Manager / Config
+```
+
+---
+
+## 2. Event-Driven Automation
+
+| Source | Mechanism | Targets |
+|---|---|---|
+| **S3 Event Notifications** | Object created/removed/restored/replication events | Lambda, SQS, SNS, or EventBridge (all event types, rich filtering) |
+| **EventBridge** | AWS service events, schedules, custom events | Lambda, Step Functions, SSM Automation, SQS/SNS, others |
+| **SQS / SNS** | Queue and fan-out | Lambda event source mapping, subscribers |
+| **CloudWatch alarms / Logs** | Metric breach, subscription filters | SNS, EventBridge, Lambda |
+
+* S3 notifications need a **destination permission**: Lambda resource policy for `s3.amazonaws.com` scoped by bucket ARN and account; SNS/SQS access policies likewise. Overlapping prefix/suffix filters on the same event type are rejected. Delivery is at-least-once, so make handlers **idempotent**.
+* **Lambda**: timeout up to 15 minutes, memory/CPU, **retries** (async: 2 by default), **DLQ or on-failure destinations**; SQS event source mappings use visibility timeout greater than function timeout and a DLQ on the queue.
+* **Step Functions** orchestrate multi-step workflows with retries, catch, parallel and wait states; Standard (up to one year, exactly-once) versus Express (high volume, up to 5 minutes).
+
+```
+ S3 upload --> S3 Event --> EventBridge rule (suffix .csv) --> Step Functions
+                                                                |-- Lambda: validate
+                                                                |-- Lambda: transform --> DynamoDB
+                                                                '-- Catch --> SNS alert
+```
+
+<Callout variant="tip" title="AWS DevOps Agent">
+Skill 3.2.2 lists AWS DevOps Agent next to Lambda and EventBridge as an automation aid. Treat it as an AI-assisted operations service that can investigate incidents and suggest or drive remediation; confirm the current feature set in AWS documentation since it is newly listed.
+</Callout>
+
+---
+
+## 3. Exam Traps & Common Distractors
+
+- **Trap 1:** Opening SSH/RDP and bastion hosts when **Session Manager** meets the requirement with less exposure.
+- **Trap 2:** Cron on an EC2 instance rather than EventBridge Scheduler or maintenance windows.
+- **Trap 3:** S3 to Lambda failing silently because the **Lambda resource policy** is missing.
+- **Trap 4:** Processing duplicates when events are delivered more than once. Design for idempotency.
+- **Trap 5:** Storing secrets as plain `String` parameters rather than `SecureString` (or Secrets Manager).
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can patch a fleet on a schedule and prove compliance.
+<details>
+<summary>Explanation</summary>
+
+Define a patch baseline, tag instances into a patch group, create a maintenance window that runs `AWS-RunPatchBaseline` with Install. Review compliance in Patch Manager or Explorer, and report non-compliance through Config.
+
+</details>
+
+- [ ] I can give admins shell access to private instances with no inbound ports.
+<details>
+<summary>Explanation</summary>
+
+Use Session Manager: instances need the SSM agent, instance profile, and a path to the Systems Manager endpoints (NAT or VPC endpoints). Control access with IAM and log sessions to S3 or CloudWatch Logs.
+
+</details>
+
+- [ ] I can troubleshoot an S3-triggered Lambda that never runs.
+<details>
+<summary>Explanation</summary>
+
+Verify the notification configuration exists on the bucket (same Region), the Lambda resource policy allows S3 (`lambda:InvokeFunction` with source ARN), filters match the key, and function errors/throttles in CloudWatch. Consider EventBridge for advanced filtering.
+
+</details>
+
+- [ ] I know when to prefer Step Functions over chained Lambdas.
+<details>
+<summary>Explanation</summary>
+
+When you need orchestration with retries, error handling, branching, waiting, or long-running workflows with visible state; chained Lambdas hide failures and tightly couple functions.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/09-amis-image-builder-and-deployment-strategies" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 09: AMIs, EC2 Image Builder, Deployment Strategies & Terraform
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/11-iam-access-and-multi-account-governance" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 11: IAM, Access Troubleshooting & Multi-Account Governance →
+  </a>
+</div>

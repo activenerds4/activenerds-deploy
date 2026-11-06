@@ -1,5 +1,100 @@
 [
   {
+    "slug": "eks-auto-mode-gateway-api-setup-migration",
+    "title": "EKS Auto Mode Meets Gateway API: A Practical Setup and Migration Guide",
+    "description": "Amazon EKS Auto Mode now natively supports the Kubernetes Gateway API. Learn how to configure managed Gateways, deploy HTTPRoutes, and migrate legacy Ingress resources with zero downtime.",
+    "date": "2026-11-04",
+    "category": "containers-kubernetes",
+    "tags": [
+      "aws",
+      "eks",
+      "gateway-api",
+      "kubernetes",
+      "networking"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/eks-auto-mode-gateway-api-setup-migration"
+  },
+  {
+    "slug": "ergonomic-setups-desk-workers-cochrane-evidence",
+    "title": "Do Ergonomic Setups Actually Work? What the New Cochrane Evidence Says for Desk Workers",
+    "description": "A deep dive into the updated Cochrane systematic review on workplace ergonomic adaptations: what the clinical evidence says about ergonomic chairs, split keyboards, standing desks, and arm/neck pain.",
+    "date": "2026-11-04",
+    "category": "fitness-wellness-tech",
+    "tags": [
+      "ergonomics",
+      "desk-setup",
+      "wellness",
+      "productivity",
+      "remote-work"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/ergonomic-setups-desk-workers-cochrane-evidence"
+  },
+  {
+    "slug": "github-npm-package-firewall-setup-guide",
+    "title": "GitHub's npm Package Firewall: How to Block Malicious Packages Before They Install",
+    "description": "How to enable and configure GitHub's npm Package Firewall to intercept trojanized and malicious open-source packages at install time, before they reach CI runners or developer machines.",
+    "date": "2026-11-03",
+    "category": "devsecops-security",
+    "tags": [
+      "npm",
+      "supply-chain",
+      "github",
+      "devsecops",
+      "security"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/github-npm-package-firewall-setup-guide"
+  },
+  {
+    "slug": "kubernetes-1-37-deprecations-ipvs-kubedns-migration",
+    "title": "Kubernetes 1.37 Deprecations: Migrating Off IPVS, KubeDNS, and Removed kubectl Flags",
+    "description": "A technical migration guide for Kubernetes 1.37 deprecations and removals, covering the transition from IPVS to nftables in kube-proxy, retiring legacy KubeDNS, and updating automated kubectl scripts.",
+    "date": "2026-11-03",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes",
+      "devops",
+      "networking",
+      "nftables",
+      "coredns"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/kubernetes-1-37-deprecations-ipvs-kubedns-migration"
+  },
+  {
+    "slug": "verify-k8s-images-slsa-verification-summaries",
+    "title": "One Signed Answer: How to Verify registry.k8s.io Images with the New SLSA Summaries",
+    "description": "How to use the newly published SLSA verification summaries on registry.k8s.io to cryptographically verify official Kubernetes container images in CI/CD and admission controllers.",
+    "date": "2026-11-02",
+    "category": "containers-kubernetes",
+    "tags": [
+      "kubernetes",
+      "cosign",
+      "supply-chain",
+      "slsa",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/verify-k8s-images-slsa-verification-summaries"
+  },
+  {
+    "slug": "litellm-supply-chain-compromise-credential-rotation",
+    "title": "LiteLLM 1.107.0 Supply Chain Attack: How to Check Your Stack and Rotate Credentials",
+    "description": "Analysis of the LiteLLM 1.107.0 supply chain compromise via Python startup hooks, how to check if your AI gateway was affected, and a step-by-step credential rotation checklist.",
+    "date": "2026-11-01",
+    "category": "devsecops-security",
+    "tags": [
+      "ai-security",
+      "supply-chain",
+      "python",
+      "devsecops"
+    ],
+    "author": "activenerds-team",
+    "url": "/blog/litellm-supply-chain-compromise-credential-rotation"
+  },
+  {
     "slug": "deep-work-environment-setup",
     "title": "Deep Work Environment Setup",
     "description": "Set up an environment for deep work — noise, lighting, notification isolation, and the physical cues that signal focus time.",

@@ -1,0 +1,149 @@
+---
+title: "Module 15: Route 53, CloudFront, Global Accelerator & Network Protection"
+description: "Routing policies, Resolver endpoints, query logging, CloudFront origins and caching, Global Accelerator, WAF, Shield, Network Firewall, DNS Firewall."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 15
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 5.2 (Skills 5.2.1–5.2.3): DNS configuration with Route 53 and Resolver, routing policies and query logging, and content distribution with CloudFront and Global Accelerator.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 5.2 (Domain 5, 18%)">
+SOA-C03 **removed S3 static website hosting** from Task 5.2. Focus on routing policy selection, hybrid DNS with Resolver endpoints, and CloudFront versus Global Accelerator.
+</Callout>
+
+---
+
+## 1. Route 53 Records and Routing Policies
+
+* **Alias vs CNAME:** alias records point to AWS resources (ELB, CloudFront, S3 website, API Gateway, other records), work at the **zone apex**, are **free to query**, and have no TTL of their own. CNAME cannot be used at the apex.
+
+| Policy | Behavior | Use |
+|---|---|---|
+| Simple | One record, may return multiple values | Single resource |
+| **Weighted** | Proportions | Canary, blue/green, A/B |
+| **Latency** | Lowest latency Region | Multi-Region performance |
+| **Failover** | Primary/secondary with health check | Active/passive |
+| **Geolocation** | By user country/continent/state | Compliance, localization, with a default record |
+| **Geoproximity** | By distance with bias | Shift traffic toward Regions |
+| **IP-based** | By client CIDR | ISP/network specific routing |
+| **Multivalue answer** | Up to 8 healthy records | Simple client-side balancing with health checks |
+
+**Query logging:** public hosted zone logs go to **CloudWatch Logs in us-east-1**. **Resolver query logging** (VPC DNS queries) goes to CloudWatch Logs, S3, or Firehose.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Route 53 Resolver and hybrid DNS">
+
+* Every VPC has the Amazon-provided resolver (VPC base address plus 2). Private hosted zones are visible only to associated VPCs.
+* **Inbound endpoint:** on-premises DNS forwards queries **into** AWS (ENIs with IPs in your subnets) so on-premises can resolve private hosted zones.
+* **Outbound endpoint + forwarding rules:** VPC queries for a domain (for example `corp.example.com`) are forwarded **out** to on-premises resolvers. Rules can be shared with **AWS RAM**.
+* Use at least two ENIs in different AZs per endpoint; security groups must allow DNS (TCP/UDP 53).
+* **DNS Firewall** rule groups filter outbound DNS from VPCs (Module 14).
+* Typical failure: endpoints work but queries fail because the on-premises firewall or VPN route does not allow 53, or private DNS settings (`enableDnsSupport`/`enableDnsHostnames`) are off.
+
+</AccordionItem>
+</AccordionGroup>
+
+```bash
+aws route53 change-resource-record-sets --hosted-zone-id Z123 --change-batch '{
+  "Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"app.example.com","Type":"A",
+  "SetIdentifier":"primary","Failover":"PRIMARY","HealthCheckId":"abcd-1234",
+  "AliasTarget":{"HostedZoneId":"Z35SXDOTRQ7X7K","DNSName":"my-alb-123.us-east-1.elb.amazonaws.com","EvaluateTargetHealth":true}}}]}'
+```
+
+---
+
+## 2. CloudFront
+
+| Element | Detail |
+|---|---|
+| Origins | S3 (use **Origin Access Control**, bucket private), ALB/EC2/custom HTTP, MediaStore and others; **origin groups** for failover |
+| Behaviors | Path patterns map to origins and caching rules |
+| **Cache policy** | TTL (min/default/max), cache key (headers, cookies, query strings) |
+| **Origin request policy** | What is forwarded to the origin without being part of the cache key |
+| Invalidation | Remove cached objects early (cost beyond monthly free paths); prefer **versioned file names** |
+| Security | HTTPS (ACM cert in **us-east-1**), **signed URLs/cookies**, geo restriction, **AWS WAF**, field-level encryption |
+| Compute | CloudFront Functions (lightweight viewer events), Lambda@Edge |
+| Origin Shield | Extra caching layer to reduce origin load |
+
+```
+ Viewer --> Edge location (cache) --(miss)--> Regional edge cache --(miss)--> Origin Shield --> Origin (S3/ALB)
+```
+
+## 3. AWS Global Accelerator
+
+* Provides **two static anycast IPs**, routes over the AWS global network to the optimal healthy endpoint (ALB, NLB, EC2, Elastic IP) with **health checks** and **traffic dials** for Regional shifting.
+* Supports **TCP and UDP**, non-HTTP and gaming/VoIP, static IP allowlisting, fast failover without DNS TTL waits.
+
+| Need | CloudFront | Global Accelerator |
+|---|---|---|
+| Cache static/dynamic HTTP content | Yes | No caching |
+| Static IPs for allowlists | No (changing IPs) | Yes |
+| Non-HTTP protocols (UDP, TCP games) | No | Yes |
+| Instant regional failover without DNS caching | Limited | Yes |
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** CNAME at the zone apex. Use an **alias** record.
+- **Trap 2:** Geolocation vs latency routing: compliance-based location versus performance-based.
+- **Trap 3:** Setting up public hosted zone query logging in a Region other than **us-east-1**.
+- **Trap 4:** Using CloudFront for static IP allowlisting or UDP traffic (Global Accelerator).
+- **Trap 5:** Invalidating constantly instead of versioning object names.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can let on-premises servers resolve private hosted zone names and vice versa.
+<details>
+<summary>Explanation</summary>
+
+Inbound Resolver endpoint for on-premises to AWS queries (point corporate DNS conditional forwarders to its IPs); outbound endpoint with a forwarding rule for the corporate domain for AWS to on-premises queries. Ensure routes and firewalls allow port 53 over the VPN/Direct Connect path.
+
+</details>
+
+- [ ] I can pick a routing policy for user-nearest Region with failover.
+<details>
+<summary>Explanation</summary>
+
+Latency routing records with health checks per Region (unhealthy Regions drop out). Combine with failover or alias records evaluating target health when a standby exists.
+
+</details>
+
+- [ ] I can restrict S3 content to CloudFront only.
+<details>
+<summary>Explanation</summary>
+
+Keep the bucket private, use Origin Access Control, and add a bucket policy allowing the CloudFront service principal conditioned on the distribution ARN. Add signed URLs for per-user access.
+
+</details>
+
+- [ ] I know when Global Accelerator beats CloudFront.
+<details>
+<summary>Explanation</summary>
+
+Non-HTTP TCP/UDP workloads, requirements for fixed IP addresses, and fast Regional failover without DNS caching. CloudFront remains the answer for caching and web content delivery.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/14-vpc-design-and-private-connectivity" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 14: VPC Design, Gateways & Private Connectivity
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/16-network-troubleshooting-and-monitoring" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 16: Network Troubleshooting, Logs & CloudWatch Network Monitoring →
+  </a>
+</div>

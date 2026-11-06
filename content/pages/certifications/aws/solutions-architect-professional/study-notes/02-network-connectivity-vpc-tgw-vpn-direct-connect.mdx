@@ -1,0 +1,173 @@
+---
+title: "Module 02: Network Connectivity: VPC Peering, Transit Gateway, VPN & Direct Connect"
+description: "Multi-VPC and hybrid topologies, transitive routing, Direct Connect virtual interfaces and resiliency models, VPN throughput and accelerated VPN."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 2
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Multi-VPC and hybrid topologies, transitive routing, Direct Connect virtual interfaces and resiliency models, VPN throughput and accelerated VPN.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 1.1 Network Connectivity Strategies">
+Expect scenarios with dozens of VPCs, multiple Regions, overlapping CIDRs, on-premises data centers and strict bandwidth or latency requirements. The tested skill is choosing between VPC peering, Transit Gateway, PrivateLink, VPN and Direct Connect, and knowing each one's limits (transitivity, throughput, encryption, resiliency).
+</Callout>
+
+---
+
+## 1. Connectivity Options Compared
+
+| Option | Transitive? | Overlapping CIDRs? | Scale | Bandwidth | Exam nuance |
+|---|---|---|---|---|---|
+| VPC peering | No | Not allowed | Point-to-point mesh (n(n-1)/2) | No aggregate cap, no gateway bottleneck | Cheapest for few VPCs; works cross-account and cross-Region |
+| Transit Gateway (TGW) | Yes (hub and spoke) | Not routable | Thousands of attachments | Per-VPC-attachment burst, ECMP for VPN | Needed for many VPCs, centralized inspection, hybrid hub |
+| PrivateLink (endpoint service) | n/a (service-level) | Allowed | Per service | NLB/GWLB scale | Expose one service, not the whole network |
+| Site-to-Site VPN | Via TGW or VGW | Not routable | 2 tunnels per connection | 1.25 Gbps per tunnel | Encrypted, fast to set up, over the internet |
+| Direct Connect (DX) | Via DX gateway / TGW | Not routable | Dedicated or hosted | 1/10/100 Gbps dedicated; 50 Mbps to 25 Gbps hosted | Not encrypted by default, consistent latency, weeks to provision |
+
+<Callout variant="warning" title="Exam Trap: Overlapping CIDRs">
+If two networks have overlapping CIDR blocks, peering and TGW cannot route between them. The correct pattern is PrivateLink (expose a service through an NLB and consume it via an interface endpoint) or a NAT/translation layer, not peering.
+</Callout>
+
+## 2. Transit Gateway Architecture
+
+```
+          On-premises DC
+               |  (Site-to-Site VPN / Direct Connect transit VIF)
+               v
+        +-------------------+
+        |  Transit Gateway  |<------ inter-Region peering ------> TGW (Region B)
+        +--+-----+------+---+
+           |     |      |
+      VPC A   VPC B   Shared Services / Inspection VPC
+```
+
+Key mechanics:
+- **Attachments:** VPC, VPN, Direct Connect gateway, TGW peering, TGW Connect (GRE and BGP for SD-WAN appliances).
+- **Route tables:** each attachment is *associated* with exactly one TGW route table (controls where its traffic goes) and can *propagate* its routes into one or more route tables (controls who can reach it).
+- **Segmentation:** use separate route tables (for example prod vs dev) so spokes cannot reach each other. This is the exam's answer to "isolate environments while sharing on-premises connectivity."
+- **Appliance mode:** enable on the inspection VPC attachment to keep flows symmetric through the same AZ for stateful firewalls.
+- **ECMP:** TGW supports equal-cost multipath across multiple VPN connections to scale beyond 1.25 Gbps per tunnel. A virtual private gateway does not.
+- **Sharing:** share the TGW with other accounts using AWS RAM; spoke accounts create their own attachments.
+- **Inter-Region peering:** static routes only (no route propagation across peering attachments), traffic stays on the AWS backbone.
+
+```bash
+aws ec2 create-transit-gateway --description "org-hub" \
+  --options AmazonSideAsn=64512,DefaultRouteTableAssociation=disable,DefaultRouteTablePropagation=disable
+aws ec2 create-transit-gateway-vpc-attachment --transit-gateway-id tgw-0abc \
+  --vpc-id vpc-0123 --subnet-ids subnet-a subnet-b
+aws ec2 associate-transit-gateway-route-table --transit-gateway-route-table-id tgw-rtb-prod \
+  --transit-gateway-attachment-id tgw-attach-0123
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why Peering Is Not Transitive (Edge-to-Edge Routing)">
+
+VPC peering routes only traffic whose source and destination are within the two peered VPCs. If VPC A peers with B and B peers with C, A cannot reach C through B. Likewise, A cannot use B's internet gateway, NAT gateway, VPN, Direct Connect or gateway endpoint ("edge-to-edge routing" is not supported). Solutions: TGW, a full mesh of peerings, or a proxy/appliance in B.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 3. AWS Direct Connect in Depth
+
+**Virtual interfaces (VIFs):**
+
+| VIF | Reaches | Notes |
+|---|---|---|
+| Private VIF | One VPC through a virtual private gateway, or many VPCs via a Direct Connect gateway | Direct Connect gateway is global and lets one connection reach VPCs in multiple Regions (but no VPC-to-VPC transit through it) |
+| Public VIF | AWS public endpoints (S3, DynamoDB, public service IPs) | Use for VPN over public VIF to get encryption |
+| Transit VIF | Transit Gateway via a Direct Connect gateway | Required for the DX-to-TGW hub pattern; hosted connections do not support transit VIFs on all sizes, so check the capacity |
+
+**Resiliency models (AWS Direct Connect Resiliency Toolkit):**
+
+| Model | Design | Protects against |
+|---|---|---|
+| Maximum resiliency | Two connections at each of two or more DX locations (4 total) with separate devices | Device, connection and whole-location failure |
+| High resiliency | One connection at each of two locations | Connection and location failure |
+| Development/test | Single connection | Nothing |
+
+**Encryption:** DX is private but not encrypted. Options: MACsec (on supported dedicated 10/100 Gbps connections, layer 2), IPsec VPN over a public VIF (or over a private IP VPN to TGW), or application-layer TLS.
+
+**Common design: DX primary with VPN backup.** Configure both to the same TGW or VGW; BGP prefers DX when you advertise with a shorter AS path or higher local preference, and fails over to VPN automatically.
+
+```bash
+aws directconnect create-direct-connect-gateway --direct-connect-gateway-name org-dxgw --amazon-side-asn 64513
+aws directconnect create-transit-virtual-interface --connection-id dxcon-abc \
+  --new-transit-virtual-interface virtualInterfaceName=transit1,vlan=101,asn=65000,directConnectGatewayId=dxgw-123
+```
+
+## 4. Site-to-Site VPN
+
+- Each connection has **two tunnels** in two AZs. Configure both on the customer device for redundancy; use BGP (dynamic) over static routes where possible.
+- **Throughput:** 1.25 Gbps per tunnel. To exceed it, terminate multiple VPN connections on a **Transit Gateway** with ECMP.
+- **Accelerated Site-to-Site VPN:** routes traffic to the nearest AWS edge location over AWS Global Accelerator for better, more consistent performance (requires TGW termination, not VGW).
+- **Private IP VPN:** IPsec over Direct Connect using private IPs (via a transit VIF), giving encryption without public IP space.
+- **Client VPN:** managed OpenVPN-based remote access for individuals, not site-to-site.
+
+## 5. Selecting Regions and Availability Zones for Network Needs
+
+- Latency-sensitive tiers: co-locate in the same Region and, for tightly coupled HPC, the same AZ with a cluster placement group.
+- Data residency: pick Regions per regulation; use SCPs to deny other Regions (Module 04).
+- DX locations: choose a location that physically connects to the target Region, and note that a DX gateway can then reach other Regions' VPCs.
+- AZ names (us-east-1a) are mapped per account; use **AZ IDs** (use1-az1) when coordinating across accounts (for example with RAM-shared subnets).
+
+## 6. Common Traps & Distractors
+
+- "Many VPCs need to reach on-premises and each other": Transit Gateway, not mesh peering and not multiple VGWs.
+- "Need encryption over Direct Connect": add VPN over DX or MACsec, DX alone is insufficient.
+- "More than 1.25 Gbps over VPN": TGW with ECMP across multiple tunnels, not a VGW.
+- "Connect VPCs across Regions with lowest operational effort": inter-Region TGW peering (or inter-Region VPC peering for two VPCs).
+- "Quickest connectivity to AWS while DX is being provisioned": Site-to-Site VPN.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can pick between peering and Transit Gateway for a given VPC count and requirement.
+<details>
+<summary>Explanation</summary>
+
+Peering is the cheapest and lowest-latency choice for a small number of VPCs with no transit requirement. Once VPC count grows, or you need centralized egress/inspection, on-premises sharing, or segmented route tables, Transit Gateway is the managed hub. Mesh peering scales as n(n-1)/2 connections and every route table must be updated.
+
+</details>
+
+- [ ] I can design an isolated prod/dev network that shares one VPN to on-premises.
+<details>
+<summary>Explanation</summary>
+
+Attach all VPCs and the VPN to one TGW, but associate prod and dev attachments with different TGW route tables. Propagate the VPN routes into both, and propagate each VPC only into the table where it should be reachable. Prod and dev then both reach on-premises but not each other.
+
+</details>
+
+- [ ] I can explain Direct Connect maximum resiliency and why a single DX is a risk.
+<details>
+<summary>Explanation</summary>
+
+Maximum resiliency uses separate connections terminating on separate devices at two or more DX locations (four connections total). It survives device, connection and location outages. A single connection is a single point of failure and typically needs a VPN backup.
+
+</details>
+
+- [ ] I know what to do when two VPCs have overlapping CIDRs but must communicate.
+<details>
+<summary>Explanation</summary>
+
+Do not use peering or TGW. Expose the provider workload through an NLB-backed PrivateLink endpoint service and consume it with an interface endpoint in the consumer VPC; address overlap does not matter because traffic is service-level through ENIs in the consumer's own address space.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/01-exam-blueprint-strategy-well-architected" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 01: Exam Blueprint, Strategy & the Well-Architected Mindset
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/03-hybrid-dns-privatelink-traffic-visibility" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 03: Hybrid DNS, PrivateLink, Endpoints & Network Traffic Visibility →
+  </a>
+</div>

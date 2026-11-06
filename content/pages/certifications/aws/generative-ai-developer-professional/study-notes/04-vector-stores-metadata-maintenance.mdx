@@ -1,0 +1,235 @@
+---
+title: "Module 04: Vector Store Architecture, Metadata Frameworks & Data Maintenance"
+description: "Bedrock Knowledge Bases, OpenSearch k-NN, Aurora pgvector, DynamoDB metadata, sharding, and sync pipelines (Task 1.4)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 4
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 1.4 (Skills 1.4.1 - 1.4.5): vector database architectures, metadata frameworks, high-performance indexing, enterprise data integration, and keeping vector stores current.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1, Task 1.4">
+The exam asks you to **choose a vector store for a scenario** (managed vs self-tuned, existing database reuse, scale) and to design **ingestion and freshness** pipelines. Know what Bedrock Knowledge Bases manages for you and when to build on OpenSearch or Aurora pgvector directly.
+</Callout>
+
+---
+
+## 1. Vector Store Options (Skill 1.4.1)
+
+A vector store keeps **embeddings** (numeric representations of text, images, or other content) and supports **approximate nearest neighbor (ANN)** search so semantically similar content can be retrieved.
+
+| Option | Strengths | Choose when |
+|---|---|---|
+| Bedrock Knowledge Bases (managed) | Handles ingestion, chunking, embedding, sync, retrieval APIs | Fastest path, low operations |
+| Amazon OpenSearch Service / Serverless | k-NN vector search, hybrid (keyword + vector), scale, filtering, Neural plugin integration with Bedrock | Large scale, hybrid search, fine control |
+| Amazon Aurora PostgreSQL with pgvector | Vectors beside relational data, SQL joins and filters, transactions | Data already in Postgres; moderate scale |
+| Amazon RDS for PostgreSQL with pgvector | Same extension on RDS | Existing RDS estate |
+| Amazon DynamoDB | Low-latency metadata and document pointers alongside a vector store | Metadata store, not the ANN engine |
+| Amazon Neptune (Analytics) | Graph plus vector, GraphRAG relationships | Relationship-heavy knowledge |
+| Amazon DocumentDB | Vector search on JSON documents | Existing DocumentDB workloads |
+| Amazon S3 as document repository | Durable source of truth for raw documents | Always the source for KB data sources |
+
+Bedrock Knowledge Bases can sit on top of several of these stores (for example OpenSearch Serverless, Aurora PostgreSQL, Neptune Analytics, and third-party options). Confirm the current supported list in documentation before the exam.
+
+```
+Documents (S3 / wiki / SharePoint / web)
+        |  ingestion job: parse -> chunk -> embed
+        v
++-------------------------+      +--------------------------+
+| Embedding model         | ---> | Vector index + metadata  |
+| (Titan Embeddings V2)   |      | (OpenSearch / pgvector)  |
++-------------------------+      +------------+-------------+
+                                              |
+ query --> embed --> ANN search (+ filters) --+--> top-k chunks --> FM
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: How ANN indexes work (HNSW vs IVF)">
+
+Exact nearest-neighbor search compares the query with every vector, which does not scale. **HNSW** (Hierarchical Navigable Small World) builds a layered graph; queries hop through layers to find close neighbors quickly. Parameters: `m` (connections per node), `ef_construction` (build-time search width), and `ef_search` (query-time width). Higher values improve recall and cost memory and latency. **IVFFlat** (pgvector) clusters vectors into lists and searches the nearest lists (`lists`, `probes`). HNSW generally gives better recall-latency trade-offs; IVF builds faster with less memory. In OpenSearch, k-NN engines include Faiss, Lucene, and nmslib (availability varies by version).
+
+</AccordionItem>
+</AccordionGroup>
+
+```json
+PUT /docs
+{
+  "settings": { "index": { "knn": true } },
+  "mappings": { "properties": {
+    "embedding": { "type": "knn_vector", "dimension": 1024,
+      "method": { "name": "hnsw", "engine": "faiss", "space_type": "innerproduct",
+                  "parameters": { "m": 16, "ef_construction": 128 } } },
+    "text": { "type": "text" },
+    "doc_type": { "type": "keyword" },
+    "updated_at": { "type": "date" }
+  } }
+}
+```
+
+```sql
+-- Aurora PostgreSQL / RDS
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE chunks (id bigserial PRIMARY KEY, doc_id text, body text,
+                     embedding vector(1024), meta jsonb);
+CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops);
+SELECT id, body FROM chunks
+ WHERE meta->>'department' = 'legal'
+ ORDER BY embedding <=> $1 LIMIT 5;
+```
+
+**Dimension must match the embedding model.** Titan Text Embeddings V2 supports 1,024 (default), 512, or 256 dimensions; the index mapping must be identical.
+
+---
+
+## 2. Metadata Frameworks (Skill 1.4.2)
+
+Metadata turns "similar text" into "the **right** similar text."
+
+| Metadata | Source | Used for |
+|---|---|---|
+| Timestamps (created, modified) | S3 object metadata | Recency filtering, freshness |
+| Authorship / owner | Custom attributes | Attribution, trust weighting |
+| Domain / department tags | S3 object tags, classification step | Scoped retrieval |
+| Access labels | Tags or attributes | Per-user filtering (security trimming) |
+| Document type, language, version | Ingestion pipeline | Filtering, routing |
+
+Bedrock Knowledge Bases reads a sidecar file named `<document>.metadata.json` for S3 documents and exposes metadata for **filtering at query time**.
+
+```json
+{ "metadataAttributes": { "department": "legal", "year": 2026, "classification": "internal" } }
+```
+
+```python
+bka = boto3.client("bedrock-agent-runtime")
+r = bka.retrieve(
+    knowledgeBaseId="KB12345678",
+    retrievalQuery={"text": "data retention policy"},
+    retrievalConfiguration={"vectorSearchConfiguration": {
+        "numberOfResults": 5,
+        "filter": {"andAll": [
+            {"equals": {"key": "department", "value": "legal"}},
+            {"greaterThanOrEquals": {"key": "year", "value": 2025}}]}}},
+)
+```
+
+<Callout variant="warning" title="Exam Trap: Filtering is not authorization by itself">
+Metadata filters narrow results, but the filter value must come from a **trusted server-side identity**, never from user-supplied prompt text. Combine with IAM and application-level authorization (Module 13).
+</Callout>
+
+---
+
+## 3. High-Performance Architectures at Scale (Skill 1.4.3)
+
+| Technique | Benefit |
+|---|---|
+| Sharding (OpenSearch primary shards) | Parallelize search and indexing; size shards sensibly (commonly tens of GB) |
+| Replicas | Query throughput and availability |
+| Multi-index by domain | Smaller, specialized indexes; route queries by topic |
+| Hierarchical indexing | Search summaries/parent nodes first, then drill into child chunks |
+| Dimension reduction (256/512 dims) | Lower memory and latency, modest recall trade-off |
+| Quantization / disk-based modes | Reduce memory footprint at scale |
+| Filter-aware ANN | Apply metadata filters inside the search, not after |
+
+---
+
+## 4. Integration Components (Skill 1.4.4)
+
+Connect enterprise content to the vector store:
+
+* **Bedrock Knowledge Bases data sources**: S3, web crawler, and connectors such as Confluence, SharePoint, and Salesforce.
+* **Amazon AppFlow**: SaaS to S3 transfers feeding ingestion.
+* **AWS DataSync / Transfer Family**: move files from on-premises or SFTP to S3.
+* **Custom Lambda connectors** for internal wikis and document management systems, writing to S3 or calling the KB ingestion API.
+* **Amazon Kendra / Q Business**: managed enterprise search alternatives when you do not want to build retrieval.
+
+---
+
+## 5. Data Maintenance & Freshness (Skill 1.4.5)
+
+Stale vectors cause confident wrong answers.
+
+```
+Source change --> S3 event / EventBridge / DynamoDB Streams
+              --> Lambda / Step Functions --> StartIngestionJob (KB)
+                  or re-embed changed chunks --> upsert/delete in index
+Schedule (EventBridge Scheduler) --> full refresh + reconciliation of deleted docs
+```
+
+| Pattern | Use |
+|---|---|
+| Incremental sync | KB ingestion jobs process only new, changed, deleted objects |
+| Real-time change detection | S3 events or DynamoDB Streams trigger targeted updates |
+| Scheduled refresh | Periodic reconciliation catches missed events |
+| Deletion handling | Remove vectors for deleted/expired documents; track document IDs |
+| Versioning | Keep a document version attribute; retire superseded chunks |
+
+```bash
+aws bedrock-agent start-ingestion-job \
+  --knowledge-base-id KB12345678 --data-source-id DS12345678
+```
+
+---
+
+## 6. Exam Traps & Common Distractors
+
+- **Trap 1:** Choosing DynamoDB as the ANN engine; it stores metadata and pointers alongside a vector store.
+- **Trap 2:** Mismatching embedding dimensions between the model and the index.
+- **Trap 3:** Rebuilding the entire index on every change when incremental sync exists.
+- **Trap 4:** Filtering after retrieval (post-filter) and losing top-k results; use in-query filters.
+- **Trap 5:** Standing up OpenSearch when "minimal operational overhead" and a standard RAG pattern point to Knowledge Bases.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Knowledge Bases, OpenSearch, and Aurora pgvector for a scenario.
+<details>
+<summary>Explanation</summary>
+
+Knowledge Bases for managed ingestion and retrieval with low operations. OpenSearch for large scale, hybrid search, and fine tuning. Aurora/RDS pgvector when data and filters already live in PostgreSQL and scale is moderate. Neptune for graph-based relationship retrieval.
+
+</details>
+
+- [ ] I can explain why metadata matters and how to apply it safely.
+<details>
+<summary>Explanation</summary>
+
+Metadata enables recency, domain, and access-scoped retrieval. In Knowledge Bases it is supplied through sidecar metadata files and applied through retrieval filters. Filter values must derive from authenticated identity on the server side.
+
+</details>
+
+- [ ] I can describe scaling levers for vector search.
+<details>
+<summary>Explanation</summary>
+
+Shard and replicate indexes, split by domain, use hierarchical indexing, reduce dimensions or quantize, tune HNSW parameters, and use filter-aware search. Monitor latency and recall to validate changes.
+
+</details>
+
+- [ ] I can design a freshness pipeline.
+<details>
+<summary>Explanation</summary>
+
+Use event-driven triggers (S3 events, EventBridge, DynamoDB Streams) to start incremental ingestion, add a scheduled full reconciliation, remove vectors for deleted documents, and track document versions.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/03-data-validation-processing-pipelines-fm-input" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 03: Data Validation & Processing Pipelines for FM Consumption
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/05-retrieval-chunking-embeddings-hybrid-search" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 05: Retrieval Mechanisms: Chunking, Embeddings, Hybrid Search & Query Handling →
+  </a>
+</div>

@@ -1,0 +1,186 @@
+---
+title: "Module 01: Well-Architected Framework, Global Infrastructure & Exam Strategy"
+description: "Six pillars, Regions, AZs, edge locations, shared responsibility, question-reading heuristics, and the SAA-C03 scoring model."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 1
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Well-Architected Framework, AWS global infrastructure, shared responsibility model, exam structure, scoring, and question-reading strategy
+
+<Callout variant="info" title="Exam Blueprint Focus: Foundations (applies to all four domains)">
+The exam validates your ability to design solutions based on the **AWS Well-Architected Framework**. The target candidate has at least one year of hands-on experience designing AWS solutions. Domain weights are: Secure 30%, Resilient 26%, High-Performing 24%, Cost-Optimized 20%. Guide version 1.1 (published October 29, 2026) removed Amazon Elastic Transcoder from the in-scope list and moved five services (AWS DeepComposer, Amazon DevOps Guru, Amazon Elastic Inference, Amazon Managed Blockchain, Amazon Sumerian) off the out-of-scope list.
+</Callout>
+
+---
+
+## 1. Exam Format & Scoring
+
+| Attribute | Detail |
+|---|---|
+| Question types | Multiple choice (1 correct, 3 distractors) and multiple response (2 or more correct out of 5 or more options) |
+| Scored questions | 50 |
+| Unscored questions | 15 (unidentified; used by AWS to evaluate future items) |
+| Scoring | Scaled 100 to 1,000; minimum passing score 720 |
+| Model | Compensatory: you pass the exam as a whole, not each domain |
+| Guessing | No penalty; unanswered questions are scored incorrect, so always answer |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: What compensatory scoring means for your study plan">
+
+Because the model is compensatory, a weak domain can be offset by a strong one. But weights are uneven: Domain 1 (30%) carries roughly 15 of the 50 scored questions, while Domain 4 (20%) carries roughly 10.
+
+* **Practical implication:** Do not skip the cost domain, but spend proportionally more time on security and resilience.
+* **Section feedback caveat:** AWS explicitly warns to interpret section-level feedback cautiously, because each section has few questions.
+* **Multiple response questions:** Typically all correct options must be chosen for credit. Read the stem for the required count (for example, "Choose TWO").
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. The Six Well-Architected Pillars
+
+The exam's four domains map onto these pillars. Know all six, because scenario wording often signals a pillar.
+
+| Pillar | Core question | Typical AWS answers | Exam keyword |
+|---|---|---|---|
+| Operational Excellence | Can we run and improve it? | CloudFormation, Systems Manager, CloudWatch | "automate", "runbooks" |
+| Security | Is data and access protected? | IAM, KMS, WAF, GuardDuty | "least privilege", "encrypt" |
+| Reliability | Does it recover and scale? | Multi-AZ, Auto Scaling, Route 53 | "highly available", "fault tolerant" |
+| Performance Efficiency | Are resources matched to need? | CloudFront, ElastiCache, right instance family | "low latency", "high throughput" |
+| Cost Optimization | Are we avoiding waste? | Savings Plans, Spot, lifecycle rules | "most cost-effective" |
+| Sustainability | Are we minimizing footprint? | Graviton, serverless, right-sizing | "reduce environmental impact" |
+
+---
+
+## 3. AWS Global Infrastructure
+
+```
+AWS Cloud
+ |
+ +-- Region (for example us-east-1)          <- isolated geography, data stays unless you replicate
+ |     |
+ |     +-- Availability Zone A  (1+ data centers, separate power/network)
+ |     +-- Availability Zone B
+ |     +-- Availability Zone C                <- AZs linked by low-latency private fiber
+ |
+ +-- Edge locations / Regional edge caches   <- CloudFront, Route 53, Global Accelerator, WAF, Shield
+ +-- Local Zones / Wavelength Zones / Outposts <- extend AWS closer to users or into data centers
+```
+
+| Construct | What it is | Design use |
+|---|---|---|
+| Region | Independent geographic area with multiple AZs | Data residency, DR across Regions, latency to users |
+| Availability Zone | One or more discrete data centers with redundant power and networking | High availability within a Region |
+| Edge location | Point of presence for CDN and DNS | Caching and DDoS absorption near users |
+| Local Zone | Infrastructure extension of a Region in a metro area | Single-digit millisecond latency to a city |
+| AWS Outposts | AWS-managed racks in your data center | Hybrid, local data processing, low-latency to on-premises |
+| AWS Wavelength | AWS compute embedded in telecom 5G networks | Ultra-low-latency mobile edge apps |
+
+**Choosing a Region** (in priority order for exam questions): compliance and data residency, then latency to users, then service and feature availability, then price.
+
+```bash
+# List Regions enabled for your account
+aws ec2 describe-regions --query "Regions[].RegionName" --output text
+
+# Map AZ names to physical AZ IDs (AZ names are shuffled per account)
+aws ec2 describe-availability-zones --region us-east-1 \
+  --query "AvailabilityZones[].[ZoneName,ZoneId]" --output table
+```
+
+---
+
+## 4. Shared Responsibility Model
+
+* **AWS is responsible for security OF the cloud:** hardware, global infrastructure, managed service software, hypervisor.
+* **You are responsible for security IN the cloud:** data, IAM configuration, OS patching on EC2, network configuration, encryption choices.
+
+| Service type | Example | You manage |
+|---|---|---|
+| Infrastructure (IaaS) | Amazon EC2 | Guest OS, patches, firewall, apps, data |
+| Container / managed | Amazon RDS | DB settings, access, data, encryption options (AWS patches OS and engine) |
+| Abstracted / serverless | Amazon S3, AWS Lambda | Data, IAM, bucket policies, function code |
+
+**Shared controls** include patch management (AWS patches infrastructure, you patch guest OS), configuration management, and awareness and training.
+
+---
+
+## 5. Question-Reading Heuristics
+
+| Stem phrase | Lean toward |
+|---|---|
+| "least operational overhead" | Managed or serverless services (Lambda, Fargate, Aurora, S3) |
+| "minimal changes to the application" | Lift-and-shift, drop-in compatible services (RDS, EFS, Amazon MQ, Storage Gateway) |
+| "most cost-effective" | Right tier plus right purchasing model; avoid always-on over-provisioning |
+| "highly available" | Multi-AZ; remove single points of failure |
+| "disaster recovery across Regions" | Replication plus Route 53 failover; match RPO and RTO to cost |
+| "decouple" | SQS, SNS, EventBridge |
+| "securely" or "without exposing to the internet" | Private subnets, VPC endpoints, IAM roles, no hard-coded keys |
+| "near real time" | Kinesis or Firehose (not nightly batch) |
+
+---
+
+## 6. Exam Traps & Common Distractors
+
+- **Trap 1:** Picking the most powerful or most custom-built option when a managed service satisfies the requirement with less overhead.
+- **Trap 2:** Assuming a Region is a single data center. Regions contain multiple AZs; AZs contain one or more data centers.
+- **Trap 3:** Believing AZ names (us-east-1a) are identical across accounts. They are not; use AZ IDs (use1-az1) to coordinate.
+- **Trap 4:** Forgetting that data does not leave a Region unless you configure replication or transfer.
+- **Trap 5:** Answering a "single service" question with a multi-service architecture. Choose the minimum that satisfies every stated requirement.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can state the exam format, scored question count, and passing score.
+<details>
+<summary>Explanation</summary>
+
+The exam has 50 scored and 15 unscored questions, in multiple choice and multiple response formats. Results are scaled from 100 to 1,000 with a minimum passing score of 720. Scoring is compensatory, so you only need to pass overall, and there is no guessing penalty.
+
+</details>
+
+- [ ] I can map a scenario keyword to the correct Well-Architected pillar.
+<details>
+<summary>Explanation</summary>
+
+"Encrypt" and "least privilege" map to Security. "Fault tolerant" and "recover" map to Reliability. "Latency" and "throughput" map to Performance Efficiency. "Cost-effective" maps to Cost Optimization. Questions often combine two pillars, such as "secure and cost-effective", so every requirement in the stem must be met.
+
+</details>
+
+- [ ] I can explain who is responsible for patching in EC2 versus RDS versus Lambda.
+<details>
+<summary>Explanation</summary>
+
+On EC2 you patch the guest OS and applications. On RDS, AWS patches the underlying OS and (during maintenance windows) the engine, while you control parameters, access, and data. With Lambda, AWS manages the runtime infrastructure and you own function code, dependencies, and IAM permissions.
+
+</details>
+
+- [ ] I can choose between Regions and AZs for a given availability or compliance requirement.
+<details>
+<summary>Explanation</summary>
+
+Use multiple AZs in one Region for high availability with low-latency synchronous replication. Use multiple Regions for disaster recovery from a regional event, for data residency in several geographies, or to serve global users with lower latency. Data stays in a Region by default.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ↑ Back to AWS Certified Solutions Architect - Associate Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/02-iam-sts-identity-federation" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 02: IAM, STS & Identity Federation →
+  </a>
+</div>

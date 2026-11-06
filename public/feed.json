@@ -6,6 +6,131 @@
   "description": "ActiveNerds is the go-to destination for AI/ML, Kubernetes, and DevSecOps professionals — sharp technical coverage woven with genuinely useful, non-preachy fitness and wellness content for desk-bound tech pros.",
   "items": [
     {
+      "id": "https://www.activenerds.com/blog/eks-auto-mode-gateway-api-setup-migration",
+      "url": "https://www.activenerds.com/blog/eks-auto-mode-gateway-api-setup-migration",
+      "title": "EKS Auto Mode Meets Gateway API: A Practical Setup and Migration Guide",
+      "content_text": "Amazon EKS Auto Mode now natively supports the Kubernetes Gateway API. Learn how to configure managed Gateways, deploy HTTPRoutes, and migrate legacy Ingress resources with zero downtime.",
+      "summary": "Amazon EKS Auto Mode now natively supports the Kubernetes Gateway API. Learn how to configure managed Gateways, deploy HTTPRoutes, and migrate legacy Ingress resources with zero downtime.",
+      "date_published": "2026-11-04T00:00:00.000Z",
+      "authors": [
+        {
+          "name": "ActiveNerds Team"
+        }
+      ],
+      "tags": [
+        "Containers & Kubernetes",
+        "Aws",
+        "Eks",
+        "Gateway Api",
+        "Kubernetes",
+        "Networking"
+      ]
+    },
+    {
+      "id": "https://www.activenerds.com/blog/ergonomic-setups-desk-workers-cochrane-evidence",
+      "url": "https://www.activenerds.com/blog/ergonomic-setups-desk-workers-cochrane-evidence",
+      "title": "Do Ergonomic Setups Actually Work? What the New Cochrane Evidence Says for Desk Workers",
+      "content_text": "A deep dive into the updated Cochrane systematic review on workplace ergonomic adaptations: what the clinical evidence says about ergonomic chairs, split keyboards, standing desks, and arm/neck pain.",
+      "summary": "A deep dive into the updated Cochrane systematic review on workplace ergonomic adaptations: what the clinical evidence says about ergonomic chairs, split keyboards, standing desks, and arm/neck pain.",
+      "date_published": "2026-11-04T00:00:00.000Z",
+      "authors": [
+        {
+          "name": "ActiveNerds Team"
+        }
+      ],
+      "tags": [
+        "Fitness & Wellness for Tech",
+        "Ergonomics",
+        "Desk Setup",
+        "Wellness",
+        "Productivity",
+        "Remote Work"
+      ]
+    },
+    {
+      "id": "https://www.activenerds.com/blog/github-npm-package-firewall-setup-guide",
+      "url": "https://www.activenerds.com/blog/github-npm-package-firewall-setup-guide",
+      "title": "GitHub's npm Package Firewall: How to Block Malicious Packages Before They Install",
+      "content_text": "How to enable and configure GitHub's npm Package Firewall to intercept trojanized and malicious open-source packages at install time, before they reach CI runners or developer machines.",
+      "summary": "How to enable and configure GitHub's npm Package Firewall to intercept trojanized and malicious open-source packages at install time, before they reach CI runners or developer machines.",
+      "date_published": "2026-11-03T00:00:00.000Z",
+      "authors": [
+        {
+          "name": "ActiveNerds Team"
+        }
+      ],
+      "tags": [
+        "DevSecOps & Security",
+        "Npm",
+        "Supply Chain",
+        "Github",
+        "Devsecops",
+        "Security"
+      ]
+    },
+    {
+      "id": "https://www.activenerds.com/blog/kubernetes-1-37-deprecations-ipvs-kubedns-migration",
+      "url": "https://www.activenerds.com/blog/kubernetes-1-37-deprecations-ipvs-kubedns-migration",
+      "title": "Kubernetes 1.37 Deprecations: Migrating Off IPVS, KubeDNS, and Removed kubectl Flags",
+      "content_text": "A technical migration guide for Kubernetes 1.37 deprecations and removals, covering the transition from IPVS to nftables in kube-proxy, retiring legacy KubeDNS, and updating automated kubectl scripts.",
+      "summary": "A technical migration guide for Kubernetes 1.37 deprecations and removals, covering the transition from IPVS to nftables in kube-proxy, retiring legacy KubeDNS, and updating automated kubectl scripts.",
+      "date_published": "2026-11-03T00:00:00.000Z",
+      "authors": [
+        {
+          "name": "ActiveNerds Team"
+        }
+      ],
+      "tags": [
+        "Containers & Kubernetes",
+        "Kubernetes",
+        "Devops",
+        "Networking",
+        "Nftables",
+        "Coredns"
+      ]
+    },
+    {
+      "id": "https://www.activenerds.com/blog/verify-k8s-images-slsa-verification-summaries",
+      "url": "https://www.activenerds.com/blog/verify-k8s-images-slsa-verification-summaries",
+      "title": "One Signed Answer: How to Verify registry.k8s.io Images with the New SLSA Summaries",
+      "content_text": "How to use the newly published SLSA verification summaries on registry.k8s.io to cryptographically verify official Kubernetes container images in CI/CD and admission controllers.",
+      "summary": "How to use the newly published SLSA verification summaries on registry.k8s.io to cryptographically verify official Kubernetes container images in CI/CD and admission controllers.",
+      "date_published": "2026-11-02T00:00:00.000Z",
+      "authors": [
+        {
+          "name": "ActiveNerds Team"
+        }
+      ],
+      "tags": [
+        "Containers & Kubernetes",
+        "Kubernetes",
+        "Cosign",
+        "Supply Chain",
+        "Slsa",
+        "Devsecops"
+      ]
+    },
+    {
+      "id": "https://www.activenerds.com/blog/litellm-supply-chain-compromise-credential-rotation",
+      "url": "https://www.activenerds.com/blog/litellm-supply-chain-compromise-credential-rotation",
+      "title": "LiteLLM 1.107.0 Supply Chain Attack: How to Check Your Stack and Rotate Credentials",
+      "content_text": "Analysis of the LiteLLM 1.107.0 supply chain compromise via Python startup hooks, how to check if your AI gateway was affected, and a step-by-step credential rotation checklist.",
+      "summary": "Analysis of the LiteLLM 1.107.0 supply chain compromise via Python startup hooks, how to check if your AI gateway was affected, and a step-by-step credential rotation checklist.",
+      "date_published": "2026-11-01T00:00:00.000Z",
+      "authors": [
+        {
+          "name": "ActiveNerds Team"
+        }
+      ],
+      "tags": [
+        "DevSecOps & Security",
+        "Ai Security",
+        "Supply Chain",
+        "Python",
+        "Devsecops"
+      ]
+    },
+    {
       "id": "https://www.activenerds.com/blog/deep-work-environment-setup",
       "url": "https://www.activenerds.com/blog/deep-work-environment-setup",
       "title": "Deep Work Environment Setup",

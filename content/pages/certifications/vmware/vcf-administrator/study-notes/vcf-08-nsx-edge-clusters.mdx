@@ -1,0 +1,488 @@
+---
+title: "Module 08: NSX Edge Clusters & Uplink Profiles"
+description: "Edge VM sizing (Medium, Large, XL), transport zones, Edge cluster deployment in SDDC Manager, BGP peering, failover modes."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF Administrator Study Guide"
+trackSlug: "/certifications/vmware/vcf-administrator"
+moduleNumber: 8
+totalModules: 18
+layout: "article"
+---
+
+**Exam:** VCP-VCF Administrator
+**Domain focus:** Networking in VMware Cloud Foundation (NSX Edge, north-south connectivity, Tier-0/Tier-1 gateways)
+**Instructor note:** Know *what* SDDC Manager automates, *what* it does not (BGP peering with physical fabric, upstream routing), and *which* design choices drive the topology.
+
+---
+
+## 1. Why Edge Clusters Exist
+
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: NSX Edge Cluster Placement & Form Factors">
+
+NSX Edge nodes provide the gateway between the virtualized Geneve overlay network and the external physical network (north-south traffic).
+
+**Placement Patterns in VCF:**
+
+* **Shared Edge Cluster:** Management and Workload domains share an Edge cluster (budget/starter environments).
+* **Dedicated Edge Cluster:** Each Workload Domain gets its own dedicated Edge cluster (production best practice).
+* **Edge Node Form Factors:** Edge VMs come in Medium (2 vCPU / 8 GB RAM), Large (4 vCPU / 16 GB), and Extra Large (8 vCPU / 32 GB).
+* For environments running high-throughput Tier-0 BGP peering, NSX Advanced Load Balancer, or stateful NAT, **Large or Extra Large** is required.
+* Edge nodes require dedicated VLAN uplinks on the vSphere Distributed Switch (VDS) to communicate with physical Top-of-Rack (ToR) switches via BGP or OSPF.
+
+</AccordionItem>
+
+</AccordionGroup>
+
+
+NSX **Edge nodes** provide the centralized (service) components of NSX that cannot be distributed in the hypervisor kernel:
+
+| Service | Runs on Edge? | Notes |
+|---|---|---|
+| North-south routing (Tier-0 SR) | Yes | BGP/static peering with physical ToR |
+| Stateful NAT, Gateway Firewall | Yes | Tier-0 or Tier-1 service router (SR) |
+| Load balancer, VPN | Yes | Tier-1 SR; sized by Edge form factor |
+| DHCP relay/server, DNS forwarder | Yes | Tier-1 SR |
+| East-west distributed routing (DR) | No | Runs in every transport node's hypervisor |
+| Distributed Firewall (DFW) | No | Kernel-level on hosts |
+
+Key concept: a **gateway has two components**
+- **DR (Distributed Router):** on every host transport node and Edge node.
+- **SR (Service Router):** only on Edge nodes, created when stateful services or uplinks are configured.
+
+An **Edge cluster** is a logical grouping of Edge transport nodes that provides capacity and availability for SRs.
+
+---
+
+## 2. Edge Cluster Deployment in VCF
+
+### 2.1 Where Edge Clusters Live
+
+- **Management Domain:** NSX Manager cluster is deployed at bring-up. An Edge cluster is **not** created by default; deploy one when you need north-south services or when you deploy **VCF Operations / VMware Aria** components that depend on application virtual networks (AVNs).
+- **VI Workload Domain:** the first cluster in a workload domain gets NSX Manager (new or shared). Edge clusters are added **after** domain creation.
+- NSX Manager is **not** an Edge; Edge nodes are separate VMs (or bare-metal) that are *registered* to NSX Manager.
+
+### 2.2 Deploying via SDDC Manager (Add Edge Cluster workflow)
+
+SDDC Manager automates Edge cluster creation, including NSX configuration and the Tier-0/Tier-1 gateways.
+
+**Path:** SDDC Manager UI → **Workload Domains** → select domain → **Actions → Add Edge Cluster** (or API: `POST /v1/edge-clusters`).
+
+**Prerequisites checklist**
+
+1. NSX Manager cluster deployed and healthy for the domain.
+2. Host cluster hosting the Edges has **sufficient resources** and is a member of the NSX overlay transport zone.
+3. Two VLANs ready (these are independent of each other):
+   - **Edge TEP VLAN** (overlay tunnel endpoint network)
+   - **Uplink VLANs** (typically two, one per ToR, for ECMP / redundancy)
+4. **Edge TEP VLAN differs from the Host TEP VLAN** when Edges and hosts share the same vSphere cluster/N-VDS (see section 4).
+5. IP planning completed: Edge management IPs, Edge TEP pool/range, uplink IPs, BGP ASNs and peer IPs.
+6. MTU **1700+** (recommend **9000**) end-to-end on TEP and uplink-to-fabric paths (underlay).
+7. DNS forward/reverse records for each Edge VM FQDN.
+8. Physical ToR configured for BGP peering (or static routing plan).
+
+**Wizard inputs (what SDDC Manager asks for)**
+
+| Input | Details |
+|---|---|
+| Edge cluster name | Logical name in NSX |
+| MTU | For the Edge TEP/uplink path |
+| ASN | Tier-0 local autonomous system number |
+| Tier-0 name / Tier-1 name | Created and linked automatically |
+| Tier-0 routing type | **BGP** (dynamic) or **Static** |
+| Tier-0 HA mode | **Active-Active** or **Active-Standby** |
+| Edge form factor | Small / Medium / Large / Extra Large |
+| Edge nodes (min 2) | FQDNs, management IPs, management port group, admin/audit/root passwords |
+| Edge TEP | VLAN ID, two TEP IPs per node (or pool) |
+| Uplink networks | VLAN, interface IPs, peer IPs, BGP peer ASN/password |
+| Edge placement | Target cluster and (optionally) anti-affinity |
+
+**What SDDC Manager does automatically**
+
+- Deploys Edge VMs via vCenter OVF deployment.
+- Registers them to NSX Manager and configures them as **Edge transport nodes**.
+- Creates the **Edge cluster** object.
+- Creates **VLAN transport zone** logical segments for uplinks.
+- Creates and links **Tier-0** and **Tier-1** gateways.
+- Configures BGP neighbors/route redistribution on the Tier-0 (if BGP chosen).
+- Applies **DRS anti-affinity rules** so Edge VMs sit on different hosts.
+
+**What it does NOT do**
+
+- Configure the **physical network** (ToR BGP peers, VLANs, MTU).
+- Create DNS records.
+- Plan IP addressing.
+- Deploy a bare-metal Edge (this is a manual NSX deployment; see 2.4).
+
+### 2.3 Edge Form Factors (Know the Sizing Ladder)
+
+| Form factor | vCPU | RAM | Disk | Typical use |
+|---|---|---|---|---|
+| Small | 2 | 4 GB | 200 GB | Lab / POC only (no LB) |
+| Medium | 4 | 8 GB | 200 GB | Basic north-south, light services |
+| Large | 8 | 32 GB | 200 GB | Production north-south + LB (small) |
+| Extra Large | 16 | 64 GB | 200 GB | Heavy LB/NAT/VPN, large-scale tenancy |
+
+→ **Exam tip:** SDDC Manager supports Medium, Large, and Extra Large for production workflows. If the question mentions **load balancer** services or **Tanzu/VKS ingress**, expect **Large or higher**. Verify exact figures in the current VMware sizing guide; the *ratios* matter more than memorized numbers.
+
+### 2.4 Edge VM vs Bare-Metal Edge
+
+| Attribute | Edge VM | Bare-Metal Edge |
+|---|---|---|
+| Deployment in VCF | Automated via SDDC Manager | Manual in NSX (not workflow-driven) |
+| Throughput | Good; hypervisor-limited | Highest; DPDK on physical NICs |
+| Latency | Slightly higher | Lowest |
+| Use case | Most VCF deployments | Telco/high-throughput, heavy NAT/VPN |
+| Operational overhead | Low | Higher; hardware lifecycle |
+| vMotion / DRS | VM is DRS-managed | Not applicable |
+
+---
+
+## 3. Edge Transport Nodes
+
+A **transport node** is any node participating in NSX data-plane forwarding:
+
+- **Host transport nodes (ESXi):** host switch is the **VDS** in VCF (VCF 4.x+ uses VDS with NSX; N-VDS is legacy).
+- **Edge transport nodes:** run an **N-VDS-equivalent host switch inside the Edge** (the "fast path" DPDK datapath). This is internal to the Edge VM.
+
+### 3.1 Transport Zones on an Edge
+
+| Transport zone | Type | Purpose |
+|---|---|---|
+| **Overlay TZ** | Overlay | Carries Geneve tunnels to hosts and other Edges |
+| **VLAN TZ** | VLAN | Carries uplink traffic to physical ToR |
+
+An Edge node is typically a member of **both** (one overlay TZ + one or more VLAN TZs).
+
+### 3.2 Edge Virtual NICs (fp-eth)
+
+Edge VM interfaces:
+
+| Interface | Role |
+|---|---|
+| **eth0** | Management (not part of data plane) |
+| **fp-eth0** | Data path: mapped to the host switch uplink (commonly TEP + uplink 1) |
+| **fp-eth1** | Data path: mapped to the second uplink |
+| **fp-eth2 (optional)** | Additional uplinks if configured |
+
+Data-plane `fp-eth` interfaces attach to **trunk port groups** on the vSphere VDS that carry the TEP VLAN and uplink VLANs.
+
+→ **Exam trap:** The Edge **management** NIC (`eth0`) is on a management port group; the **data-path** NICs (`fp-ethX`) go to a **trunk** port group. Mixing these up is a classic error.
+
+---
+
+## 4. TEP Configuration
+
+**TEP (Tunnel Endpoint)** = the IP interface used for Geneve encapsulation/decapsulation.
+
+### 4.1 Host TEP vs Edge TEP
+
+| Attribute | Host TEP | Edge TEP |
+|---|---|---|
+| Created on | ESXi `vmk10`/`vmk11` (VMkernel) | Edge `fp-ethX` data-path |
+| IP assignment | Pool or DHCP (VCF: IP pool) | IP pool / static list |
+| VLAN | Host overlay VLAN | Edge TEP VLAN |
+| Count | 1 per uplink (typically 2) | 1 per TEP uplink (typically 2) |
+| MTU | ≥ 1700 (9000 recommended) | Same |
+
+### 4.2 The Key Rule: Same-Host TEP Isolation
+
+When an Edge VM runs **on a host that is itself a transport node with its own TEP**, the Edge's TEP traffic must go **out to the physical network and back**, because the host's TEPs and Edge's TEPs live in the **same host switch** domain issue: a host's VMkernel TEP cannot directly tunnel to an Edge VM on the same host through the same VDS path.
+
+**Solution used by VCF:**
+- Use a **separate Edge TEP VLAN** (distinct from the Host TEP VLAN).
+- The physical network **routes** between Host TEP VLAN and Edge TEP VLAN (L3 reachability required).
+
+→ **Exam tip:** If a question says "Edge and host TEPs are on the same VLAN and tunnels fail when the Edge and host share the same ESXi host," the answer is: **use a different VLAN for Edge TEP** (and ensure routing between the two).
+
+### 4.3 TEP IP Pools
+
+- Host TEP: IP pool defined in the **Transport Node Profile / VCF network pool**.
+- Edge TEP: IP pool or explicit IPs defined in the Edge deployment wizard.
+- **Pools should not overlap** and must be routable between host and Edge TEP subnets.
+
+### 4.4 Validating TEP Health
+
+```
+# From an Edge node (admin CLI)
+get vteps                         # Local VTEP interfaces
+get tunnel-ports                  # Tunnel status
+get logical-router                # Confirm SR/DR presence
+
+# From an NSX Manager UI
+System → Fabric → Nodes → Edge Transport Nodes → Tunnel status
+```
+
+Also verify jumbo frame path (don't fragment ping at the TEP MTU):
+
+```
+vmkping ++netstack=vxlan -I vmk10 -d -s 1572 <remote TEP IP>
+```
+(Use `-s 8972` when using MTU 9000.)
+
+---
+
+## 5. Edge Cluster Topology in VCF
+
+### 5.1 Logical Topology (Standard VCF Design)
+
+```
+          Physical ToR A          Physical ToR B
+               |  BGP  \       /  BGP  |
+               |         \   /         |
+          [ Tier-0 Gateway (SR on Edge cluster) ]
+                          |
+              Tier-0 ↔ Tier-1 (auto-plumbed, router link)
+                          |
+          [ Tier-1 Gateway (SR optional, DR distributed) ]
+                          |
+        Overlay segments (workloads, Aria AVNs, Tanzu, etc.)
+```
+
+- **Tier-0 gateway:** north-south; peers with physical fabric; connects to Tier-1s.
+- **Tier-1 gateway:** tenant/workload; connects to segments; offers stateful services if an SR is needed.
+- Tier-0 and Tier-1 are **linked automatically** by NSX using **router-link** and **intra-tier transit** subnets (100.64.0.0/16 and 169.254.0.0/16 defaults).
+
+### 5.2 Placement Models
+
+| Model | Description | When used |
+|---|---|---|
+| **Dedicated Edge cluster** | Edges on their own vSphere cluster | Large environments, strict isolation |
+| **Shared with compute (same cluster)** | Edges on the workload cluster | Small footprints, VCF consolidated architecture |
+| **Management domain Edge** | Edge on management cluster | AVN/Aria needs, consolidated designs |
+
+→ **Exam tip:** In **consolidated architecture** (management + workload on one cluster), Edge VMs share the cluster; use **resource pools / reservations** so Edge VMs are not starved.
+
+### 5.3 Uplink Design Patterns
+
+| Pattern | Description |
+|---|---|
+| **Two uplinks, two VLANs (recommended)** | Each Edge has uplink 1 → ToR A VLAN, uplink 2 → ToR B VLAN |
+| **Single uplink VLAN** | Simpler but not resilient; avoid |
+| **Named teaming policy** | Pins uplink VLAN to a specific physical NIC (required to keep BGP deterministic) |
+
+**Named teaming policies** bind a VLAN segment to a specific uplink so BGP peers across ToR A and ToR B each use the intended path.
+
+### 5.4 Scaling
+
+- Up to **10 Edge nodes per Edge cluster**.
+- Up to **16 Edge clusters per NSX Manager** domain (verify limits in current *VMware Configuration Maximums*).
+- Scale up (larger form factor) → redeploy/resize workflow.
+- Scale out (more nodes) → add nodes to the cluster through SDDC Manager (**Expand Edge Cluster**).
+
+---
+
+## 6. High Availability Modes
+
+HA is configured on the **Tier-0** (and Tier-1 SRs) when an Edge cluster is assigned.
+
+### 6.1 Active-Active (A/A)
+
+- **All Edge nodes** in the cluster forward north-south traffic simultaneously.
+- Uses **ECMP** (up to 8 paths) toward the physical network.
+- **Stateful services are NOT supported** on an A/A Tier-0 SR (no stateful NAT, no gateway firewall state, no LB on T0).
+- Stateless; throughput scales linearly with node count.
+- Failure of an Edge → ECMP rehashes; **BFD** speeds detection.
+
+### 6.2 Active-Standby (A/S)
+
+- **One active, one standby** SR instance.
+- **Supports stateful services** (NAT, gateway firewall, VPN, LB at T1).
+- Failover: standby promotes if active fails (detected via heartbeats / BFD).
+- Preemptive or non-preemptive failover option (preemptive = original active reclaims role).
+- Single node carries the traffic at any time (limited aggregate throughput).
+
+### 6.3 Comparison
+
+| Feature | Active-Active | Active-Standby |
+|---|---|---|
+| Throughput | Scales with ECMP | Single-node |
+| Stateful NAT / Edge firewall | No (on T0) | Yes |
+| Load balancer on T0 | No | Yes (LB sits on T1 in practice) |
+| Failover model | ECMP reconvergence | Active promotes standby |
+| Typical VCF use | High-throughput N-S routing | Services-heavy designs |
+
+### 6.4 Design Pattern to Combine Both
+
+Common design: **Tier-0 in Active-Active** (pure routing, maximum bandwidth) + **Tier-1 in Active-Standby** (stateful services such as NAT/LB/firewall) on the same Edge cluster. The Tier-1 SR consumes the Edge cluster but only on two nodes of the cluster.
+
+### 6.5 Failure Detection
+
+| Mechanism | Purpose |
+|---|---|
+| **BFD** between Edge and ToR | Sub-second detection of BGP path loss |
+| **BFD between Edge nodes** (intra-cluster) | Fast failover decisions in HA pair |
+| **Failure domains** | Group Edges (e.g., rack/AZ) so A/S pairs don't land in the same fault domain |
+| **Edge health monitoring** | Datapath, service, and NIC status |
+
+### 6.6 Edge Maintenance
+
+Putting an Edge into **maintenance mode** in NSX drains SRs to other nodes. Use before patching or host maintenance. In VCF, lifecycle of Edge (via NSX upgrade orchestrated by SDDC Manager) handles this automatically.
+
+---
+
+## 7. Routing and Peering (SDDC Manager Context)
+
+| Item | VCF detail |
+|---|---|
+| Dynamic routing | **eBGP** to ToR switches (default, preferred) |
+| Static routing | Supported; SDDC Manager can configure static default route + HA VIP (in A/S) |
+| BFD | Optional but recommended with BGP |
+| Route redistribution | Connected segments, NAT IPs, LB VIPs, etc. redistributed into BGP on the Tier-0 |
+| ASN | Tier-0 local ASN must differ from ToR ASN for eBGP |
+
+→ **Exam tip:** SDDC Manager configures the **NSX side**. The physical ToR BGP neighbor configuration is **the customer's responsibility**.
+
+---
+
+## 8. Lifecycle and Operations in VCF
+
+- **Never** upgrade or resize NSX Edges directly from NSX Manager UI when SDDC Manager manages the domain (use SDDC Manager workflows to avoid drift/inventory mismatch).
+- Expand an Edge cluster: SDDC Manager → Workload Domain → **Edge Clusters** → **Expand**.
+- Passwords: manage and rotate through **SDDC Manager credential management**.
+- Certificates: NSX Edge cert replacement via SDDC Manager certificate workflow where applicable.
+- Backup: NSX Manager backup (SFTP) covers Edge configuration; Edge VMs themselves are recreated, not restored.
+
+---
+
+## 9. Common Failure Scenarios and Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Edge deployment fails in SDDC Manager validation | DNS missing, VLAN/MTU mismatch, IP conflict | Fix prerequisites, retry |
+| Tunnels Down between Edge and hosts | Edge TEP VLAN not routed to Host TEP VLAN; MTU mismatch | Verify L3 routing, MTU 1700+/9000 end-to-end |
+| BGP session not Established | ASN mismatch, VLAN wrong on trunk, ToR ACL/password | Verify neighbor config, `get bgp neighbor summary` |
+| Asymmetric north-south loss after failover | No named teaming, ECMP hashing issue | Configure named teaming policy per uplink VLAN |
+| Stateful NAT not working | Tier-0 deployed as Active-Active | Use A/S, or move services to Tier-1 (A/S) |
+| Edge VMs on same host | Anti-affinity not honored (DRS off) | Enable DRS and verify VM-VM anti-affinity rule |
+
+**Useful Edge CLI commands**
+
+```
+get edge-cluster status
+get logical-routers
+vrf <id>
+get bgp neighbor summary
+get high-availability status
+get interfaces
+```
+
+---
+
+## 10. Exam Tips (Quick Hit List)
+
+1. **SDDC Manager deploys Edge VMs**; bare-metal Edge is manual.
+2. **Minimum 2 Edge nodes** per Edge cluster in SDDC Manager workflow.
+3. **Edge TEP VLAN ≠ Host TEP VLAN**, and both must route to each other.
+4. **MTU:** ≥ 1700 minimum for Geneve; **9000 recommended**.
+5. **Active-Active Tier-0** = ECMP, **no stateful services**. **Active-Standby** = stateful services OK.
+6. **Gateway components:** DR (everywhere) vs SR (Edge only).
+7. **Two transport zones on an Edge:** Overlay + VLAN.
+8. **BGP is default** for VCF Tier-0 uplinks; physical ToR config is **not** automated.
+9. **Anti-affinity:** keep Edge nodes on separate hosts.
+10. **Do lifecycle through SDDC Manager**, not NSX Manager alone.
+11. **Dedicated vs shared Edge cluster:** dedicated for scale and isolation; shared for consolidated.
+12. **Named teaming policy** = deterministic uplink-to-ToR pinning for BGP.
+13. Edge `eth0` = management; `fp-ethX` = data path (trunk port group).
+14. **Failure domains** keep A/S pairs in different racks/zones.
+
+→ Disclaimer: Exact maximums, form-factor specs, and default behaviors change by VCF/NSX release. Always cross-check against the **VCF release notes** and **VMware Configuration Maximums** for your exam version.
+
+---
+
+## 11. Practice Questions
+
+### Question 1
+
+An administrator is adding an Edge cluster to a VI workload domain using SDDC Manager. The Edge VMs will run on the same vSphere cluster whose ESXi hosts are already NSX host transport nodes. After deployment, overlay tunnels between Edge nodes and the hosts are in a **Down** state when an Edge VM is located on the same ESXi host as a workload VM on an overlay segment. The Edge TEP and Host TEP both use VLAN 1614. What is the most likely resolution?
+
+A. Increase the Edge form factor from Medium to Large
+B. Assign a different VLAN to the Edge TEP and ensure it is routable to the Host TEP VLAN
+C. Switch the Tier-0 from Active-Standby to Active-Active
+D. Configure static routes on the Edge management interface
+
+**Answer: B**
+
+**Explanation:** When Edge VMs share a host with host TEPs on the same VDS, Edge TEP traffic must leave the host and be routed back in; this requires an **Edge TEP VLAN that is different from the Host TEP VLAN** and L3 reachability between them. Form factor (A) affects capacity, not tunnel formation. HA mode (C) does not influence TEP tunnels. The management interface (D) is not part of the data path.
+
+---
+
+### Question 2
+
+A VCF administrator must provide **stateful NAT** and **gateway firewall** for tenant workloads while also maximizing north-south throughput to the physical network. Which design best meets both requirements on a single Edge cluster?
+
+A. Tier-0 Active-Standby with all services on the Tier-0
+B. Tier-0 Active-Active (ECMP) with stateful services configured on Active-Standby Tier-1 gateways
+C. Tier-0 Active-Active with stateful NAT configured directly on the Tier-0
+D. Deploy two separate NSX Manager clusters
+
+**Answer: B**
+
+**Explanation:** An **Active-Active Tier-0** provides ECMP and scaled throughput but **does not support stateful services**. Stateful NAT and gateway firewall run on a **Tier-1 in Active-Standby**, which still uses the same Edge cluster. Option A limits throughput to one node. Option C is unsupported. Option D is unrelated to the requirement.
+
+---
+
+### Question 3
+
+After SDDC Manager finishes an **Add Edge Cluster** workflow, the Tier-0 BGP neighbors show **Idle/Connect** and never reach **Established**. NSX validation shows Edge nodes, TEPs, and uplink segments are healthy. Which is the most probable cause?
+
+A. SDDC Manager failed to create the Tier-1 gateway
+B. The physical ToR switches are not configured with matching BGP neighbor, ASN, and VLAN settings
+C. The Edge cluster has fewer than 10 nodes
+D. The NSX Manager backup has not been configured
+
+**Answer: B**
+
+**Explanation:** SDDC Manager configures only the **NSX side** of the peering. The **physical ToR** BGP configuration (neighbor IPs, remote ASN, VLAN trunking, passwords) is the customer's responsibility. Since all NSX components are healthy, a mismatch on the physical side is most likely. A Tier-1 failure (A) would not affect Tier-0 BGP. Cluster size (C) and backups (D) don't affect BGP session establishment.
+
+---
+
+## 12. Quick Self-Check
+
+- [ ] I can explain DR vs SR and where each runs.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can list the SDDC Manager Edge prerequisites (DNS, VLANs, MTU, IPs, ToR config).
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can explain why Edge TEP VLAN must differ from Host TEP VLAN.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can compare Active-Active vs Active-Standby and name which supports stateful services.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I can describe the A/A Tier-0 + A/S Tier-1 pattern.
+<details>
+<summary>Explanation</summary>
+
+</details>
+- [ ] I know what SDDC Manager automates and what it leaves to the customer.
+<details>
+<summary>Explanation</summary>
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vcf-administrator/study-notes/vcf-07-vsan-spbm-policies" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Module 07: vSAN Storage Policy Based Management (SPBM)
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VCF Administrator Track
+  </a>
+  <a href="/certifications/vmware/vcf-administrator/study-notes/vcf-09-nsx-routing-gateways" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 09: NSX Logical Routing (Tier-0 and Tier-1 Gateways) →
+  </a>
+</div>

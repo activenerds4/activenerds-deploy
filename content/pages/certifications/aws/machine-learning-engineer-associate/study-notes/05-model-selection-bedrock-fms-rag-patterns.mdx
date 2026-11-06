@@ -1,0 +1,487 @@
+---
+title: "Module 05: Choosing Modeling Approaches: Bedrock FMs, RAG Patterns & AWS AI Services"
+description: "Task 2.1: selecting Bedrock FMs, fine-tuning strategies, custom vs managed vs pre-trained vs FM tradeoffs, RAG architecture patterns, performance/time/cost/latency tradeoffs, and Textract/Rekognition/Comprehend/Transcribe."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 5
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Domain 2, Task 2.1 (Choose appropriate modeling approaches for ML and AI solutions) - skills 2.1.1 (evaluate and select Amazon Bedrock FMs), 2.1.2 (fine-tuning strategies for pre-trained FMs), 2.1.3 (compare ML models, GenAI models, algorithms and solution templates), 2.1.4 (custom versus managed versus pre-trained versus FM trade-offs), 2.1.5 (RAG architecture patterns), 2.1.6 (performance, training time and cost), 2.1.7 (performance, latency and cost for AI models) and 2.1.8 (AWS AI services such as Amazon Textract, Amazon Rekognition, Amazon Comprehend and Amazon Transcribe).
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 2.1 (Skills 2.1.1 - 2.1.8)">
+Domain 2 is 24% of scored content. Task 2.1 is a decision task: the exam gives a business requirement and asks for the lowest-effort approach that meets it. Skills 2.1.1, 2.1.2, 2.1.4, 2.1.5 and 2.1.7 are new in MLA-C02, which means FM selection, customization strategy, RAG pattern choice and the performance-latency-cost triangle are the freshest question sources. Skills 2.1.3, 2.1.6 and 2.1.8 carry over from MLA-C01. Note that the exam guide moved the old "fine-tune with custom datasets" execution detail out of Task 2.2, while 2.1.2 keeps the strategic question: which customization approach fits the business need. Amazon Translate, Polly, Lex and Personalize are also on the in-scope services list, so know them at one-line depth.
+</Callout>
+
+---
+
+## 1. The Decision Ladder: Start With the Cheapest Approach That Works
+
+Model selection is a ladder. Move up only when the rung below cannot meet the requirement for accuracy, control, data privacy or cost.
+
+| Rung | Approach | Effort | Example |
+|---|---|---|---|
+| 1 | AWS AI service (pre-trained API) | Lowest: call an API | Extract invoice fields with Textract |
+| 2 | Foundation model through Bedrock with prompt engineering | Low: write prompts | Summarize tickets with a Bedrock model |
+| 3 | FM plus RAG | Medium: build retrieval | Answer from internal policy documents |
+| 4 | Customize an FM (fine-tune, continued pre-training, distillation) | Medium to high: curated data, training job | Consistent brand voice or domain-specific output format |
+| 5 | Train or tune a model on SageMaker AI (built-in algorithm or script mode) | High: data science and MLOps | Churn prediction on proprietary tabular data |
+| 6 | Build a model from scratch | Highest | Novel architecture, unique modality |
+
+```
+ Is there an AWS AI service that does exactly this?  --yes--> use it (2.1.8)
+        | no
+        v
+ Is it language/image generation, summarization, Q&A?  --yes--> Bedrock FM (2.1.1)
+        |                                                          |
+        | no (tabular, forecasting, ranking)                       v
+        v                                          Needs private or fresh knowledge?
+ SageMaker built-in algorithm / AutoML / custom        yes -> RAG (2.1.5)
+        (2.1.3, 2.1.6)                                 Needs a style, format or skill?
+                                                       yes -> customize (2.1.2)
+                                                       Still too slow or costly?
+                                                       yes -> smaller model / distill (2.1.7)
+```
+
+---
+
+## 2. Skill 2.1.1: Evaluating and Selecting Foundation Models in Amazon Bedrock
+
+Amazon Bedrock offers FMs from Amazon (the Nova and Titan families) and other providers such as Anthropic, Meta, Mistral AI, Cohere, AI21 Labs and Stability AI, behind one API surface. The catalog and model versions change frequently, so the exam tests selection criteria, not memorization of model names.
+
+| Criterion | Question to ask | Why it matters |
+|---|---|---|
+| Modality | Text, chat, image generation, embeddings, multimodal input? | Embedding models for retrieval, image models for generation, multimodal models for documents with charts |
+| Task quality | How does it score on **your** prompts? | Public leaderboards rarely match your domain |
+| Context window | How much input can it take? | Long documents versus RAG with small chunks |
+| Latency | Time to first token and tokens per second | Interactive chat versus background jobs |
+| Price | Per-token input and output rates, plus the capacity mode | Output tokens usually cost more than input tokens |
+| Customization | Can it be fine-tuned, continued pre-trained or distilled? | Decides whether strategy 2.1.2 is open to you |
+| Language and domain | Languages, code, reasoning ability | Multilingual customer base |
+| Availability | Is it offered in your Region, and does it support cross-Region inference? | Data residency and capacity |
+| Governance | Provider terms, guardrail support, compliance requirements | Regulated workloads |
+
+**Selection workflow:** shortlist two or three models by modality and context size, run **Amazon Bedrock Evaluations** (automatic metrics, LLM-as-a-judge or human review) on a representative prompt set, record quality, latency and cost for each, then choose the smallest model that clears the quality bar. Different tasks in one application can use different models, for example a small fast model to classify intent and a larger model for complex reasoning.
+
+```python
+import boto3
+bedrock = boto3.client("bedrock")
+
+resp = bedrock.list_foundation_models(byOutputModality="TEXT", byInferenceType="ON_DEMAND")
+for m in resp["modelSummaries"]:
+    print(m["modelId"], m["providerName"], m["customizationsSupported"])
+```
+
+The **Converse API** gives a model-agnostic request format, so swapping models during evaluation is a change of `modelId`:
+
+```python
+rt = boto3.client("bedrock-runtime")
+r = rt.converse(
+    modelId=MODEL_ID,
+    messages=[{"role": "user", "content": [{"text": "Summarize this ticket in two sentences: ..."}]}],
+    inferenceConfig={"maxTokens": 300, "temperature": 0.2},
+)
+print(r["output"]["message"]["content"][0]["text"])
+print(r["usage"]["inputTokens"], r["usage"]["outputTokens"], r["metrics"]["latencyMs"])
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Building a fair FM bake-off">
+
+A reliable comparison controls everything except the model.
+
+* **Golden prompt set:** 50 to a few hundred real prompts with reference answers or a scoring rubric, covering common, hard and adversarial cases.
+* **Same inference settings:** Same temperature, token limits and system prompt. Prompts that work well for one family may need small adjustments for another, so give each model a fair prompt pass.
+* **Multiple scorers:** Programmatic metrics (exact match, ROUGE-style overlap) suit constrained outputs. LLM-as-a-judge scales to open-ended answers. Human review is the tie-breaker for tone and safety. Use a judge model from a different family than the one being judged where possible.
+* **Operational metrics next to quality:** Measure p50 and p95 latency, time to first token, tokens consumed and total cost per 1,000 requests.
+* **Re-run on change:** Models are versioned and retired, so keep the evaluation set and rerun it before migrating to a new model version.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Skill 2.1.2: Fine-Tuning Strategies for Pre-Trained FMs
+
+Customization is a spectrum. Pick by what is missing from the base model.
+
+| Strategy | What changes | Data needed | Best for | Watch out for |
+|---|---|---|---|---|
+| Prompt engineering and few-shot examples | Nothing in the model | A few examples | Format, tone, simple tasks | Prompt length and cost per call |
+| RAG | Nothing in the model, context is added at query time | Document corpus | Fresh or private knowledge, citations | Retrieval quality |
+| Fine-tuning | Model weights adjusted on labeled input-output pairs | Labeled prompt-response examples (often hundreds to thousands) | Consistent style, output schema, task specialization | Data quality, overfitting, catastrophic forgetting of general ability |
+| Continued pre-training | Weights adjusted on unlabeled domain text | Large unlabeled domain corpus | Domain vocabulary and language (legal, medical, internal jargon) | Large data and cost, does not teach task behavior by itself |
+| Distillation | A smaller student model learns from a larger teacher's outputs | Prompts (responses are generated by the teacher) | Lower latency and cost at similar quality for a narrow task | Narrow task only, quality ceiling set by the teacher |
+| Custom Model Import | Bring weights trained elsewhere into Bedrock | Compatible model artifacts | Reuse a model you already trained or tuned | Supported architectures only |
+
+```python
+bedrock = boto3.client("bedrock")
+bedrock.create_model_customization_job(
+    jobName="support-tone-ft-01",
+    customModelName="support-tone-v1",
+    roleArn=BEDROCK_ROLE_ARN,
+    baseModelIdentifier=BASE_MODEL_ID,                 # must be a model that supports customization
+    customizationType="FINE_TUNING",                   # or CONTINUED_PRE_TRAINING, DISTILLATION
+    trainingDataConfig={"s3Uri": "s3://ml-ft/train.jsonl"},
+    outputDataConfig={"s3Uri": "s3://ml-ft/output/"},
+    hyperParameters={"epochCount": "2"},               # hyperparameter names and values are model-specific strings
+)
+```
+
+Training data is JSON Lines in S3, and the record layout is model-specific. For fine-tuning it is labeled pairs, while continued pre-training uses unlabeled text. A custom model must be hosted before use, typically through **Provisioned Throughput** (purchased in model units), so factor a standing cost into the decision. Dataset preparation for all three approaches is covered in Module 03, and execution detail in Module 06.
+
+<Callout variant="tip" title="One-line decision rule">
+Knowledge problem (facts that are private or change often): use RAG. Behavior problem (style, structure, specialized task): fine-tune. Vocabulary problem (the model does not speak your domain): continued pre-training. Cost or latency problem (a big model does a narrow job): distill or pick a smaller model.
+</Callout>
+
+---
+
+## 4. Skill 2.1.3: Comparing ML Models, GenAI Models, Algorithms and Solution Templates
+
+Choose the model family from the data type and the constraint that dominates: interpretability, domain-specific accuracy or latency.
+
+| Problem | Good starting points on AWS | Interpretability | Typical latency and cost profile |
+|---|---|---|---|
+| Tabular classification or regression | XGBoost, Linear Learner (built-in algorithms) | Linear models: high. Gradient-boosted trees: medium, explainable with SHAP through Clarify | Milliseconds, cheap CPU instances |
+| Forecasting | DeepAR built-in algorithm, or Amazon Forecast style statistical models | Medium to low | Batch or real-time, moderate |
+| Anomaly detection | Random Cut Forest | Medium | Cheap |
+| Clustering, dimensionality reduction | K-Means, PCA | Medium | Cheap |
+| Text classification with labeled data | BlazingText or a fine-tuned transformer from JumpStart | Low | Moderate |
+| Image classification or detection | Built-in image algorithms, JumpStart vision models, Rekognition Custom Labels | Low | GPU for training, CPU or GPU for inference |
+| Open-ended text or code generation, summarization, chat | FMs on Bedrock, or open models hosted from SageMaker JumpStart | Lowest | Hundreds of milliseconds to seconds, priced by tokens or instance time |
+
+**Solution templates:** SageMaker JumpStart offers pre-built solution templates and model hubs that deploy a working stack in a few clicks, and SageMaker Canvas and Autopilot provide AutoML for teams without ML code. They shorten time to a baseline, and the exam favors them when the scenario stresses speed and limited ML expertise.
+
+| If the requirement says | Prefer |
+|---|---|
+| "Regulators must understand each decision" | Linear model or tree-based model plus Clarify explanations, not a deep network |
+| "Highest accuracy on image or text, explanation not required" | Deep model or fine-tuned FM |
+| "Sub-10 ms response on millions of requests" | Small tabular model on a real-time endpoint, not an LLM |
+| "Domain-specific terminology" | Fine-tuned or continued pre-trained model, or RAG with domain documents |
+| "Control over the model, VPC isolation and custom serving" | SageMaker AI hosting (JumpStart or custom) |
+| "No infrastructure to manage" | Bedrock or an AWS AI service |
+
+---
+
+## 5. Skill 2.1.4: Custom Solutions versus Managed Services versus Pre-trained Models versus FMs
+
+| Dimension | AWS AI services | Bedrock FM (with RAG or customization) | Pre-trained model on SageMaker (JumpStart, Hugging Face) | Custom model on SageMaker |
+|---|---|---|---|---|
+| Time to value | Minutes to days | Days to weeks | Weeks | Weeks to months |
+| ML expertise | Minimal | Prompt and data skills | Moderate | High |
+| Customization | Limited (custom vocabulary, custom classifiers, custom labels) | Prompts, RAG, fine-tuning, distillation | Full fine-tuning and hosting control | Complete |
+| Data required | None or little | Documents or labeled pairs | Moderate | Large labeled dataset |
+| Infrastructure | None | Serverless, optional Provisioned Throughput | You pick and manage instances | You manage training and hosting |
+| Cost model | Per request, page, minute or character | Per token, or hourly for provisioned capacity | Instance hours | Instance hours plus engineering time |
+| Control and portability | Lowest | Low to medium | High | Highest |
+| Best fit | Standard problems (OCR, sentiment, transcription) | Generative and language tasks | Open models with data-residency or tuning needs | Proprietary tabular or unique problems |
+
+<Callout variant="warning" title="Exam Trap: Do not over-build">
+Scenario: a company wants to extract totals and vendor names from scanned invoices with a two-person team and no ML staff. Wrong answer: train a custom OCR and layout model on SageMaker. Right answer: Amazon Textract (AnalyzeExpense) because a managed service exists for exactly this task. The reverse trap also appears: if the requirement is a model on proprietary tabular features, an AI service cannot do it and SageMaker training is correct.
+</Callout>
+
+---
+
+## 6. Skill 2.1.5: Selecting RAG Architecture Patterns
+
+RAG retrieves relevant passages at query time and adds them to the prompt, so the FM answers from your data without retraining. Amazon Bedrock Knowledge Bases manages ingestion (chunking, embedding, indexing) and retrieval, and supports several vector stores including Amazon OpenSearch Service, Amazon Aurora PostgreSQL with pgvector and Amazon S3 Vectors (the exam guide also lists RDS with pgvector and S3 for skill 1.1.7). The pattern you choose depends on the question type.
+
+| Pattern | How it works | Choose when | Trade-off |
+|---|---|---|---|
+| Managed RAG (RetrieveAndGenerate) | Knowledge base retrieves, builds the prompt and calls the FM in one API call | Fastest path, standard Q&A with citations | Less control over prompt and orchestration |
+| Retrieve-only plus custom generation | Call Retrieve, then build your own prompt and model call | Custom prompt assembly, post-processing, model routing | You own the orchestration |
+| Semantic search | Embedding similarity only | Natural-language questions, paraphrased wording | Can miss exact identifiers and rare terms |
+| Hybrid search | Semantic plus keyword matching combined | Product codes, names, acronyms alongside natural language | Needs a store and configuration that support it |
+| Metadata filtering | Restrict retrieval by attributes (department, date, tenant) | Multi-tenant data, access scoping, recency | Requires good metadata at ingestion |
+| Reranking | A reranker reorders retrieved candidates by relevance before generation | Retrieval returns many loosely relevant chunks | Adds latency and cost per query |
+| Query rewriting or decomposition | Rewrite or split a complex question into sub-queries | Multi-part or vague questions | Extra model calls |
+| Hierarchical or parent-child chunking | Retrieve small chunks, return larger parent context | Precise matching but need surrounding context | Larger prompts |
+| Agentic or multi-step RAG | An agent decides when and what to retrieve, may call tools | Questions that need several lookups or actions | Higher latency and cost, more failure modes |
+| Graph or structured-data retrieval | Relationships in a graph store, or natural-language-to-SQL against structured data | Questions about connections or tabular facts | More setup and schema maintenance |
+| Multimodal RAG | Embed and retrieve images and text | Documents where figures carry meaning | Larger indexes, multimodal embedding models |
+
+```
+ User question
+      |
+      v
+ [Optional] query rewrite / decomposition
+      |
+      v
+ Embed query --> Vector store (OpenSearch / Aurora pgvector / S3 Vectors)
+      |            + metadata filter, + keyword leg for hybrid
+      v
+ Top-k chunks --> [Optional] reranker --> top-n chunks
+      |
+      v
+ Prompt = instructions + chunks + question --> FM --> answer + citations
+      |
+      v
+ [Optional] Guardrails check, logging for evaluation
+```
+
+```python
+agent_rt = boto3.client("bedrock-agent-runtime")
+
+# Managed: retrieve and generate in one call
+r = agent_rt.retrieve_and_generate(
+    input={"text": "What is the parental leave policy?"},
+    retrieveAndGenerateConfiguration={
+        "type": "KNOWLEDGE_BASE",
+        "knowledgeBaseConfiguration": {
+            "knowledgeBaseId": KB_ID,
+            "modelArn": MODEL_ARN,
+            "retrievalConfiguration": {"vectorSearchConfiguration": {
+                "numberOfResults": 5, "overrideSearchType": "HYBRID"}},
+        },
+    },
+)
+print(r["output"]["text"])
+
+# Retrieve only, with a metadata filter, then build your own prompt
+chunks = agent_rt.retrieve(
+    knowledgeBaseId=KB_ID,
+    retrievalQuery={"text": "parental leave policy"},
+    retrievalConfiguration={"vectorSearchConfiguration": {
+        "numberOfResults": 5,
+        "filter": {"equals": {"key": "department", "value": "hr"}}}},
+)["retrievalResults"]
+```
+
+| Choose RAG when | Choose fine-tuning when |
+|---|---|
+| Knowledge changes often | Behavior or format must be consistent |
+| You need citations and traceability | Knowledge is stable and fits the training set |
+| Data is private and access-controlled per user | You want shorter prompts and lower latency per call |
+| You want updates without retraining | The task is narrow and well defined |
+
+RAG and fine-tuning are complementary: a fine-tuned model can still use retrieval. Chunking, embeddings and refresh cycles are covered in Modules 03 and 11, and retrieval evaluation in Module 12.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why RAG answers go wrong and where to fix them">
+
+Diagnose by stage, because the fix differs.
+
+* **Ingestion:** Poor parsing of tables or PDFs, chunks that split a fact in half. Fix chunking strategy and document parsing.
+* **Retrieval:** The right passage exists but is not in the top results. Try hybrid search, a better embedding model, metadata filters, query rewriting or a reranker. Raising k alone floods the prompt with noise.
+* **Generation:** The passage is retrieved but the model ignores or contradicts it. Tighten the prompt to answer only from the provided context, use a model with a larger context window, add citations, and screen with Guardrails (contextual grounding checks).
+* **Freshness:** Stale answers mean the index was not refreshed. Schedule or trigger knowledge base sync.
+* **Evaluation:** Score retrieval (relevance, coverage) separately from generation (faithfulness to context), because a single end-to-end score hides which stage failed.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Vector store selection signals">
+
+OpenSearch Service suits large-scale, low-latency search that also needs keyword and hybrid capabilities. Aurora PostgreSQL with pgvector suits teams that already run relational data and want vectors beside it with SQL filtering. S3 Vectors targets cost-efficient storage of very large embedding collections where sub-second rather than single-digit-millisecond retrieval is acceptable. Pick by query latency target, scale, existing skills and cost, and confirm current feature support in the Bedrock documentation because capabilities evolve.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 7. Skills 2.1.6 and 2.1.7: Performance, Training Time, Latency and Cost Trade-offs
+
+### Skill 2.1.6: Performance versus training time versus cost (classic ML)
+
+| Lever | Effect on time | Effect on cost | Effect on accuracy |
+|---|---|---|---|
+| Bigger or GPU instance, distributed training | Faster | Higher hourly rate, often similar total | Same |
+| Managed Spot training with checkpointing | Can wait for capacity | Substantial discount | Same |
+| Early stopping (training or tuning) | Shorter | Lower | Neutral if validation metric has plateaued |
+| Fewer tuning trials or a smarter strategy (Bayesian, Hyperband) | Shorter | Lower | Slight risk of missing the optimum |
+| Transfer learning from a pre-trained model | Much shorter | Lower | Often higher with little data |
+| More data or a bigger model | Longer | Higher | Diminishing returns |
+| Built-in algorithm instead of custom code | Less engineering time | Less engineering cost | Competitive on standard problems |
+
+```python
+from sagemaker.estimator import Estimator
+
+est = Estimator(
+    image_uri=IMAGE_URI, role=ROLE_ARN,
+    instance_count=1, instance_type="ml.g5.xlarge",
+    use_spot_instances=True,
+    max_run=7200,                      # training time limit in seconds
+    max_wait=14400,                    # must be at least max_run, includes waiting for Spot capacity
+    checkpoint_s3_uri="s3://ml-train/checkpoints/job-01/",
+)
+```
+
+### Skill 2.1.7: Performance versus latency versus cost (GenAI inference)
+
+GenAI cost scales with tokens, and latency scales with output length and model size.
+
+| Lever | Latency | Cost | Quality impact |
+|---|---|---|---|
+| Smaller or distilled model | Lower | Lower | May drop on hard tasks |
+| Shorter prompts and capped output tokens | Lower | Lower | Risk of truncation |
+| Prompt caching for repeated prefixes | Lower | Lower for cached input | None |
+| Streaming responses | Lower perceived latency (time to first token) | Same | None |
+| Batch inference for non-interactive work | Higher (asynchronous) | Lower per token than on-demand | None |
+| Provisioned Throughput | Predictable | Fixed hourly commitment, wasteful at low volume | None |
+| Latency-optimized or routed inference options, cross-Region inference profiles | Lower or steadier | Varies | Depends on the option |
+| RAG with fewer, reranked chunks | Lower | Lower | Often higher precision |
+| Caching responses to repeated questions | Lowest | Lowest | Risk of stale answers |
+
+<Callout variant="tip" title="Match capacity mode to traffic shape">
+Spiky or unpredictable traffic: on-demand. Steady high volume with strict throughput needs, or any custom model: Provisioned Throughput. Large offline jobs such as summarizing a million documents overnight: batch inference. For SageMaker-hosted models the equivalent choices are real-time endpoints, serverless inference, asynchronous inference and batch transform.
+</Callout>
+
+---
+
+## 8. Skill 2.1.8: Applying AWS AI Services to Business Problems
+
+These are fully managed, pre-trained APIs. You send data, you get structured results, and you do not manage models.
+
+| Service | What it does | Typical use | Key notes |
+|---|---|---|---|
+| Amazon Textract | OCR plus structure extraction: forms (key-value pairs), tables, queries, expenses, identity documents | Invoice, receipt and ID processing | Synchronous calls for single images or one-page documents, asynchronous (Start and Get operations through S3) for multi-page PDFs |
+| Amazon Rekognition | Image and video analysis: labels, faces, text in images, content moderation, custom labels | Moderation, face matching, object detection | Custom Labels trains on your images for domain-specific classes |
+| Amazon Comprehend | NLP: sentiment, entities, key phrases, language detection, PII detection, toxicity, custom classification and entities, topic modeling | Support-ticket analytics, PII discovery | Comprehend Medical handles clinical text |
+| Amazon Transcribe | Speech to text: custom vocabulary, speaker identification, redaction of PII, call analytics | Call-center transcripts, captions | Batch and streaming modes |
+| Amazon Translate | Neural machine translation, custom terminology | Localizing content and multilingual pipelines | Also useful for text augmentation by back-translation |
+| Amazon Polly | Text to speech with SSML control and neural voices | Voice responses, accessibility | Output is audio |
+| Amazon Lex | Conversational interfaces (intents, slots, fulfillment through Lambda) | Chatbots and voice bots | Pair with Bedrock for generative answers |
+| Amazon Personalize | Recommendations and personalization from interaction data | Product, content and next-best-action recommendations | You supply user, item and interaction data and a recipe |
+
+```python
+import boto3
+textract = boto3.client("textract")
+doc = textract.analyze_document(
+    Document={"S3Object": {"Bucket": "ml-docs", "Name": "contracts/page1.png"}},
+    FeatureTypes=["FORMS", "TABLES"])
+
+comprehend = boto3.client("comprehend")
+sent = comprehend.detect_sentiment(Text="The agent solved my issue quickly.", LanguageCode="en")
+print(sent["Sentiment"])
+
+rek = boto3.client("rekognition")
+labels = rek.detect_labels(Image={"S3Object": {"Bucket": "ml-img", "Name": "shelf.jpg"}},
+                           MaxLabels=10, MinConfidence=80)
+
+transcribe = boto3.client("transcribe")
+transcribe.start_transcription_job(
+    TranscriptionJobName="call-0001", Media={"MediaFileUri": "s3://ml-audio/call-0001.mp3"},
+    MediaFormat="mp3", LanguageCode="en-US", OutputBucketName="ml-transcripts")
+```
+
+```
+ Scanned claim form -> Textract (fields, tables) -> Comprehend (PII, entities)
+                                                        |
+ Call recording -> Transcribe (text, redaction) --------+--> Bedrock FM (summary, triage)
+                                                        |
+                                              Translate (other languages)
+```
+
+| Business problem | Service | Not this |
+|---|---|---|
+| Pull line items from invoices | Textract AnalyzeExpense | Custom OCR model |
+| Detect unsafe user-uploaded images | Rekognition content moderation | Training a classifier |
+| Find customer sentiment in reviews | Comprehend | Fine-tuning an LLM for a basic sentiment task |
+| Turn call audio into searchable text | Transcribe | Building speech recognition |
+| Show recommendations on a shop page | Personalize | A hand-built collaborative filter |
+| Support chatbot with intents and slots | Lex (optionally with Bedrock) | Custom NLU code |
+| Read text aloud for accessibility | Polly | Self-hosted TTS |
+| Translate a product catalog | Translate | Training a translation model |
+
+---
+
+## 9. Common Traps and Scenario Reasoning
+
+<Callout variant="warning" title="Exam Trap: The question is usually about the cheapest sufficient approach">
+When two answers both work, prefer the one with less operational effort (managed service over custom training, RAG over retraining for changing knowledge, batch over real-time for offline work, smaller model over larger when quality is met). Reject answers that retrain a model to solve a knowledge-freshness problem or that deploy an LLM where a sub-10 ms tabular model suffices.
+</Callout>
+
+**Scenario 1.** A bank's HR assistant must answer from policy documents that change every week and must cite the source section.
+*Wrong answer:* Fine-tune a foundation model every week on the new policies. *Right answer:* Bedrock Knowledge Bases RAG with scheduled sync, because it handles changing knowledge with citations and no retraining.
+
+**Scenario 2.** A lender must explain each loan decision to regulators, and a deep network scored slightly higher AUC than gradient-boosted trees.
+*Wrong answer:* Ship the deep network for the best AUC. *Right answer:* Use XGBoost or a linear model and explain predictions with Clarify, since interpretability is the binding constraint (skill 2.1.3).
+
+**Scenario 3.** Nightly, 800,000 product descriptions must be rewritten. Nobody waits for the results.
+*Wrong answer:* Real-time on-demand calls to the largest available model. *Right answer:* Bedrock batch inference with a smaller model that meets the quality bar, because the work is asynchronous and cost-sensitive (skill 2.1.7).
+
+**Scenario 4.** A support chatbot must always return answers in a strict JSON schema with the company's tone, and knowledge is stable.
+*Wrong answer:* Add a vector database. *Right answer:* Fine-tuning (or careful prompting and structured output) addresses behavior, whereas retrieval addresses knowledge (skill 2.1.2).
+
+**Scenario 5.** A startup with no ML team needs to classify the sentiment of customer emails by tomorrow.
+*Wrong answer:* Train a BERT model on SageMaker. *Right answer:* Amazon Comprehend `detect_sentiment`, since a pre-trained managed service meets the need (skills 2.1.4 and 2.1.8).
+
+**Scenario 6.** Multi-page scanned PDFs fail when sent to a synchronous Textract call.
+*Wrong answer:* Increase the Lambda timeout. *Right answer:* Use the asynchronous Textract operations (StartDocumentAnalysis, then retrieve results), which accept multi-page PDFs from S3.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can list the criteria for selecting a Bedrock FM and describe how to evaluate candidates (skill 2.1.1).
+<details>
+<summary>Explanation</summary>
+
+Criteria are modality, task quality on your own prompts, context window, latency (including time to first token), per-token price and capacity mode, supported customization, language and domain strength, Regional availability and governance. Shortlist by modality and context size, run Bedrock Evaluations on a representative prompt set with the same inference settings, compare quality, latency and cost, and select the smallest model that meets the quality bar. The Converse API makes swapping models during evaluation a change of model ID.
+
+</details>
+
+- [ ] I can match a business need to prompt engineering, RAG, fine-tuning, continued pre-training or distillation (skill 2.1.2).
+<details>
+<summary>Explanation</summary>
+
+Facts that are private or change often point to RAG. Consistent style, structure or a specialized task points to fine-tuning on labeled prompt-response pairs. Domain vocabulary and language points to continued pre-training on unlabeled domain text. A big model doing a narrow job too slowly or expensively points to distillation into a smaller model. Custom Model Import brings in weights trained elsewhere. Custom models are typically served through Provisioned Throughput, which adds a standing cost.
+
+</details>
+
+- [ ] I can pick an algorithm family when interpretability, domain performance or latency dominates (skill 2.1.3).
+<details>
+<summary>Explanation</summary>
+
+Interpretability first: linear models or trees, or boosted trees with Clarify SHAP explanations. Maximum accuracy on unstructured data: deep models or fine-tuned FMs. Tight latency: small tabular models on real-time endpoints. Fast baseline with limited expertise: JumpStart solution templates or SageMaker Canvas and Autopilot. Open-ended generation: Bedrock FMs, or JumpStart open models when you need hosting control.
+
+</details>
+
+- [ ] I can compare AI services, Bedrock FMs, pre-trained SageMaker models and custom training on effort, control and cost (skill 2.1.4).
+<details>
+<summary>Explanation</summary>
+
+AI services offer the fastest time to value with the least control and per-request pricing. Bedrock FMs add prompt, RAG and customization options on a serverless, per-token model. Pre-trained models on SageMaker give hosting and tuning control at instance-hour cost. Custom training offers full control for proprietary or unusual problems at the highest effort. Choose the lowest rung that meets accuracy, privacy and control requirements.
+
+</details>
+
+- [ ] I can choose a RAG pattern from use case requirements (skill 2.1.5).
+<details>
+<summary>Explanation</summary>
+
+Standard Q&A with citations: managed RetrieveAndGenerate. Custom prompt assembly or routing: Retrieve plus your own generation call. Exact identifiers alongside natural language: hybrid search. Tenant or department scoping: metadata filters. Noisy top-k: reranking. Complex multi-part questions: query decomposition or agentic RAG. Relationship or structured-data questions: graph or text-to-SQL retrieval. Documents with meaningful figures: multimodal RAG. Diagnose failures by stage (ingestion, retrieval, generation, freshness) before changing the architecture.
+
+</details>
+
+- [ ] I can reason about the performance, training time, latency and cost triangle for both classic ML and GenAI (skills 2.1.6 and 2.1.7).
+<details>
+<summary>Explanation</summary>
+
+For training: Spot with checkpointing, early stopping, smarter tuning strategies and transfer learning cut time and cost without hurting accuracy much, while larger models and more data show diminishing returns. For GenAI inference: smaller or distilled models, shorter prompts, capped output, prompt caching and streaming reduce latency or cost, batch inference lowers cost for offline work, and Provisioned Throughput trades a fixed commitment for predictability. Always state which constraint dominates before choosing.
+
+</details>
+
+- [ ] I can map a business problem to the right AWS AI service and avoid common mismatches (skill 2.1.8).
+<details>
+<summary>Explanation</summary>
+
+Textract for documents (forms, tables, expenses, IDs; asynchronous for multi-page PDFs), Rekognition for images and video including moderation, Comprehend for text analytics and PII, Transcribe for speech to text, Translate for translation, Polly for text to speech, Lex for conversational bots, Personalize for recommendations. Pick the managed service over custom training whenever it covers the task, and combine services (Textract then Comprehend then a Bedrock FM) for multi-step pipelines.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/04-data-quality-bias-labeling-cleaning" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 04: Data Quality, Labeling, Bias Detection & Data Cleaning
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/06-sagemaker-training-tuning-customization" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 06: Training, Tuning & Customizing Models with SageMaker AI →
+  </a>
+</div>

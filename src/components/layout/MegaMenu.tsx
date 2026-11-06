@@ -223,7 +223,9 @@ function CascadingMegaMenuPanel({
                       ? "interactive utilities"
                       : item.id === "deep-learning"
                         ? "guides & certifications"
-                        : "resources"}{" "}
+                        : item.id === "certifications"
+                          ? "exam artifacts & tracks"
+                          : "resources"}{" "}
                     available
                   </p>
                 </div>
@@ -231,9 +233,13 @@ function CascadingMegaMenuPanel({
                   Select item
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-1 max-h-[380px] overflow-y-auto pr-1">
+              <div key={activeGroup.label} className="grid grid-cols-1 gap-1 max-h-[380px] overflow-y-auto pr-1">
                 {activeGroup.items.map((child) => (
-                  <MegaMenuLink key={child.href} child={child} onClose={onClose} />
+                  <MegaMenuLink
+                    key={`${activeGroup.label}-${child.label}-${child.href}`}
+                    child={child}
+                    onClose={onClose}
+                  />
                 ))}
               </div>
             </div>

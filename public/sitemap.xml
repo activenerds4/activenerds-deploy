@@ -21,6 +21,42 @@
     <priority>0.5</priority>
   </url>
   <url>
+    <loc>https://www.activenerds.com/blog/eks-auto-mode-gateway-api-setup-migration</loc>
+    <lastmod>2026-11-04</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/blog/ergonomic-setups-desk-workers-cochrane-evidence</loc>
+    <lastmod>2026-11-04</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/blog/github-npm-package-firewall-setup-guide</loc>
+    <lastmod>2026-11-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/blog/kubernetes-1-37-deprecations-ipvs-kubedns-migration</loc>
+    <lastmod>2026-11-03</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/blog/verify-k8s-images-slsa-verification-summaries</loc>
+    <lastmod>2026-11-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/blog/litellm-supply-chain-compromise-credential-rotation</loc>
+    <lastmod>2026-11-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://www.activenerds.com/blog/deep-work-environment-setup</loc>
     <lastmod>2026-08-13</lastmod>
     <changefreq>weekly</changefreq>
@@ -1035,6 +1071,21 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://www.activenerds.com/category/containers-kubernetes</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/category/fitness-wellness-tech</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/category/devsecops-security</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://www.activenerds.com/category/focus-productivity</loc>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
@@ -1060,32 +1111,17 @@
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://www.activenerds.com/category/devsecops-security</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://www.activenerds.com/category/fitness-wellness-tech</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://www.activenerds.com/category/containers-kubernetes</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
     <loc>https://www.activenerds.com/tag/kubernetes</loc>
     <changefreq>weekly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://www.activenerds.com/tag/habit-building</loc>
+    <loc>https://www.activenerds.com/tag/devsecops</loc>
     <changefreq>weekly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://www.activenerds.com/tag/devsecops</loc>
+    <loc>https://www.activenerds.com/tag/habit-building</loc>
     <changefreq>weekly</changefreq>
     <priority>0.5</priority>
   </url>
@@ -1140,7 +1176,102 @@
     <priority>0.5</priority>
   </url>
   <url>
+    <loc>https://www.activenerds.com/tag/supply-chain</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
     <loc>https://www.activenerds.com/tag/fitness-trackers</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/networking</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/aws</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/eks</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/gateway-api</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/desk-setup</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/wellness</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/productivity</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/remote-work</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/npm</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/github</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/security</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/devops</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/nftables</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/coredns</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/cosign</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/slsa</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/ai-security</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.activenerds.com/tag/python</loc>
     <changefreq>weekly</changefreq>
     <priority>0.5</priority>
   </url>

@@ -1,0 +1,190 @@
+---
+title: "Module 02: IAM, STS & Identity Federation"
+description: "Policy evaluation logic, roles, cross-account access, STS, IAM Identity Center, Directory Service, and Cognito identity flows."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 2
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 1.1 — IAM users, groups, roles, policies, STS, cross-account access, federation, IAM Identity Center, AWS Directory Service, root user best practices
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1, Task 1.1 — Design secure access to AWS resources">
+Expect scenarios about granting a service or another account access without long-lived keys, federating a corporate directory, and applying least privilege. The right answer is almost always an **IAM role with temporary credentials**, not an IAM user with access keys.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: IAM policy evaluation logic">
+
+When a request is made, AWS evaluates all applicable policies in this order of precedence:
+
+1. **Explicit deny** in any policy always wins.
+2. **Organizations SCPs** must allow the action (they filter; they never grant).
+3. **Resource-based policies** may grant access (within the same account, this alone can be sufficient).
+4. **Permissions boundaries** must allow the action (for the principal that has one).
+5. **Session policies** (passed during AssumeRole or federation) must allow the action.
+6. **Identity-based policies** must allow the action.
+7. Anything not explicitly allowed is **implicitly denied**.
+
+For **cross-account** requests, both the identity-based policy in the caller's account and the resource-based policy (or role trust) in the owning account must allow the action.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Roles, trust policies, and temporary credentials">
+
+A role has two policy types: a **trust policy** (who can assume it) and **permission policies** (what it can do). AWS STS returns temporary credentials (access key, secret key, session token).
+
+* Default role session duration is 1 hour; the maximum is configurable from 1 to 12 hours. Role chaining caps sessions at 1 hour.
+* **EC2 instance profile** delivers role credentials to instances through the instance metadata service; never embed access keys on instances.
+* **ExternalId** in a trust policy protects against the confused deputy problem when granting access to a third party.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Identity construct | Use for | Credentials | Exam note |
+|---|---|---|---|
+| Root user | Few account-level tasks (change support plan, close account) | Email and password plus MFA | No access keys; enable MFA; do not use daily |
+| IAM user | Legacy long-lived access | Password, access keys | Avoid; prefer roles or Identity Center |
+| IAM group | Collective permissions for users | None | Groups cannot be nested; cannot be a principal in a policy |
+| IAM role | Services, cross-account, federation | Temporary via STS | The default best-practice answer |
+| IAM Identity Center | Workforce SSO to many accounts and apps | Temporary via permission sets | Replaces per-account IAM users for people |
+| Amazon Cognito | Customer-facing app users | Tokens (user pools) and AWS credentials (identity pools) | Not for your workforce |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+Cross-account access with a role
+
+ Account A (222222222222)                       Account B (111111111111)
+ +-----------------------+   1. sts:AssumeRole  +--------------------------+
+ | IAM user / role       | -------------------> | Role: ReadReports        |
+ | (needs sts:AssumeRole |                      |  Trust: Account A        |
+ |  permission)          | <------------------- |  Perms: s3:GetObject     |
+ +-----------------------+   2. temp creds      +--------------------------+
+            |                                               |
+            +---------- 3. call S3 with temp creds ---------+
+```
+
+| STS API | Caller authenticates with | Typical use |
+|---|---|---|
+| AssumeRole | IAM principal | Cross-account, role switching |
+| AssumeRoleWithSAML | SAML 2.0 assertion | Enterprise federation (for example AD FS) |
+| AssumeRoleWithWebIdentity | OIDC token | Mobile or web identity providers (Cognito is preferred) |
+| GetSessionToken | IAM user (with MFA) | Enforce MFA for API calls |
+
+### Federation and directories
+
+| Option | What it does | Choose when |
+|---|---|---|
+| IAM Identity Center | Central workforce SSO across Organizations accounts; permission sets; SAML and SCIM with external IdPs | Many accounts, employees need console and CLI access |
+| SAML 2.0 federation to IAM | IdP asserts to STS to assume a role | Single account or custom IdP integration |
+| AWS Managed Microsoft AD | Real AD in AWS; supports trust to on-premises AD | Need AD-aware workloads and trusts |
+| AD Connector | Proxy that redirects to on-premises AD | Use existing on-premises AD without replicating |
+| Simple AD | Small standalone Samba-based directory | Basic needs, no trust to on-premises AD |
+| Cognito user pools / identity pools | Sign-up/sign-in for customers; exchange tokens for AWS credentials | Mobile and web apps |
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowOrgReadOnly",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::example-reports/*",
+      "Condition": {
+        "StringEquals": { "aws:PrincipalOrgID": "o-exampleorgid" }
+      }
+    }
+  ]
+}
+```
+
+```bash
+# Assume a cross-account role and receive temporary credentials
+aws sts assume-role \
+  --role-arn arn:aws:iam::111111111111:role/ReadReports \
+  --role-session-name audit-session \
+  --external-id 12345
+
+# Find unintended external access to resources
+aws accessanalyzer list-findings --analyzer-arn <analyzer-arn>
+```
+
+**Least-privilege workflow:** start with AWS managed policies, then use IAM Access Analyzer policy generation (from CloudTrail activity) to tighten, and use last-accessed data to remove unused permissions. **Permissions boundaries** cap the maximum permissions an identity can be granted, which is how you safely delegate role creation to developers.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Storing access keys in code, AMIs, or environment variables. Use roles (instance profile, task role, Lambda execution role).
+- **Trap 2:** Believing an SCP grants permissions. It only restricts; an identity policy must still allow the action.
+- **Trap 3:** Using Cognito for employee access or IAM Identity Center for customers. Cognito is for app customers; Identity Center is for workforce.
+- **Trap 4:** Forgetting that cross-account needs both sides: the caller's permission to assume the role and the role's trust policy.
+- **Trap 5:** Using the root user for routine administration. Lock it down with MFA and use it only for tasks that require it.
+- **Trap 6:** Sharing IAM user credentials across people. Create separate identities; prefer federation.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can trace an access decision through explicit deny, SCP, boundary, and identity policy.
+<details>
+<summary>Explanation</summary>
+
+An explicit deny anywhere ends evaluation with a denial. Otherwise the action must be allowed by every applicable filter (SCPs, permissions boundary, session policy) and by at least one grant (identity-based or resource-based policy). If nothing grants it, the default implicit deny applies.
+
+</details>
+
+- [ ] I can design cross-account access using roles instead of shared credentials.
+<details>
+<summary>Explanation</summary>
+
+Create a role in the resource account whose trust policy names the other account (or specific principal), attach permissions, and grant the caller sts:AssumeRole. The caller receives short-lived credentials. Add an ExternalId condition for third-party access to prevent the confused deputy problem.
+
+</details>
+
+- [ ] I can pick the right federation service for a workforce versus customers.
+<details>
+<summary>Explanation</summary>
+
+Workforce users across multiple AWS accounts use IAM Identity Center (integrated with Organizations and an external IdP or Active Directory). Customer-facing application users use Amazon Cognito user pools for authentication and identity pools to obtain scoped AWS credentials.
+
+</details>
+
+- [ ] I can choose between AWS Managed Microsoft AD, AD Connector, and Simple AD.
+<details>
+<summary>Explanation</summary>
+
+Managed Microsoft AD hosts a real directory in AWS and can establish trusts with on-premises AD. AD Connector is only a proxy to on-premises AD and stores nothing in AWS. Simple AD is a low-cost standalone directory for basic needs and cannot trust on-premises AD.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/01-well-architected-global-infrastructure" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 01: Well-Architected Framework, Global Infrastructure & Exam Strategy
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/03-multi-account-governance" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 03: Multi-Account Governance with Organizations, SCPs & Control Tower →
+  </a>
+</div>

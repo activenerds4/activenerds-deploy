@@ -1,0 +1,213 @@
+---
+title: "Kubernetes 1.37 Deprecations: Migrating Off IPVS, KubeDNS, and Removed kubectl Flags"
+slug: kubernetes-1-37-deprecations-ipvs-kubedns-migration
+description: "A technical migration guide for Kubernetes 1.37 deprecations and removals, covering the transition from IPVS to nftables in kube-proxy, retiring legacy KubeDNS, and updating automated kubectl scripts."
+date: "2026-11-03"
+author: activenerds-team
+category: containers-kubernetes
+tags: ["kubernetes", "devops", "networking", "nftables", "coredns"]
+featured: true
+relatedArticles: ["deploy-secure-k8s-cilium", "kubernetes-network-policies-tutorial", "k8s-crashloopbackoff-troubleshooting", "k8s-operators-explained", "kubernetes-multi-cluster-management"]
+image: https://cdn.activenerds.com/images/posts/kubernetes-1-37-deprecations-ipvs-kubedns-migration.png
+imageAlt: "Kubernetes 1.37 deprecations guide — IPVS proxy mode migration to nftables, CoreDNS migration, and kubectl flag cleanups"
+published: true
+---
+
+<Callout variant="warning" title="Release Cycle Notice">
+With the release of **Kubernetes v1.37**, several long-standing networking modes, legacy DNS configurations, and deprecated `kubectl` flags have officially crossed the threshold from "deprecated" to "removed". Review this guide before updating your control planes or node pools.
+</Callout>
+
+Upgrading Kubernetes clusters is routine, but major deprecation cycles require proactive planning. While previous releases focused on PodSecurityPolicy removals and Storage API cleanups, **Kubernetes 1.37** targets lower-level networking and CLI primitives:
+
+1. **IPVS mode in `kube-proxy`** is deprecated in favor of the modern, native **`nftables`** backend.
+2. The legacy **KubeDNS** compatibility layer has reached end-of-life, requiring complete migration to CoreDNS.
+3. Several legacy `kubectl` CLI flags frequently baked into older CI/CD automation pipelines have been purged.
+
+Here is what you need to check and how to execute a zero-downtime migration.
+
+---
+
+## 1. What's Deprecated and Removed in Kubernetes 1.37
+
+| Component / Subsystem | Status in v1.37 | Recommended Replacement | Impacted Workloads |
+|---|---|---|---|
+| **`kube-proxy` IPVS Mode** | Formally Deprecated / Maintenance Only | `nftables` mode (GA) or eBPF (Cilium / Calico) | Large clusters relying on IPVS for 10k+ services. |
+| **KubeDNS Compatibility** | Completely Removed | CoreDNS (default since v1.13) | Very old clusters or bespoke enterprise bare-metal builds. |
+| **`kubectl --export` / `--record`** | Completely Removed | GitOps declarative manifests / `kubectl diff` | Automated deployment scripts and legacy CI runners. |
+| **`--short` flag in `kubectl version`** | Removed | `kubectl version --output=json` or `yaml` | CI status checkers and parsing scripts. |
+
+---
+
+## 2. Checking Your Clusters for Affected Usage
+
+Before scheduling cluster upgrades, audit your running node configurations and tooling.
+
+### Step 2.1: Audit kube-proxy Mode
+
+Inspect the `kube-proxy` ConfigMap across your clusters:
+
+```bash
+kubectl get configmap kube-proxy -n kube-system -o yaml | grep mode
+```
+
+If the output shows `mode: "ipvs"`, you are running the legacy IPVS backend and must prepare for the `nftables` transition.
+
+### Step 2.2: Verify Cluster DNS Provider
+
+Verify whether any node or namespace still points to KubeDNS:
+
+```bash
+kubectl get deployments -n kube-system -l k8s-app=kube-dns -o wide
+kubectl get deployments -n kube-system -l k8s-app=coredns -o wide
+```
+
+If your pods rely on a deployment named `kube-dns` that runs `k8s.gcr.io/k8s-dns-kube-dns-amd64`, migration to CoreDNS is non-negotiable before booting 1.37 nodes.
+
+### Step 2.3: Scan Git Repositories for Removed `kubectl` Flags
+
+Run a regex search across your repository infrastructure:
+
+```bash
+git grep -E "kubectl.*(--export|--record|version.*--short)"
+```
+
+Replace instances of `kubectl version --short` with:
+
+```bash
+# Modern equivalent for version parsing
+kubectl version -o json | jq -r '.serverVersion.gitVersion'
+```
+
+---
+
+## 3. The IPVS to `nftables` Migration Path
+
+For years, when clusters scaled beyond 5,000 Services, the linear lookup penalty of `iptables` forced operators onto `ipvs`. However, IPVS required specialized kernel modules (`ip_vs`, `ip_vs_rr`, `ip_vs_wrr`), suffered from synchronization edge cases with network namespaces, and lacked dual-stack feature parity.
+
+Kubernetes introduced the **`nftables` proxy mode**, which provides logarithmic lookup speeds comparable to IPVS without kernel module overhead.
+
+```
+Legacy (v1.18 - v1.36):
+kube-proxy ---> IPVS Kernel Module (ipset + ipvsadm tables)
+
+Modern (v1.37+):
+kube-proxy ---> nftables Engine (Integrated set lookups, fast packet classification)
+```
+
+### Transitioning kube-proxy to `nftables`
+
+1. **Verify Host Kernel Support**: Ensure worker nodes run Linux kernel 5.10 or higher with `nftables` enabled:
+
+```bash
+# Verify nftables support on worker nodes
+uname -r
+nft list tables > /dev/null 2>&1 && echo "nftables supported" || echo "Upgrade Kernel"
+```
+
+2. **Update the `kube-proxy` ConfigMap**:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-proxy
+  namespace: kube-system
+data:
+  config.conf: |
+    apiVersion: kubeproxy.config.k8s.io/v1alpha1
+    kind: KubeProxyConfiguration
+    mode: "nftables"
+    nftables:
+      masqueradeAll: false
+      syncPeriod: 30s
+      minSyncPeriod: 2s
+```
+
+3. **Perform a Rolling DaemonSet Restart**:
+
+```bash
+kubectl rollout restart daemonset kube-proxy -n kube-system
+kubectl rollout status daemonset kube-proxy -n kube-system
+```
+
+4. **Clean Up Lingering IPVS Tables**:
+
+```bash
+# On worker nodes after kube-proxy has restarted in nftables mode
+sudo ipvsadm -C
+```
+
+---
+
+## 4. Retiring KubeDNS in Favor of CoreDNS
+
+If you maintain long-lived bare-metal clusters that never migrated from KubeDNS, deploy CoreDNS prior to upgrading the control plane.
+
+### Step 4.1: Deploy CoreDNS
+
+Deploy the standardized CoreDNS configuration with AutoPath and cache plugins:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health {
+            lameduck 5s
+        }
+        ready
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+            pods insecure
+            fallthrough in-addr.arpa ip6.arpa
+            ttl 30
+        }
+        prometheus :9153
+        forward . /etc/resolv.conf
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+```
+
+Point your cluster Service `kube-dns` cluster IP to the CoreDNS service selector:
+
+```bash
+kubectl patch service kube-dns -n kube-system \
+  -p '{"spec":{"selector":{"k8s-app":"coredns"}}}'
+```
+
+---
+
+## 5. Kubernetes 1.37 Pre-Upgrade Checklist
+
+Use this checklist before applying the 1.37 binary update:
+
+```
+[ ] 1. Kernel Verification:
+    - Worker nodes running Linux kernel >= 5.10.
+    - nftables CLI tool installed on base host OS image.
+
+[ ] 2. Proxy Mode Transition:
+    - kube-proxy ConfigMap updated from 'ipvs' to 'nftables' (or Cilium eBPF replacement).
+    - Existing Service traffic validated across pod failover tests.
+
+[ ] 3. DNS Verification:
+    - KubeDNS completely decommissioned; CoreDNS handling all internal and upstream lookups.
+    - Test DNS resolution: `kubectl run dns-test --image=busybox:1.36 --rm -it -- nslookup kubernetes.default`
+
+[ ] 4. CI/CD Script Audit:
+    - All occurrences of `kubectl version --short` migrated to JSON output parsing.
+    - All occurrences of `--export` and `--record` flags eliminated.
+
+[ ] 5. Backup & Control Plane Health:
+    - etcd snapshot taken and tested.
+    - All node conditions reporting `Ready` without DiskPressure or MemoryPressure.
+```
+
+By executing these configuration updates ahead of time, your clusters will smoothly transition to Kubernetes 1.37 with improved networking performance and simplified maintenance.

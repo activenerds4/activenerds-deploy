@@ -26,3 +26,8 @@ export { default as SponsoredBadge } from "./SponsoredBadge";
 export { default as PollWidget } from "@/components/growth/PollWidget";
 export { default as TrackCard } from "./TrackCard";
 export { default as ModuleCard } from "./ModuleCard";
+export { default as VendorCard } from "./VendorCard";
+export { default as CertTrackCard } from "./CertTrackCard";
+export { default as TrackResourceTabs } from "./TrackResourceTabs";
+export { default as ExamResourceCard } from "./ExamResourceCard";
+export { default as ResourceCard } from "./ResourceCard";

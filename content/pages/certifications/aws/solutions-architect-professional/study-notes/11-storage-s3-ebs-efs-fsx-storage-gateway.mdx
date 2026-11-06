@@ -1,0 +1,180 @@
+---
+title: "Module 11: Storage Architecture: S3, EBS, EFS, FSx & Storage Gateway"
+description: "Storage class economics, EBS volume types, shared file system selection, S3 replication, Object Lock and hybrid storage."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 11
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Storage class economics, EBS volume types, shared file system selection, S3 replication, Object Lock and hybrid storage.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 2.5 and 4.3 Storage Selection">
+Pick the storage service from the access pattern (object, block, file), protocol (NFS, SMB, iSCSI), performance profile and cost tier. Know S3 storage classes, replication and Object Lock details, and which file system supports Windows, Linux, HPC or multi-protocol needs.
+</Callout>
+
+---
+
+## 1. Choosing Among Storage Services
+
+| Need | Service |
+|---|---|
+| Unlimited object store, web-scale, data lake | Amazon S3 |
+| Block volume for a single EC2 instance (boot, database) | Amazon EBS |
+| Ultra-fast local scratch | EC2 instance store (ephemeral) |
+| Shared POSIX file system for Linux (NFSv4) | Amazon EFS |
+| Shared SMB file system with Active Directory | FSx for Windows File Server |
+| HPC, ML training, fast S3-linked scratch | FSx for Lustre |
+| Multi-protocol (NFS, SMB, iSCSI), snapshots, SnapMirror, NetApp migration | FSx for NetApp ONTAP |
+| ZFS-based NFS with snapshots, low latency | FSx for OpenZFS |
+| Hybrid cloud access to AWS storage | AWS Storage Gateway |
+| Backup of many services | AWS Backup |
+
+## 2. Amazon S3
+
+**Storage classes:**
+
+| Class | Retrieval | Minimum duration | Notes |
+|---|---|---|---|
+| Standard | Instant | None | Frequent access |
+| Intelligent-Tiering | Instant (frequent, infrequent, archive instant tiers); optional async archive tiers | None | Automatic tiering for unknown/changing patterns; small monitoring fee per object; no retrieval fees |
+| Standard-IA | Instant | 30 days | Infrequent access, lower storage price, retrieval fee, 3 AZs |
+| One Zone-IA | Instant | 30 days | Single AZ; re-creatable data only |
+| Glacier Instant Retrieval | Milliseconds | 90 days | Archive accessed about quarterly |
+| Glacier Flexible Retrieval | Minutes to hours (expedited, standard, bulk) | 90 days | Backups and archives |
+| Glacier Deep Archive | Hours (standard about 12 hours, bulk about 48 hours) | 180 days | Lowest cost, compliance archives |
+| Express One Zone | Single-digit millisecond | None | High-performance, single AZ, directory buckets |
+
+**Key capabilities:**
+
+- Strong read-after-write consistency for all operations. Max object size 5 TB; single PUT up to 5 GB; use **multipart upload** for objects over 100 MB (required above 5 GB); **Transfer Acceleration** for long-distance uploads; **byte-range fetches** for parallel downloads.
+- **Lifecycle rules:** transition and expire (current, noncurrent versions, incomplete multipart uploads). Objects smaller than 128 KB are not transitioned to IA by default behavior and have minimum billable size.
+- **Versioning** required for replication and Object Lock; **MFA Delete** for extra protection.
+- **Replication:** CRR (cross-Region) and SRR (same-Region), cross-account with ownership override; only new objects by default (use S3 Batch Replication for existing objects); delete markers optionally replicated; **Replication Time Control** gives a 15-minute SLA for most objects; replicas can use a different storage class.
+- **Object Lock:** WORM; **Governance** (users with permission can override) vs **Compliance** (no one, including root, can delete during retention); **Legal hold** independent of retention.
+- **Access control:** bucket policies, Block Public Access, ACLs (disabled by default via Bucket owner enforced), **Access Points** (per-application policies and VPC restriction), **Multi-Region Access Points** (single global endpoint with failover routing), presigned URLs, **S3 Access Grants**.
+- **Encryption:** SSE-S3 (default on all new objects), SSE-KMS (audit/control; consider request-rate quotas and bucket keys to cut KMS calls), SSE-C, DSSE-KMS, client-side.
+- **Analytics and management:** S3 Storage Lens (org-wide usage/activity metrics and recommendations), Inventory, Batch Operations, Event Notifications (to SNS, SQS, Lambda, EventBridge), S3 Select/Athena for querying, Object Lambda for transformations on read.
+
+```bash
+aws s3api put-bucket-lifecycle-configuration --bucket logs --lifecycle-configuration file://lifecycle.json
+aws s3api put-object-lock-configuration --bucket records --object-lock-configuration \
+  'ObjectLockEnabled=Enabled,Rule={DefaultRetention={Mode=COMPLIANCE,Days=2555}}'
+aws s3control create-multi-region-access-point --account-id 111122223333 --details file://mrap.json
+```
+
+```json
+{
+  "Rules": [{
+    "ID": "tier-and-expire", "Status": "Enabled", "Filter": {"Prefix": "logs/"},
+    "Transitions": [{"Days": 30, "StorageClass": "STANDARD_IA"}, {"Days": 90, "StorageClass": "GLACIER"}],
+    "Expiration": {"Days": 2555},
+    "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}
+  }]
+}
+```
+
+<Callout variant="warning" title="Exam Trap: Governance vs Compliance Mode">
+"No one, including the root user, may delete for seven years" means Object Lock Compliance mode. If privileged administrators must still be able to override, Governance mode. Vault Lock in AWS Backup mirrors this distinction.
+</Callout>
+
+## 3. Amazon EBS
+
+| Type | Category | Performance | Use |
+|---|---|---|---|
+| gp3 | SSD general purpose | 3,000 IOPS and 125 MB/s baseline; up to 16,000 IOPS and 1,000 MB/s independently provisioned | Default for most workloads; cheaper than gp2 |
+| gp2 | SSD | Burst credits; IOPS scale with size (3 IOPS per GB) | Legacy |
+| io2 / io2 Block Express | SSD provisioned IOPS | Up to 64,000 IOPS (256,000 with Block Express on supported instances), 99.999% durability | Critical databases; supports Multi-Attach |
+| io1 | SSD provisioned IOPS | Up to 64,000 IOPS | Legacy PIOPS |
+| st1 | HDD throughput optimized | Up to 500 MB/s | Streaming, big data, logs; cannot be boot volume |
+| sc1 | HDD cold | Lower | Infrequent access; cannot be boot volume |
+
+- EBS is AZ-scoped; snapshots (incremental, stored in S3-managed storage) move data across AZs/Regions. **Fast Snapshot Restore** removes first-read latency; **Data Lifecycle Manager** automates snapshots; **EBS Snapshots Archive** reduces cost for rarely used snapshots.
+- **Multi-Attach** (io1/io2): up to 16 Nitro instances in the same AZ attach one volume; needs a cluster-aware file system.
+- Encryption by default setting at Region level; encrypted volumes encrypt snapshots and move data in transit between instance and volume.
+- **Instance store** gives very high local IOPS but data is lost when the instance stops, terminates or fails.
+- RAID 0 across volumes increases performance but not durability; RAID 1 for redundancy (consider EBS durability).
+
+## 4. File Systems
+
+| Feature | EFS | FSx Windows | FSx Lustre | FSx ONTAP | FSx OpenZFS |
+|---|---|---|---|---|---|
+| Protocol | NFSv4.1/4.2 | SMB, AD | Lustre POSIX | NFS, SMB, iSCSI | NFS |
+| OS | Linux | Windows (and Linux via SMB) | Linux | All | Linux/macOS/Windows |
+| Multi-AZ | Yes (Standard); One Zone option | Yes (Multi-AZ deployment) | Single AZ | Multi-AZ option | Single or Multi-AZ options |
+| Notable | Elastic, throughput modes (Elastic, Provisioned, Bursting), tiers Standard/IA/Archive, lifecycle management | DFS namespaces, shadow copies, AD integration | Hundreds of GB/s, sub-ms latency, S3 data repository link, scratch vs persistent | Dedup, compression, tiering to capacity pool, SnapMirror | Snapshots and clones, high IOPS |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Storage Gateway Types">
+
+**S3 File Gateway:** NFS/SMB to S3 objects, local cache. **FSx File Gateway:** low-latency on-premises access to FSx for Windows shares. **Volume Gateway:** iSCSI block volumes; **cached** mode keeps primary data in S3 with frequently used data cached locally; **stored** mode keeps full dataset locally with async snapshot backups to S3/EBS snapshots. **Tape Gateway:** virtual tape library to S3/Glacier for existing backup software. Deployed as a VM, hardware appliance or EC2.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: S3 Request Rates and Performance Design">
+
+S3 supports at least 3,500 PUT/COPY/POST/DELETE and 5,500 GET/HEAD requests per second per prefix, with no limit on the number of prefixes. Parallelize across prefixes, use multipart uploads and byte-range fetches, and CloudFront for read-heavy distribution. SSE-KMS adds KMS request quotas; use S3 Bucket Keys.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 5. Common Traps & Distractors
+
+- "Windows file shares with AD permissions": FSx for Windows File Server, not EFS (Linux only).
+- "HPC with S3 data": FSx for Lustre linked to S3.
+- "Database on EC2 needing 100,000 IOPS": io2 Block Express or instance store NVMe with replication.
+- "Unknown access pattern, avoid retrieval fees": S3 Intelligent-Tiering.
+- "Archive accessed once a year, restore within 12 hours": Glacier Deep Archive.
+- "Replicate existing objects": Batch Replication; plain replication only affects new objects.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can pick the right S3 storage class for a given access pattern and retrieval time.
+<details>
+<summary>Explanation</summary>
+
+Frequent: Standard; unknown or changing: Intelligent-Tiering; infrequent with instant access: Standard-IA or One Zone-IA (re-creatable); archive with millisecond retrieval: Glacier Instant Retrieval; archive with hours acceptable: Flexible Retrieval; lowest cost long-term retention: Deep Archive. Watch minimum storage durations.
+
+</details>
+
+- [ ] I can design S3 cross-Region replication including existing data and compliance needs.
+<details>
+<summary>Explanation</summary>
+
+Enable versioning on both buckets, configure CRR with an IAM role (and KMS permissions for encrypted objects), use Batch Replication for existing objects, optionally add Replication Time Control for the 15-minute SLA and Multi-Region Access Points for a single failover-capable endpoint.
+
+</details>
+
+- [ ] I can choose the right shared file system for Linux, Windows, HPC and multi-protocol.
+<details>
+<summary>Explanation</summary>
+
+EFS for general Linux NFS; FSx for Windows for SMB with AD; FSx for Lustre for HPC; FSx for ONTAP for multi-protocol and NetApp features; FSx for OpenZFS for ZFS-based NFS workloads.
+
+</details>
+
+- [ ] I can explain EBS gp3 vs io2 and Multi-Attach limitations.
+<details>
+<summary>Explanation</summary>
+
+gp3 provides baseline 3,000 IOPS and 125 MB/s with independent scaling at lower cost; io2 delivers higher IOPS and durability for critical databases. Multi-Attach works only with io1/io2, same AZ, Nitro instances (up to 16), and requires a cluster-aware file system or application-level coordination.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/10-decoupling-integration-sqs-sns-eventbridge-step-functions" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 10: Decoupling & Integration: SQS, SNS, EventBridge, Step Functions & Streaming
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/12-compute-caching-global-performance" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 12: Compute, Caching & Global Performance: EC2, CloudFront & Global Accelerator →
+  </a>
+</div>

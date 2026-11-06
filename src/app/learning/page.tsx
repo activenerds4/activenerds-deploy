@@ -129,26 +129,26 @@ const DeepLearningHubPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Featured Certs Central Spotlight */}
+      {/* Technical Certifications Spotlight */}
       <section className="rounded-2xl border border-primary/30 bg-gradient-to-r from-primary/10 via-card to-card p-6 sm:p-8 space-y-4 shadow-sm">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-1.5 font-mono text-xs text-primary font-semibold uppercase tracking-wider">
               <Award className="h-4 w-4" />
-              <span>New • Certs Central</span>
+              <span>Technical Certifications</span>
             </div>
             <h2 className="font-display text-2xl sm:text-3xl font-bold text-foreground">
-              VMware Cloud Foundation (VCF 9) Study Notes
+              Engineering Exam Guides & Practice Roadmaps
             </h2>
             <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
-              Complete revision guides and architectural breakdowns across 3 certification tracks: VCF Administrator (18 modules), VCF 9 Architect (13 sections), and Tanzu Kubernetes VKS 3V0-24.25 (5 sections).
+              Master enterprise infrastructure, cloud native architectures, and AI certifications. Concise study notes, mock tests, and flashcards across VMware VCF, Kubernetes, AWS, and AI credentials.
             </p>
           </div>
           <Link
-            to="/learning/certs-central/vmware/study-notes"
+            to="/certifications"
             className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity shrink-0 shadow-sm"
           >
-            <span>Explore VMware Notes</span>
+            <span>Explore Certifications</span>
             <ArrowRight className="h-4 w-4" />
           </Link>
         </div>

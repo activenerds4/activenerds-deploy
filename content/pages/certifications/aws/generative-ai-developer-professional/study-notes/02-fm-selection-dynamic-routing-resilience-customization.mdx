@@ -1,0 +1,225 @@
+---
+title: "Module 02: FM Selection, Dynamic Model Switching, Resilience & Customization Lifecycle"
+description: "Benchmark-driven FM choice, AppConfig/Lambda provider switching, cross-Region inference, circuit breakers, SageMaker LoRA deployment (Task 1.2)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 2
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 1.2 (Skills 1.2.1 - 1.2.4): FM selection, configuration-driven model switching, resilient AI systems, and customized model deployment and lifecycle management.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1, Task 1.2">
+Expect questions that combine **resilience** (what happens when a model or Region is throttled or unavailable) with **flexibility** (change models without redeploying code). Know the difference between inference-time failover, cross-Region inference profiles, and multi-Region deployments, and when each applies.
+</Callout>
+
+---
+
+## 1. Assessing and Choosing FMs (Skill 1.2.1)
+
+Select models against evidence, not reputation.
+
+| Dimension | What to evaluate | Where to look |
+|---|---|---|
+| Capability fit | Reasoning, code, summarization, multilingual, tool use | Provider docs, your golden dataset |
+| Modality | Text, image, audio, video input/output | Model card in Bedrock |
+| Context window | Max input tokens vs your documents and history | Model specs |
+| Latency | Time to first token, tokens per second | Load tests; latency-optimized inference options |
+| Cost | Input and output price per 1,000 tokens | Pricing page, measured token usage |
+| Limits | Requests and tokens per minute quotas | Service Quotas |
+| Regional availability | Is the model in your Region, or only via inference profile | Bedrock console / `list-foundation-models` |
+| Compliance | Terms, data handling, provider restrictions | Model access page |
+
+```bash
+aws bedrock list-foundation-models \
+  --by-output-modality TEXT \
+  --by-inference-type ON_DEMAND \
+  --query 'modelSummaries[].{id:modelId,provider:providerName}' --output table
+```
+
+<Callout variant="tip" title="Exam Tip">
+"Select the model" questions often hinge on a single hard limit: the document exceeds the context window, the model lacks image input, or the Region lacks the model. Eliminate on hard limits first, then compare cost and quality.
+</Callout>
+
+---
+
+## 2. Dynamic Model Selection & Provider Switching (Skill 1.2.2)
+
+Goal: change models, parameters, or even providers **without code changes or redeployment**.
+
+```
+Client --> API Gateway --> Lambda --> reads config (AppConfig)
+                                         |  modelId, temperature, fallback list
+                                         v
+                              Bedrock Converse (modelId from config)
+```
+
+| Component | Role |
+|---|---|
+| AWS AppConfig | Holds model ID, inference parameters, feature flags; deploys gradually with validators and automatic rollback on CloudWatch alarms |
+| Lambda | Fetches config via the AppConfig Lambda extension (cached locally), calls Bedrock |
+| API Gateway | Stable external contract; routes to Lambda |
+| Converse API | Provider-neutral request shape, so swapping models is a string change |
+
+```json
+{
+  "default": {"modelId": "us.amazon.nova-lite-v1:0", "maxTokens": 500, "temperature": 0.2},
+  "premium": {"modelId": "us.amazon.nova-pro-v1:0", "maxTokens": 1000, "temperature": 0.3},
+  "fallbackOrder": ["default", "premium"]
+}
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why AppConfig over environment variables or Parameter Store">
+
+Environment variables require a function update and new version to change. Parameter Store can hold the value but offers no staged rollout. **AppConfig** adds deployment strategies (linear, canary, all-at-once), JSON Schema or Lambda validators that reject bad configs before they ship, and automatic rollback when a monitored CloudWatch alarm fires. For a config change that could break every request (a bad model ID), these safeguards are the point.
+
+</AccordionItem>
+</AccordionGroup>
+
+**Provider abstraction caveat:** Converse normalizes most parameters, but model-specific options (for example top-k) go in `additionalModelRequestFields`. A thin adapter layer per provider keeps the rest of your code neutral.
+
+---
+
+## 3. Resilient AI Systems (Skill 1.2.3)
+
+| Failure | Mitigation |
+|---|---|
+| Throttling (`ThrottlingException`) | Exponential backoff with jitter, quota increases, cross-Region inference, provisioned throughput |
+| Model or Region capacity issue | Cross-Region inference profile, or fallback to a different model/Region |
+| Persistent downstream failure | Circuit breaker pattern in Step Functions, fail fast to a degraded path |
+| Model deprecation | Config-driven model IDs, lifecycle tracking, evaluation before cutover |
+
+### Cross-Region inference
+
+An **inference profile** lets Bedrock route requests across Regions to increase throughput and absorb bursts. **Geographic** profiles (IDs prefixed like `us.` or `eu.`) keep traffic inside a geography, which matters for residency. **Global** profiles route more broadly for maximum capacity. Use the profile ID or ARN as the `modelId`.
+
+```bash
+aws bedrock list-inference-profiles --type-equals SYSTEM_DEFINED \
+  --query 'inferenceProfileSummaries[].inferenceProfileId'
+```
+
+### Circuit breaker with Step Functions
+
+```
+          +--------------------+
+Start --> | Check breaker state| (DynamoDB item: CLOSED / OPEN, openedAt)
+          +----+----------+----+
+        CLOSED |          | OPEN and not cooled down
+               v          v
+      +-----------+   +-----------------+
+      | Invoke FM |   | Degraded path:  |
+      | (Retry)   |   | cached answer / |
+      +--+-----+--+   | smaller model / |
+   ok    |     | fail | static message  |
+         |     v      +-----------------+
+         |  record failure; if threshold reached, set OPEN
+```
+
+Step Functions `Retry` handles transient errors; `Catch` routes persistent failures to the degraded branch and updates breaker state. **Graceful degradation** options: serve a cached response, fall back to a cheaper model, answer without retrieval, or return a clear status message.
+
+| Technique | Scope | Trade-off |
+|---|---|---|
+| Retry with backoff | Transient errors | Adds latency; can amplify load without jitter |
+| Cross-Region inference profile | Capacity and regional disruption | Data may be processed in other Regions of the geography |
+| Fallback model | Model-specific outage | Quality or cost difference |
+| Circuit breaker | Persistent failure | Needs state store and tuning |
+| Multi-Region deployment of the app | Full regional outage | Highest cost and complexity |
+
+---
+
+## 4. FM Customization Deployment & Lifecycle (Skill 1.2.4)
+
+Model **training** is out of scope; **deploying, versioning, and retiring** customized models is in scope.
+
+| Need | Service / feature |
+|---|---|
+| Deploy a fine-tuned open-weight model with full control | Amazon SageMaker AI real-time or asynchronous endpoint |
+| Serve many task-specific variants cheaply | LoRA / adapters attached to a shared base model (SageMaker inference components) |
+| Version and approve model artifacts | SageMaker Model Registry (model package groups, approval status) |
+| Automate build, test, deploy, rollback | CodePipeline with Model Registry approval events |
+| Bring an externally trained model into Bedrock | Bedrock Custom Model Import |
+| Use a Bedrock fine-tuned model | Provisioned Throughput is required to invoke custom models |
+
+```
+Train/tune --> Register (Model Registry: PendingManualApproval)
+   --> Approve --> EventBridge --> CodePipeline
+   --> Deploy to staging endpoint --> automated evaluation gate
+   --> Blue/green or canary to production --> CloudWatch alarms
+   --> On breach: automatic rollback to previous approved version
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Parameter-efficient adaptation (LoRA and adapters)">
+
+LoRA trains small low-rank matrices instead of updating all weights, so each customization is a small artifact. At serving time you load one base model and attach different adapters per task or tenant, which improves GPU utilization versus hosting a full model copy per variant. The exam angle: **many domain variants on shared infrastructure** points to adapters; **one heavily customized model with dedicated capacity** points to a standard fine-tuned endpoint.
+
+</AccordionItem>
+</AccordionGroup>
+
+**Lifecycle management:** track versions in the registry, keep the prior approved version deployable for rollback, define retirement criteria (superseded, deprecated base model), and run the evaluation suite before every promotion.
+
+---
+
+## 5. Exam Traps & Common Distractors
+
+- **Trap 1:** Using a code deployment to change the model. The expected answer is AppConfig or equivalent configuration.
+- **Trap 2:** Treating retries as resilience for a prolonged outage. Use circuit breakers and fallbacks.
+- **Trap 3:** Choosing a global inference profile when the scenario states data must stay within a geography.
+- **Trap 4:** Forgetting that Bedrock custom models need Provisioned Throughput to serve.
+- **Trap 5:** Rolling out a new customized model to 100 percent of traffic with no rollback plan.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can design a system that switches FMs without redeploying code.
+<details>
+<summary>Explanation</summary>
+
+Store model ID and inference parameters in AWS AppConfig, read them in Lambda through the AppConfig extension, call Bedrock via Converse, and deploy config changes gradually with a validator and CloudWatch alarm rollback. API Gateway keeps the client contract stable.
+
+</details>
+
+- [ ] I can explain cross-Region inference and when a geographic profile is required.
+<details>
+<summary>Explanation</summary>
+
+Inference profiles route requests across Regions to raise throughput and handle bursts. Geographic profiles constrain routing to a geography (for example US or EU), which is needed for residency requirements. Global profiles maximize capacity but may process data outside the stated geography.
+
+</details>
+
+- [ ] I can distinguish retry, fallback, and circuit breaker and apply each correctly.
+<details>
+<summary>Explanation</summary>
+
+Retry with exponential backoff and jitter handles transient throttles. A fallback switches to another model or Region on specific failures. A circuit breaker stops calling a failing dependency after a threshold, routes to a degraded path, and probes for recovery, preventing retry storms.
+
+</details>
+
+- [ ] I know how a customized model moves from registry to production safely.
+<details>
+<summary>Explanation</summary>
+
+Register in SageMaker Model Registry, require approval, trigger a pipeline on approval, deploy to staging, run automated evaluation, shift traffic gradually (canary or blue/green), monitor with alarms, and roll back automatically to the previous approved version on failure. Retire superseded versions deliberately.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/01-genai-solution-design-poc-well-architected" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 01: GenAI Solution Design, Proofs of Concept & the Well-Architected GenAI Lens
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/03-data-validation-processing-pipelines-fm-input" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 03: Data Validation & Processing Pipelines for FM Consumption →
+  </a>
+</div>

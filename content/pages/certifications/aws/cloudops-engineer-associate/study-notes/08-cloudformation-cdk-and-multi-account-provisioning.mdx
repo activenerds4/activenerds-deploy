@@ -1,0 +1,168 @@
+---
+title: "Module 08: CloudFormation, CDK, StackSets & RAM"
+description: "Template mechanics, change sets, drift, rollback states, CDK constructs, StackSets, AWS RAM sharing, and deployment error remediation."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 8
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 3.1 (Skills 3.1.2–3.1.4): CloudFormation and CDK, diagnosing deployment failures, and sharing resources across Regions and accounts with StackSets and AWS RAM.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 3.1 (Domain 3, 22%)">
+Skill 3.1.2 was reworded in v1.1 to "create and manage AWS resources" with CloudFormation and CDK. **Designing** CI/CD pipelines is out of scope; **operating and troubleshooting** IaC is in scope. Memorize stack failure states and their recovery actions.
+</Callout>
+
+---
+
+## 1. CloudFormation Mechanics
+
+| Template section | Purpose |
+|---|---|
+| Parameters | Inputs (use **SSM parameter types** for AMI IDs) |
+| Mappings / Conditions | Static lookups, conditional resources |
+| **Resources** | Only required section |
+| Outputs | Values to display or **export** for `Fn::ImportValue` |
+
+Key functions: `Ref`, `Fn::GetAtt`, `Fn::Sub`, `Fn::Join`, `Fn::ImportValue`, `Fn::If`.
+
+* **Change sets** preview updates before executing. **Drift detection** finds out-of-band changes.
+* **DeletionPolicy** (`Delete`, `Retain`, `Snapshot`, `RetainExceptOnCreate`) and **UpdateReplacePolicy** protect data such as RDS and EBS.
+* **Stack policy** blocks updates to critical resources; **termination protection** blocks stack deletion.
+* **Nested stacks** reuse templates; **cross-stack references** use exports (an export in use cannot be deleted or changed).
+* **EC2 bootstrapping:** `cfn-init` (metadata), `cfn-signal` with a **CreationPolicy** or WaitCondition so the stack waits for the instance to finish.
+* **Custom resources** (Lambda-backed) must send a response to the pre-signed URL, otherwise the stack hangs until timeout.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Stack states and recovery actions">
+
+| State | Meaning | Action |
+|---|---|---|
+| `CREATE_FAILED` then `ROLLBACK_COMPLETE` | First create failed and rolled back | Read **Events**, fix, **delete the stack**, recreate (a rolled-back create cannot be updated) |
+| `UPDATE_ROLLBACK_COMPLETE` | Update failed, stack restored to previous good state | Fix template and update again |
+| `UPDATE_ROLLBACK_FAILED` | Rollback itself failed (often manual change or missing permission) | Fix the cause, then **ContinueUpdateRollback** (optionally skip resources) |
+| `DELETE_FAILED` | Deletion blocked (non-empty S3 bucket, ENI in use, dependent resource) | Remove the blocker or retain the resource on retry |
+| `REVIEW_IN_PROGRESS` | Change set created for a new stack | Execute or delete |
+
+Disable **rollback on failure** while debugging a create to keep resources for inspection. Always read the **earliest** failed event, not the last.
+
+</AccordionItem>
+</AccordionGroup>
+
+```bash
+aws cloudformation deploy --template-file app.yaml --stack-name app \
+  --capabilities CAPABILITY_NAMED_IAM --parameter-overrides Env=prod
+aws cloudformation describe-stack-events --stack-name app \
+  --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId,ResourceStatusReason]'
+aws cloudformation continue-update-rollback --stack-name app
+aws cloudformation detect-stack-drift --stack-name app
+```
+
+`CAPABILITY_IAM` / `CAPABILITY_NAMED_IAM` is required when the template creates IAM resources, and `CAPABILITY_AUTO_EXPAND` for macros and nested transforms.
+
+---
+
+## 2. AWS CDK
+
+* Define infrastructure in TypeScript, Python, Java, C#, Go; **synthesizes to CloudFormation**, so CloudFormation is still the engine and the source of stack events.
+* **Constructs:** L1 (`Cfn*`, direct mapping), **L2** (sensible defaults and helper methods like `bucket.grantRead(fn)`), L3 (patterns).
+* Workflow: `cdk bootstrap` (once per account/Region, creates the staging bucket and roles) then `cdk synth`, `cdk diff`, `cdk deploy`.
+* Common failure: deploying to an unbootstrapped Region or a bootstrap version too old for the app.
+
+```
+ CDK app (code) --cdk synth--> CloudFormation template --cdk deploy--> CloudFormation stack --> AWS resources
+                                      ^
+                                cdk diff compares to deployed
+```
+
+---
+
+## 3. Multi-Account and Multi-Region Provisioning
+
+| Service | Use | Notes |
+|---|---|---|
+| **CloudFormation StackSets** | Deploy one template to many accounts and Regions | **Service-managed** permissions (Organizations, auto-deploy to new accounts) or **self-managed** (admin role `AWSCloudFormationStackSetAdministrationRole` and execution role `AWSCloudFormationStackSetExecutionRole` in each target) |
+| **AWS RAM** | Share resources without copying | Subnets (shared VPC), Transit Gateway, Route 53 Resolver rules, License Manager configs, and more; enable sharing with Organizations |
+| Service Catalog | Governed, pre-approved products | Self-service with constraints |
+| Control Tower | Landing zone and account factory | Guardrails |
+
+StackSet operation tuning: **maximum concurrent accounts** and **failure tolerance**; a single failed instance can leave a stack instance `OUTDATED`.
+
+---
+
+## 4. Diagnosing Deployment Issues
+
+| Symptom | Likely cause |
+|---|---|
+| "Not enough free IP addresses" / ENI creation fails | **Subnet too small** (AWS reserves **5 IPs per subnet**; smallest is /28), Lambda/EKS/ECS tasks consuming ENIs |
+| `AccessDenied` / `UnauthorizedOperation` | Deploying role lacks permission, SCP deny, or service role missing |
+| `LimitExceeded` | Service quota reached; request an increase |
+| AMI not found | AMI IDs are **Region-specific**; use SSM parameter lookups |
+| Resource already exists | Hard-coded physical names conflicting |
+| Circular dependency | `DependsOn`/`Ref` loop |
+| Export cannot be updated/deleted | Another stack imports it |
+
+---
+
+## 5. Exam Traps & Common Distractors
+
+- **Trap 1:** Updating a stack in `ROLLBACK_COMPLETE`. It must be deleted.
+- **Trap 2:** Believing CDK replaces CloudFormation; it generates templates that CloudFormation deploys.
+- **Trap 3:** Using StackSets without Organizations trusted access when asking for automatic deployment to new accounts (needs **service-managed** permissions).
+- **Trap 4:** Hard-coding AMI IDs in a multi-Region template.
+- **Trap 5:** Forgetting `CAPABILITY_IAM` when the template creates roles.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can recover a stack stuck in UPDATE_ROLLBACK_FAILED.
+<details>
+<summary>Explanation</summary>
+
+Identify the resource whose rollback failed (events), correct the cause (restore a manually deleted resource, grant permissions), then run **ContinueUpdateRollback**, optionally skipping the unfixable resources. Afterward run drift detection and reconcile.
+
+</details>
+
+- [ ] I know how to roll one template out to every account in an OU, including future ones.
+<details>
+<summary>Explanation</summary>
+
+Use a StackSet with **service-managed permissions**, target the OU, and enable **automatic deployment**. Set Regions, concurrency, and failure tolerance. Self-managed mode requires pre-created IAM roles and does not auto-deploy to new accounts.
+
+</details>
+
+- [ ] I can explain why an EC2-launching stack fails with an IP-related error.
+<details>
+<summary>Explanation</summary>
+
+The subnet has run out of available addresses (a /28 gives 11 usable after the 5 reserved). Use larger subnets, add subnets in more AZs, or release unused ENIs.
+
+</details>
+
+- [ ] I can share a VPC subnet with another account.
+<details>
+<summary>Explanation</summary>
+
+Enable RAM sharing with Organizations and share the subnets with the target accounts or OU. Participants create resources in the shared subnets but cannot modify the VPC itself; the owner controls route tables and NACLs.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/07-backup-restore-and-disaster-recovery" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 07: AWS Backup, Restore Strategies & Disaster Recovery
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/09-amis-image-builder-and-deployment-strategies" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 09: AMIs, EC2 Image Builder, Deployment Strategies & Terraform →
+  </a>
+</div>

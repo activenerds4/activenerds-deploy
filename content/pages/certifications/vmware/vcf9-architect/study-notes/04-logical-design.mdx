@@ -1,0 +1,251 @@
+---
+title: "Section 04: Logical Design Specifications"
+description: "Hardware-agnostic design: management vs workload domains, NSX routing topology, vSAN fault domains, cluster scaling models."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF 9.0 Architect Exam Revision Notes"
+trackSlug: "/certifications/vmware/vcf9-architect"
+moduleNumber: 4
+totalModules: 13
+layout: "article"
+---
+
+**Creating VCF 9.0 Logical Designs**
+
+→ Verify exact VCF 9.0 limits, supported options and product names against the current documentation and exam guide. The notes below stress **decision logic**: which option, why, and what it costs. Where a legacy "Aria" name appears, the VCF 9.0 name is given alongside.
+
+**Naming map:** Aria Automation → **VCF Automation**; Aria Operations → **VCF Operations** (includes fleet management); Aria Operations for Logs → **VCF Operations for logs**; Aria Operations for Networks → **VCF Operations for networks**; Cloud Builder → **VCF Installer**.
+
+---
+
+## 0. Logical Design: What It Is (and Is Not)
+
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Logical Design vs Physical Design Boundaries">
+
+The golden rule of enterprise infrastructure architecture:
+
+* **Logical Design is hardware-vendor agnostic:** It defines architectural components, relationships, network topologies, redundancy models, and policies. Example: *"Management Domain cluster with 4 hosts, dual 25 GbE redundant uplinks, vSAN storage policy with FTT=1 RAID-1, and two Tier-0 gateways connected to two Tier-1 gateways."*
+* **Physical Design specifies exact part numbers, configs, and names:** Example: *"Dell PowerEdge R760 with 2x Intel Xeon Gold 6430, 512GB DDR5 RAM, 4x 3.84TB Kioxia NVMe SSDs, dual Broadcom 57504 NICs, VLAN 1024 for vSAN, subnet 192.168.10.0/24."*
+
+If the customer decides to swap server hardware from Dell to HPE or Cisco UCS, the **logical design remains 100% unchanged**. Only the physical design specification is revised.
+
+</AccordionItem>
+
+</AccordionGroup>
+
+
+- Defines **components, roles, relationships, rules and topology** that satisfy requirements.
+- **Vendor/hardware independent in detail**: no IPs, VLAN IDs, host models, build numbers (those are **physical**).
+- Every logical decision should **trace to a requirement** and state **AMPRS implications**.
+- Flow: requirements → conceptual model → **logical design** → physical design.
+
+---
+
+## 1. VCF Prerequisites (Logical-Level Decisions)
+
+| Area | Logical design decision | Scenario guidance |
+|---|---|---|
+| **Compatibility / supportability** | Hardware, firmware, drivers on compatibility lists; supported VCF version/BOM | Non-compatible hardware = **constraint** → change hardware or accept unsupported risk (avoid) |
+| **Hosts** | Min hosts per cluster driven by vSAN FTT, HA, maintenance headroom | Higher resilience (FTT=2, N+1/N+2) = more hosts |
+| **Network** | Physical network ready: redundant uplinks, MTU for overlay (≥1600, commonly 9000), routing/VLAN plan, jumbo frames end to end | Missing MTU/VLAN readiness = **risk/assumption** to validate before deployment |
+| **Core services** | DNS (forward + reverse), NTP, DHCP (for overlay TEPs, if used), certificate authority, backup target, identity source | Missing or inconsistent DNS/NTP = most common deployment failure |
+| **Identity** | Directory service; SSO via **VCF Identity Broker** | Compliance/central identity requirement → federate with enterprise IdP |
+| **Licensing** | Licence model and entitlement | Licence gaps = constraint |
+| **Skills / operations** | Operational model, support contracts | Skills gap = risk → training or managed service (transfer) |
+
+**Exam takeaways**
+- Prerequisites are **assumptions until validated**. Validate or log as risks.
+- Prerequisite gaps are typically **mitigated before bring-up**, not designed around mid-build.
+
+---
+
+## 2. VCF Fleet Topologies
+
+| Topology                                 | Description                                                             | Choose when                                                  | Trade-offs                                            |
+| ---------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------- |
+| **Single instance, consolidated**        | One instance; workloads run in the management domain                    | Small/edge/lab, minimal hardware                             | Lowest cost; weak isolation, limited scale            |
+| **Single instance, standard**            | One instance; dedicated management domain + workload domain(s)          | One site, production, isolation                              | More hosts; clear separation, independent lifecycle   |
+| **Multi-instance fleet (multi-site)**    | Several instances managed together (fleet management in VCF Operations) | Multiple sites/regions, DR, data sovereignty, scale ceilings | Overhead; blast-radius reduction, regional compliance |
+| **Stretched cluster within an instance** | vSAN stretched cluster across two sites + witness                       | RPO≈0 and automatic site failover at metro distance          | Needs low latency and bandwidth; higher hardware/cost |
+| **Instances with replication/DR**        | Separate instances, async replication, orchestrated recovery            | Long distance DR                                             | Non-zero RPO/RTO; DR runbooks and tooling required    |
+
+**Exam signals**
+- "Regulation keeps data in-country in two regions" → **separate instances per region (fleet)**.
+- "Zero data loss, two sites 10 km apart" → **stretched cluster**.
+- "Small branch with 3 hosts" → **consolidated**.
+- "Hundreds of VMs, multiple business units" → **standard**, multiple workload domains.
+
+---
+
+## 3. Network Infrastructure (Physical Network Logical Design)
+
+| Decision | Options | Guidance / trade-off |
+|---|---|---|
+| **Topology** | Spine-leaf (recommended) vs traditional 3-tier | Spine-leaf = predictable latency, scale-out, L3 to the rack; 3-tier = legacy reuse |
+| **Layer 2 vs Layer 3 boundaries** | L3 to the leaf (per-rack subnets) vs stretched L2 | L3 = smaller fault domains, better scale; stretched L2 = simpler VLAN reuse but wider failure domain |
+| **Uplink redundancy** | Dual ToR switches, ≥2 NICs, LAG/teaming policy | Eliminates single point of failure (**A**) |
+| **Bandwidth** | 10/25/100 GbE; oversubscription ratio | vSAN ESA and NSX Edge drive higher speeds (**P**) |
+| **MTU** | ≥1600 for Geneve overlay; 9000 for vSAN/vMotion | Must be consistent end to end or traffic fails or degrades |
+| **Routing** | BGP (preferred for NSX T0 peering) vs static | BGP = dynamic failover, ECMP; static = simple but less resilient |
+| **Traffic types / VLANs** | Management, vMotion, vSAN, host TEP, Edge TEP, Edge uplinks | Separate for isolation/QoS (logical VLAN/segment plan, IDs are physical) |
+| **Underlay services** | DNS, NTP, DHCP, firewalls, external connectivity | Must exist before bring-up |
+
+**Exam signals**
+- "Network team cannot guarantee jumbo frames" → **risk**, mitigate (validate, adjust MTU design) before deployment.
+- "Need predictable east-west latency and scale" → **spine-leaf**.
+
+---
+
+## 4. Management Domain
+
+| Decision                   | Options                                                                                                                       | Guidance / trade-off                                             |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Role**                   | Hosts management components (vCenter, NSX Manager, SDDC Manager, VCF Operations/Automation components, supporting appliances) | Treat as the **most critical** domain; protect and back up       |
+| **Architecture model**     | Dedicated (standard) vs consolidated                                                                                          | Dedicated = isolation; consolidated = footprint saving           |
+| **Cluster size**           | Minimum hosts for resilience (vSAN FTT, HA headroom)                                                                          | More hosts = higher availability, higher cost                    |
+| **Storage**                | Principal storage (vSAN; confirm other supported principal types in 9.0)                                                      | Management domain sizing must include growth of fleet components |
+| **Component form factors** | Small/medium/large appliance sizes; simple vs HA deployment of VCF Operations/Automation                                      | Match to scale and **availability requirement**                  |
+| **vCenter / NSX Manager**  | Management domain hosts its own vCenter and NSX Manager cluster (3 nodes for NSX Manager HA)                                  | NSX Manager cluster of 3 = resilience                            |
+| **Fault tolerance**        | Anti-affinity rules, VM-host placement, HA admission control                                                                  | Prevents loss of multiple critical nodes in one host failure     |
+| **Backup & recovery**      | Backups of SDDC Manager, vCenter, NSX; recovery order documented                                                              | Drives **R** (recoverability)                                    |
+| **Access / security**      | Restricted admin access, separate identity roles                                                                              | **S**                                                            |
+
+**Exam takeaways**
+- Management domain **availability and recoverability** is typically the **highest priority** in design questions.
+- Do not run unrelated workloads in the management domain in a **standard** architecture.
+
+---
+
+## 5. Workload Domains
+
+| Decision | Options | Guidance / trade-off |
+|---|---|---|
+| **Domain count / boundaries** | By business unit, environment (prod/dev), security zone, application tier, region, compliance scope, lifecycle needs | More domains = isolation and independent lifecycle; more management components and cost |
+| **vCenter** | One per workload domain | Natural boundary for permissions and lifecycle |
+| **NSX instance** | **Dedicated** NSX Manager per domain vs **shared** across domains | Dedicated = isolation/independent upgrades, higher footprint; shared = fewer components, coupled lifecycle and shared blast radius |
+| **Cluster design** | Cluster size, workload type separation (general, GPU, Kubernetes), failure domains | Separate by workload profile for **P** and licensing |
+| **Storage** | vSAN ESA/OSA principal; supplemental VMFS/NFS where supported; remote datastore for compute-only | HCI simplicity vs external array reuse |
+| **Availability** | Standard cluster vs stretched cluster | Match to RPO/RTO |
+| **Kubernetes** | Enable Supervisor/VKS in domain | Modern-app requirement |
+| **Capacity** | Headroom for HA, growth, maintenance | Define N+1/N+2 and growth buffer |
+
+**Exam signals**
+- "Different compliance scopes (e.g., PCI vs general)" → **separate workload domains**.
+- "Need independent upgrade windows per business unit" → **separate domains, dedicated NSX**.
+- "Minimise management footprint" → fewer domains, shared NSX (accept coupling).
+
+---
+
+## 6. Networking (NSX Logical Design)
+
+| Decision | Options | Guidance / trade-off |
+|---|---|---|
+| **Overlay vs VLAN** | Geneve overlay segments vs VLAN-backed | Overlay = agility and scale; VLAN = legacy integration |
+| **Transport zones** | Overlay TZ, VLAN TZ per need | Separate for isolation |
+| **Gateway tiers** | **T0** (north-south, physical peering) and **T1** (tenant/segment routing) | Multi-tenant → T1 per tenant under shared T0 |
+| **T0 HA mode** | Active/Active (ECMP, throughput) vs Active/Standby (stateful services: NAT, gateway firewall, VPN) | Choose by stateful-service need |
+| **Edge cluster** | Dedicated Edge cluster; VM vs bare-metal Edge; size (S/M/L/XL) | Bare metal = max throughput; VM = flexibility/cost |
+| **Edge placement** | Management domain vs workload domain vs dedicated cluster | Dedicated Edge cluster for performance/isolation; shared = cost saving |
+| **Security model** | Distributed Firewall micro-segmentation, gateway firewall, IDS/IPS, tagging/groups | Zero-trust requirement → default-deny with application-based policy |
+| **Load balancing** | NSX LB vs external LB | Match to service and feature needs |
+| **Multi-site** | NSX Federation vs independent per-site NSX | Federation = global policy, stretched networking; complexity |
+| **Connectivity to physical** | BGP peering, uplink VLANs, ECMP | Redundancy + throughput |
+| **Visibility** | VCF Operations for networks (flows) | Troubleshooting and security planning |
+
+**Exam signals**
+- "Stateful NAT/VPN at the edge" → **T0 Active/Standby**.
+- "Maximum north-south throughput" → **bare-metal Edge, Active/Active, ECMP**.
+- "Tenants need isolated routing" → **T1 per tenant**.
+- "Same security policy at two sites" → **NSX Federation** (or consistent policy via automation).
+
+---
+
+## 7. Automation (VCF Automation, formerly Aria Automation)
+
+| Decision | Options | Guidance / trade-off |
+|---|---|---|
+| **Purpose** | Self-service consumption, governance, tenancy, templates | Required when **agility/self-service/chargeback** are requirements |
+| **Deployment form** | Single-node vs clustered (HA) | HA when automation is business-critical |
+| **Tenancy model** | Single org vs multiple organisations/projects | Isolation for business units or external customers |
+| **Resource mapping** | Which workload domains/regions are exposed to which tenants | Aligns consumption with domain/security boundaries |
+| **Catalogue & governance** | Templates/blueprints, approval policies, quotas, lease/day-2 actions | Standardisation (**M**), control (**S**), cost |
+| **Integration** | Identity broker/SSO, ITSM, IPAM, DNS, CI/CD, IaC/APIs | Drives automation end to end |
+| **Placement** | In management domain (or per fleet/instance as designed) | Protect as management component |
+| **Backup/DR** | Include in backup scope; define recovery | **R** |
+
+**Exam signals**
+- "Developers need on-demand environments with approval workflows" → **VCF Automation** with governance policies.
+- "Multiple departments with separate quotas" → **multi-tenant organisations/projects**.
+
+---
+
+## 8. Operations (VCF Operations, formerly Aria Operations)
+
+| Decision | Options | Guidance / trade-off |
+|---|---|---|
+| **Purpose** | Monitoring, capacity planning, performance, cost, compliance, plus **fleet management** (lifecycle of management components) | Central visibility across instances |
+| **Deployment form** | Single-node vs HA cluster; collector/remote-collector nodes for remote sites | HA for critical monitoring; remote collectors to reduce WAN dependency |
+| **Scope** | Which instances/domains/adapters monitored | Fleet-wide vs per-instance |
+| **Logging** | **VCF Operations for logs**: log retention, forwarding, audit | Compliance retention drives sizing |
+| **Network visibility** | **VCF Operations for networks**: flow collection | Micro-segmentation planning, troubleshooting |
+| **Alerting & integration** | Notifications, ITSM integration, dashboards | **M** |
+| **Capacity & cost** | Capacity forecasting, rightsizing, showback/chargeback | Supports cost objectives |
+| **Compliance** | Hardening/compliance benchmarks | **S** |
+| **Lifecycle (fleet management)** | Patching/upgrading management components, version consistency | Reduces operational overhead; plan maintenance windows |
+| **Placement and data protection** | Management domain; backup, retention sizing | **R**, storage growth |
+
+**Exam signals**
+- "Need to forecast capacity and demonstrate cost to business" → **VCF Operations capacity/cost**.
+- "Logs must be kept 1 year for audit" → size **VCF Operations for logs** retention and storage accordingly.
+- "Many sites, limited WAN" → **remote collectors**.
+- "Consistent patching across many instances" → **fleet management**.
+
+---
+
+## 9. Scenario Cheat Sheet
+
+| Scenario | Logical decision |
+|---|---|
+| Small remote office, 3-4 hosts | Consolidated architecture, simple-form management, minimal NSX Edge |
+| Production enterprise, one site | Standard architecture; dedicated management domain; separate workload domain(s) |
+| Strict compliance separation (e.g., payments) | Dedicated workload domain, dedicated NSX, DFW micro-segmentation, audit logging |
+| Two metro sites, RPO=0 | vSAN stretched cluster with witness; redundant inter-site links |
+| Two distant regions with local data residency | Multi-instance fleet, per-region instances, fleet-level operations |
+| High north-south throughput and stateful services both needed | Separate T0s or tiers: A/A for throughput, A/S for stateful; bare-metal Edge where required |
+| Self-service with approvals and quotas | VCF Automation, multi-tenant projects, policy governance |
+| Capacity forecasting and cost transparency | VCF Operations capacity and cost modules |
+| Network cannot support jumbo frames | Risk: validate/adjust MTU design; mitigate before deployment |
+| Existing SAN must be retained | Supplemental storage (where supported) alongside or instead of vSAN; note extra management dependencies |
+| Need independent upgrade cadence per business unit | Separate workload domains with dedicated NSX and vCenter |
+| Minimise cost and footprint with moderate isolation | Fewer domains, shared NSX, simple-form management; document accepted risk |
+
+---
+
+## 10. Quick Recall
+
+- **Prerequisites**: compatibility, hosts, network (MTU/routing/VLANs), DNS/NTP/certs/identity; **validate assumptions before bring-up**.
+- **Topology**: consolidated (small) → standard (production) → multi-instance fleet (regions/sovereignty) → stretched (RPO≈0, metro) / DR instances (distance).
+- **Network**: spine-leaf, L3 to leaf, redundant uplinks, consistent MTU, BGP.
+- **Management domain**: highest criticality; HA, backup, NSX Manager ×3, anti-affinity.
+- **Workload domains**: split by compliance, business unit, lifecycle, region; dedicated NSX = isolation, shared = fewer components.
+- **NSX**: T0 A/A (throughput) vs A/S (stateful); T1 per tenant; dedicated/bare-metal Edge for performance; DFW for micro-segmentation; Federation for multi-site policy.
+- **VCF Automation**: self-service, tenancy, governance, HA if critical.
+- **VCF Operations**: monitoring, capacity, cost, compliance, fleet lifecycle; remote collectors; logs and networks add-ons.
+- Always justify with **requirements → AMPRS trade-offs → implications**.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vcf9-architect/study-notes/03-business-requirements" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 03: Eliciting & Validating Business Requirements
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VCF 9.0 Architect Track
+  </a>
+  <a href="/certifications/vmware/vcf9-architect/study-notes/05-physical-design" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 05: Physical Infrastructure Design →
+  </a>
+</div>

@@ -1,25 +1,25 @@
 # ActiveNerds — Full Content Index
 
 > ActiveNerds is the go-to destination for AI/ML, Kubernetes, and DevSecOps professionals — sharp technical coverage woven with genuinely useful, non-preachy fitness and wellness content for desk-bound tech pros.
-> Generated: 2026-10-28T14:30:31.335Z
-> Articles: 169
+> Generated: 2026-11-06T05:29:20.314Z
+> Articles: 175
 
 ## Categories
 
+- Containers & Kubernetes: https://www.activenerds.com/category/containers-kubernetes
+- Fitness & Wellness for Tech: https://www.activenerds.com/category/fitness-wellness-tech
+- DevSecOps & Security: https://www.activenerds.com/category/devsecops-security
 - Focus & Productivity: https://www.activenerds.com/category/focus-productivity
 - Platform Engineering & DevOps: https://www.activenerds.com/category/platform-engineering-devops
 - Events & Community: https://www.activenerds.com/category/events-community
 - AI & Machine Learning: https://www.activenerds.com/category/ai-machine-learning
 - Gear & Gadgets: https://www.activenerds.com/category/gear-gadgets
-- DevSecOps & Security: https://www.activenerds.com/category/devsecops-security
-- Fitness & Wellness for Tech: https://www.activenerds.com/category/fitness-wellness-tech
-- Containers & Kubernetes: https://www.activenerds.com/category/containers-kubernetes
 
 ## Tags
 
 - Kubernetes: https://www.activenerds.com/tag/kubernetes
-- Habit Building: https://www.activenerds.com/tag/habit-building
 - Devsecops: https://www.activenerds.com/tag/devsecops
+- Habit Building: https://www.activenerds.com/tag/habit-building
 - Ergonomics: https://www.activenerds.com/tag/ergonomics
 - Mlops: https://www.activenerds.com/tag/mlops
 - Affiliate: https://www.activenerds.com/tag/affiliate
@@ -30,7 +30,23 @@
 - Conferences: https://www.activenerds.com/tag/conferences
 - Llms: https://www.activenerds.com/tag/llms
 - Standing Desk: https://www.activenerds.com/tag/standing-desk
+- Supply Chain: https://www.activenerds.com/tag/supply-chain
 - Fitness Trackers: https://www.activenerds.com/tag/fitness-trackers
+- Networking: https://www.activenerds.com/tag/networking
+- Aws: https://www.activenerds.com/tag/aws
+- Eks: https://www.activenerds.com/tag/eks
+- Gateway Api: https://www.activenerds.com/tag/gateway-api
+- Desk Setup: https://www.activenerds.com/tag/desk-setup
+- Wellness: https://www.activenerds.com/tag/wellness
+- Productivity: https://www.activenerds.com/tag/productivity
+- Remote Work: https://www.activenerds.com/tag/remote-work
+- Npm: https://www.activenerds.com/tag/npm
+- Github: https://www.activenerds.com/tag/github
+- Security: https://www.activenerds.com/tag/security
+- Devops: https://www.activenerds.com/tag/devops
+- Nftables: https://www.activenerds.com/tag/nftables
+- Coredns: https://www.activenerds.com/tag/coredns
+- Cosign: https://www.activenerds.com/tag/cosign
 
 ## Authors
 
@@ -40,6 +56,54 @@
 - Priya Sharma: https://www.activenerds.com/author/priya-sharma
 
 ## Articles
+
+### EKS Auto Mode Meets Gateway API: A Practical Setup and Migration Guide
+- URL: https://www.activenerds.com/blog/eks-auto-mode-gateway-api-setup-migration
+- Date: 2026-11-04
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Aws, Eks, Gateway Api, Kubernetes, Networking
+- Description: Amazon EKS Auto Mode now natively supports the Kubernetes Gateway API. Learn how to configure managed Gateways, deploy HTTPRoutes, and migrate legacy Ingress resources with zero downtime.
+
+### Do Ergonomic Setups Actually Work? What the New Cochrane Evidence Says for Desk Workers
+- URL: https://www.activenerds.com/blog/ergonomic-setups-desk-workers-cochrane-evidence
+- Date: 2026-11-04
+- Author: ActiveNerds Team
+- Category: Fitness & Wellness for Tech
+- Tags: Ergonomics, Desk Setup, Wellness, Productivity, Remote Work
+- Description: A deep dive into the updated Cochrane systematic review on workplace ergonomic adaptations: what the clinical evidence says about ergonomic chairs, split keyboards, standing desks, and arm/neck pain.
+
+### GitHub's npm Package Firewall: How to Block Malicious Packages Before They Install
+- URL: https://www.activenerds.com/blog/github-npm-package-firewall-setup-guide
+- Date: 2026-11-03
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Npm, Supply Chain, Github, Devsecops, Security
+- Description: How to enable and configure GitHub's npm Package Firewall to intercept trojanized and malicious open-source packages at install time, before they reach CI runners or developer machines.
+
+### Kubernetes 1.37 Deprecations: Migrating Off IPVS, KubeDNS, and Removed kubectl Flags
+- URL: https://www.activenerds.com/blog/kubernetes-1-37-deprecations-ipvs-kubedns-migration
+- Date: 2026-11-03
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes, Devops, Networking, Nftables, Coredns
+- Description: A technical migration guide for Kubernetes 1.37 deprecations and removals, covering the transition from IPVS to nftables in kube-proxy, retiring legacy KubeDNS, and updating automated kubectl scripts.
+
+### One Signed Answer: How to Verify registry.k8s.io Images with the New SLSA Summaries
+- URL: https://www.activenerds.com/blog/verify-k8s-images-slsa-verification-summaries
+- Date: 2026-11-02
+- Author: ActiveNerds Team
+- Category: Containers & Kubernetes
+- Tags: Kubernetes, Cosign, Supply Chain, Slsa, Devsecops
+- Description: How to use the newly published SLSA verification summaries on registry.k8s.io to cryptographically verify official Kubernetes container images in CI/CD and admission controllers.
+
+### LiteLLM 1.107.0 Supply Chain Attack: How to Check Your Stack and Rotate Credentials
+- URL: https://www.activenerds.com/blog/litellm-supply-chain-compromise-credential-rotation
+- Date: 2026-11-01
+- Author: ActiveNerds Team
+- Category: DevSecOps & Security
+- Tags: Ai Security, Supply Chain, Python, Devsecops
+- Description: Analysis of the LiteLLM 1.107.0 supply chain compromise via Python startup hooks, how to check if your AI gateway was affected, and a step-by-step credential rotation checklist.
 
 ### Deep Work Environment Setup
 - URL: https://www.activenerds.com/blog/deep-work-environment-setup

@@ -1,0 +1,191 @@
+---
+title: "Section 1: IT Architectures, Technologies, and Standards"
+description: "Compute models (VMs vs containers vs vSphere Pods), Kubernetes architecture, networking (Antrea, Calico), storage (CNS, FCD, SPBM)."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VMware Kubernetes (VKS 3V0-24.25)"
+trackSlug: "/certifications/vmware/vks-tanzu"
+moduleNumber: 1
+totalModules: 5
+layout: "article"
+---
+
+**IT Architectures, Technologies, Standards**
+
+
+
+<Callout variant="tip" title="Exam Tip">
+Section 1 is concept-based, not click-path-based. Expect questions that ask you to *choose* the right compute model, name the right Kubernetes object, or match a VKS deployment to a reference architecture (NSX, VDS, Zones). The exam content is based on VCF 9.0: "VKS" is the current name for what older material calls Tanzu Kubernetes Grid Service (TKGS), and "vSphere Kubernetes release (VKr)" replaces "TKR".
+</Callout>
+
+
+
+---
+
+## Objective 1.1: Differentiate between VMs and Containers to Select the Appropriate Compute Model
+
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: vSphere Pods & CRX MicroVM Isolation Architecture">
+
+Standard containers in a Linux host share the underlying OS kernel, relying on Linux cgroups and namespaces for process isolation. While fast, this creates a shared kernel attack surface.
+
+**vSphere Pods** solve this by introducing the **Container Runtime Executive (CRX)**:
+
+* ESXi launches an extremely lightweight microVM running an optimized, minimal **Photon OS** paravirtualized kernel.
+* The CRX uses direct-boot techniques, starting in **under 2 seconds** (approaching native container startup speed).
+* Each vSphere Pod gets its own independent hardware-isolated memory space and vCPU scheduling on the ESXi hypervisor.
+* **Why this matters for VCF 9 exams:** When an exam scenario specifies **uncompromised kernel-level multi-tenancy** or strict compliance (such as PCI-DSS or defense boundaries) alongside container agility, **vSphere Pods** (or dedicated VKS clusters) are the required answer, not multi-tenant shared-worker Linux nodes.
+
+</AccordionItem>
+
+<AccordionItem title="Deep-Dive: Antrea NSX Routed CNI vs Geneve Overlay">
+
+In standard Kubernetes overlay networking, pods communicate through Geneve or VXLAN tunnels. When running inside vSphere with NSX, standard overlays result in **double encapsulation** (packet inside Geneve inside Geneve), which adds CPU overhead and hides pod IPs from physical monitoring tools.
+
+With **Antrea NSX Routed CNI**:
+
+* Pod IPs are allocated from an **NSX IP Block / Subnet** routed directly by the NSX Tier-1 Gateway.
+* Packets leaving the pod do not require secondary overlay encapsulation; they travel natively across the NSX fabric.
+* Physical firewalls, network taps, and NetFlow collectors observe genuine Pod IPs directly, simplifying corporate auditability and performance tracing.
+
+</AccordionItem>
+
+</AccordionGroup>
+
+
+| | Virtual Machine | Container |
+|---|---|---|
+| **Isolation boundary** | Full virtualized hardware, own guest OS kernel | Shared host OS kernel, isolated by namespaces/cgroups |
+| **What is packaged** | OS + libraries + app | Libraries + app only (image layers) |
+| **Size / startup** | GBs; minutes | MBs; seconds |
+| **Density** | Lower (each VM carries a full OS) | Higher (many containers per OS kernel) |
+| **Lifecycle** | Long-lived, pets-and-cattle | Short-lived, immutable, cattle |
+| **Scheduling/placement** | vSphere DRS, HA, vMotion | Kubernetes scheduler, declarative controllers |
+| **Best for** | Legacy/monolithic apps, strong OS-level isolation, Windows guests, stateful systems needing full OS control | Microservices, stateless/scalable apps, CI/CD-driven deployments |
+
+**The VKS middle ground: vSphere Pods**
+
+| Compute option on Supervisor | What it is | Choose when |
+|---|---|---|
+| **VM (traditional / VM Service)** | Standard vSphere VM, or declaratively provisioned VM via the Virtual Machine Service in a vSphere Namespace | Full OS control, legacy apps, VM tooling |
+| **vSphere Pod** | Pod running directly on ESX in a CRX (Container Runtime Executive) microVM; each container gets its own paravirtualized Photon-based Linux kernel, with VM-grade isolation at container speed | Strong isolation per container without running full VMs; Open Container Initiative (OCI) compatible |
+| **VKS cluster (Kubernetes nodes)** | Full conformant Kubernetes cluster of VMs (control plane + workers) lifecycle-managed by Cluster API | General-purpose Kubernetes: operators, Helm, service mesh, standard packages, full K8s API |
+
+**Key takeaways**
+- Containers share a kernel; VMs do not. If the requirement is kernel-level isolation per workload, the answer is VMs or **vSphere Pods**, not plain containers on shared nodes.
+- vSphere Pods give **VM-level isolation with container speed**: the CRX uses the same hardware virtualization techniques as VMs and a direct-boot technique so pods boot nearly as fast as containers.
+- Containers are **immutable**: replace, never patch in place. A question about "patching a running container" is a trap; you redeploy a new image.
+- VMs remain the right answer for strong tenancy boundaries, specialized OS needs, and workloads that cannot be containerized.
+- VKS clusters are the right answer when you need the full upstream-conformant Kubernetes API (custom controllers, CRDs, operators) rather than the subset the Supervisor exposes directly.
+
+---
+
+## Objective 1.2: Use Kubernetes Architecture, Networking, Storage, Service Mesh, and Helm
+
+### Cluster architecture
+
+| Layer | Components | Role |
+|---|---|---|
+| **Control plane** | kube-apiserver, etcd, kube-scheduler, kube-controller-manager | API front end, state store, pod placement, reconciliation loops |
+| **Worker node** | kubelet, kube-proxy, container runtime (containerd in VKS) | Runs pods, service networking, executes containers |
+| **Desired state** | Declarative YAML -> API server -> controllers reconcile actual = desired | Everything in Kubernetes (and VKS) is declarative |
+
+In VKS: cluster nodes are VMs on the Supervisor; the Supervisor itself exposes a Kubernetes API where `Cluster` objects (Cluster API) are the desired state for workload clusters.
+
+### Networking
+
+| Construct | What it does | VKS implementation |
+|---|---|---|
+| **CNI plugin** | Pod-to-pod connectivity, network policy | **Antrea (default)** or **Calico**; Antrea uses Open vSwitch, Calico uses the Linux bridge with BGP; VKS also provides the **Antrea NSX Routed** CNI for routable pod networking |
+| **Service ClusterIP** | Default type; reachable only inside the cluster | Antrea or Calico |
+| **Service NodePort** | Opens a port on every worker node | Antrea or Calico |
+| **Service LoadBalancer** | External IP from the infrastructure load balancer | NSX Load Balancer (one virtual server per service), Avi Load Balancer, or Foundation Load Balancer |
+| **Ingress** | L7 HTTP/HTTPS routing into the cluster | Third-party controller such as **Contour** (standard package) |
+| **Network policy** | Allowed traffic to/from selected pods | Antrea (OVS) or Calico (iptables) |
+
+### Storage
+
+| Construct | Role in Kubernetes | VKS implementation |
+|---|---|---|
+| **StorageClass** | Template/class of storage for dynamic provisioning | Created automatically from the **vSphere storage policies** assigned to the vSphere Namespace; replicated to VKS clusters in that namespace |
+| **PersistentVolumeClaim (PVC)** | Workload request for storage | Handled by the **paravirtual CSI (pvCSI)** in the cluster, which forwards requests to CNS-CSI on the Supervisor and CNS in vCenter |
+| **PersistentVolume (PV)** | The provisioned volume | Backed by a vSphere First Class Disk (FCD)/virtual disk on policy-compliant datastores |
+| **VolumeSnapshot** | Point-in-time copy | CSI snapshots via the vSphere CSI driver (csi.vsphere.vmware.com) |
+| **Ephemeral storage** | Pod-lifetime data | Ephemeral VMDKs on the node |
+
+### Service mesh
+
+| Aspect | Key points |
+|---|---|
+| **Purpose** | Service-to-service mTLS, traffic management, observability - without app code changes |
+| **Mechanism** | Sidecar proxies (Envoy) or ambient mode; a control plane programs the proxies |
+| **VKS implementation** | **Istio**, delivered as a VKS standard package (sidecar mode or ambient mode; supports tracing config, bring-your-own-CA, multi-cluster) |
+
+### Helm
+
+| Aspect | Key points |
+|---|---|
+| **Purpose** | Package manager for Kubernetes: charts = templated, versioned bundles of manifests |
+| **Concepts** | Chart, release, repository, values file overrides |
+| **In VKS** | A **Helm Controller** standard package exists; most first-party add-ons are instead delivered as **standard packages** (Carvel-based) installed with the VCF CLI or kubectl |
+
+**Key takeaways**
+- Default CNI for new VKS clusters is **Antrea** - you do not specify it in YAML. Calico must be explicitly specified or set as the default CNI. Exam trap: picking Calico as the default.
+- A Service of type LoadBalancer consumes one virtual server on the infrastructure load balancer (NSX LB, Avi, or Foundation LB). Ingress (Contour) is the L7 alternative that shares one external endpoint across many routes.
+- VKS storage is **policy-driven**: vSphere storage policy -> namespace -> Kubernetes StorageClass -> PVC -> CNS volume. There is no direct storage admin work inside the cluster.
+- "Service mesh" on the exam = **Istio standard package** on a VKS cluster. HCX "service mesh" (site pairing) is a different product - a classic trap.
+- Helm = generic package manager; VKS standard packages = Broadcom-curated Carvel packages (Cert Manager, Contour, ExternalDNS, Fluent Bit, Harbor, Istio, Prometheus, Telegraf, Velero, Cluster Autoscaler, and more). Know the difference.
+
+---
+
+## Objective 1.3: Determine the Reference Architecture (NSX, VDS, Zones) for a VKS Deployment
+
+| | **NSX topology** (Segments or VPC) | **VDS topology** | **vSphere Zones topology** |
+|---|---|---|---|
+| **Networking stack** | NSX overlay: T0/T1 gateways, segments, or NSX VPCs; NCP bridges Kubernetes and NSX | vSphere Distributed Switch port groups as Workload Networks | NSX or VDS stack, stretched across **three vSphere Zones** (each zone = one vSphere cluster) |
+| **Load balancer** | NSX Load Balancer (embedded/T1) or Avi Load Balancer | Foundation Load Balancer or Avi Load Balancer (external HAProxy also seen in legacy docs) | Same as the underlying stack (NSX LB / Avi / FLB) |
+| **Objects created per VKS cluster** | Tier-1 gateway + linked segment for the node network; LB virtual server + server pool for the cluster API server; one virtual server per LoadBalancer service; SNAT rules on T0 | No NSX objects; node IPs come from the Workload Network (distributed port group); LB VIPs from Avi/FLB | Supervisor control plane VM placed in each zone; VKS cluster is zone-aware and can use failure domains / placement policies |
+| **Availability model** | Host-level HA within a cluster | Host-level HA within a cluster | **Cluster-level HA**: survives a whole-cluster (zone) failure |
+| **Best fit** | Micro-segmentation, per-tenant isolation, VCF Automation / VPC self-service | Simple deployments without NSX; VLAN-backed | HA for control plane and workloads across fault domains |
+
+**Zones facts worth memorizing**
+- A **vSphere Zone maps 1:1 to a vSphere cluster**; a Supervisor deploys on **exactly 3 zones**; all zone clusters share one VDS (and one NSX Overlay Transport Zone for NSX stacks) and the same physical L2 network.
+- Three-zone Supervisor **requires control plane HA** (3 control plane VMs, one per zone).
+- Namespace resources are drawn equally from all three clusters (300 MHz reservation = 100 MHz per cluster).
+- Zones marked for management can be reserved for the Supervisor control plane only; namespaces can be assigned their own zones for workload/management isolation.
+
+**Key takeaways**
+- **VPC is the recommended workload network** for VCF 9 stacks and the default when the Supervisor is activated during workload domain creation; it provides the most complete VCF Automation experience.
+- With NSX, the system auto-creates a **small NSX load balancer per VKS cluster** for its API server, plus per-service virtual servers, SNAT rules, and default DFW rules (kube-dns, validator).
+- With VDS, there are **no NSX overlay objects**: workload networks are port groups, and the external LB (Avi or Foundation LB) fronts the control plane and LoadBalancer services.
+- Zones are an **availability decision**, not a networking stack decision: you choose NSX/VPC or VDS *and* one-zone vs three-zone independently.
+- Exam trap: "which architecture gives cluster-level HA?" - three vSphere Zones. "Which needs no NSX?" - VDS. "Which is recommended for VCF Automation?" - VPC.
+
+---
+
+## Quick Recall Sheet
+
+- **VM** = own kernel, strong isolation, slow. **Container** = shared kernel, fast, immutable. **vSphere Pod** = VM-grade isolation at container speed (CRX + Spherelet on ESX).
+- **VKS cluster** = conformant Kubernetes on Supervisor-managed VMs, built by Cluster API.
+- **Default CNI = Antrea.** Calico must be specified. Antrea NSX Routed = routable pods.
+- **LoadBalancer service** -> NSX LB / Avi / FLB virtual server. **Ingress** -> Contour. **Network policy** -> Antrea/Calico.
+- Storage chain: **storage policy -> namespace -> StorageClass -> PVC -> pvCSI -> CNS-CSI -> CNS -> FCD**.
+- **Service mesh = Istio standard package.** Helm = generic chart manager; VKS add-ons are Carvel-based standard packages.
+- **NSX topology**: T1 + segment + LB per cluster, SNAT per namespace. **VDS topology**: port groups + external LB, no NSX objects. **Zones**: exactly 3, one cluster each, cluster-level HA, control plane HA mandatory.
+- Naming: TKGS -> **VKS**, TKR -> **VKr**, Supervisor Cluster -> **Supervisor** (vSphere 9 / VCF 9 naming).
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vks-tanzu/study-notes" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ↑ Back to VMware Kubernetes (VKS 3V0-24.25)
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    Kubernetes (VKS Tanzu) Track
+  </a>
+  <a href="/certifications/vmware/vks-tanzu/study-notes/section-2-products-and-solutions" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 2: VMware Products and Solutions (Supervisor & Networking) →
+  </a>
+</div>

@@ -1,0 +1,197 @@
+---
+title: "Module 03: Data Transformation with Glue, EMR, Lambda, Flink & Redshift"
+description: "Choosing a transformation engine, CSV to Parquet, JDBC/ODBC, containers on ECS/EKS, cost optimization, troubleshooting, data APIs, 3 Vs, and LLM integration."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 3
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 1.2: choosing and tuning transformation services (Glue, EMR, Lambda, Redshift, Flink), format conversion, JDBC/ODBC connectivity, containers on ECS/EKS, cost optimization, troubleshooting, data APIs, the three Vs, and LLM integration (Skills 1.2.1–1.2.10).
+
+<Callout variant="info" title="Exam Blueprint Focus: Transformation Engine Selection">
+The exam rewards matching the engine to the workload: serverless Spark (Glue), flexible big-data clusters (EMR), small event-driven transforms (Lambda), SQL-in-warehouse ELT (Redshift), and streaming (Flink). New in guide v1.1: Skill 1.2.10, integrating LLMs for data processing.
+</Callout>
+
+---
+
+## 1. Engine Selection Matrix (Skills 1.2.4, 1.2.5)
+
+| Engine | Model | Best for | Cost levers | Avoid when |
+|---|---|---|---|---|
+| AWS Glue ETL (Spark) | Serverless, per DPU-second | Standard batch/streaming ETL, catalog integration | Glue Flex execution, auto scaling, right-size workers, G.1X/G.2X | Need custom Hadoop ecosystem tools |
+| Glue Python shell / Ray | Small single-node / distributed Python | Light scripts, pandas | 1/16 DPU option for Python shell | Terabyte-scale joins |
+| Amazon EMR (EC2) | Managed cluster | Heavy Spark/Hive/Presto/HBase, custom libs, long-running | Spot task nodes, instance fleets, managed scaling, transient clusters | Teams wanting zero cluster management |
+| EMR Serverless | Serverless Spark/Hive | Spark without cluster ops | Pre-initialized capacity only if needed | Need HDFS-heavy or custom AMIs |
+| EMR on EKS | Spark on existing Kubernetes | Share EKS fleet | Karpenter, Spot | No existing EKS |
+| AWS Lambda | Event-driven functions (15 min, up to 10 GB memory) | Light per-file/per-record transforms | Memory/ARM (Graviton) tuning | Long or very large jobs |
+| Amazon Redshift (SQL, stored procs, materialized views) | ELT in warehouse | Transform data already in warehouse | Serverless RPU limits, pause/resume, concurrency scaling | Unstructured or non-SQL logic |
+| Managed Service for Apache Flink | Stateful streaming | Windows, joins, CEP | KPU autoscaling | Simple stateless transforms |
+| ECS/EKS (Fargate) | Containers | Custom runtimes, long-running or non-Spark code | Fargate Spot, right-size tasks | Plain Spark (use Glue/EMR) |
+
+```
+ Raw (S3)                 Transform                         Curated / Serve
++---------+   crawl   +---------------------+   write    +-------------------+
+| CSV/JSON|---------->| Glue Spark / EMR    |----------->| S3 Parquet + Iceberg|
+| Logs    |           | Lambda (small)      |            | Redshift (COPY/MV)  |
++---------+           | Redshift SQL (ELT)  |            | OpenSearch          |
+                      +---------------------+            +-------------------+
+```
+
+---
+
+## 2. Format Conversion and Optimization (Skill 1.2.6)
+
+* **Row formats:** CSV, JSON, Avro (good for streaming/schema evolution).
+* **Columnar formats:** **Parquet** and **ORC** reduce scan size and cost, enable predicate pushdown and column pruning, compress well (Snappy default, ZSTD, GZIP).
+* **Athena** bills per data scanned, so CSV → partitioned Parquet commonly cuts cost by 30–90%.
+* Aim for 128 MB–1 GB files; avoid millions of tiny files.
+
+```python
+# AWS Glue PySpark: CSV -> partitioned Parquet
+from awsglue.context import GlueContext
+from pyspark.context import SparkContext
+glue = GlueContext(SparkContext.getOrCreate())
+df = glue.create_dynamic_frame.from_catalog(database="raw", table_name="orders_csv")
+glue.write_dynamic_frame.from_options(
+    frame=df, connection_type="s3",
+    connection_options={"path": "s3://lake/curated/orders/", "partitionKeys": ["order_date"]},
+    format="glue_parquet", format_options={"compression": "snappy"})
+```
+
+Other conversions: **Firehose** record format conversion (JSON → Parquet/ORC), **Athena CTAS** (`CREATE TABLE AS SELECT ... WITH (format='PARQUET')`), and `UNLOAD ... FORMAT PARQUET` from Redshift.
+
+---
+
+## 3. Connecting and Integrating Sources (Skills 1.2.2, 1.2.3)
+
+* **JDBC / ODBC** are standard database drivers. Glue uses **JDBC connections** (stored as Glue connections, credentials in Secrets Manager). BI tools and SQL clients often use ODBC/JDBC to Redshift/Athena.
+* **Redshift Data API** avoids drivers and managed connections (HTTP, async, IAM auth).
+* Integrating multiple sources: land into S3, catalog with Glue, join in Spark/Athena/Redshift. Use **Redshift federated queries** or **Athena federated queries** (Lambda connectors) for in-place joins. **Zero-ETL integrations** replicate Aurora/RDS/DynamoDB to Redshift or the lakehouse without building pipelines.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Glue DynamicFrame vs Spark DataFrame, workers, and bookmarks">
+
+* **DynamicFrame** is self-describing (per-record schema), handles schema inconsistencies with `ResolveChoice`, `ApplyMapping`, `Relationalize`. Convert with `.toDF()` for full Spark SQL APIs.
+* **Worker types:** G.1X (1 DPU), G.2X (2 DPU, memory-intensive), G.4X/G.8X (large), Z.2X (Ray). Auto Scaling lets Glue add/remove workers within a max.
+* **Glue Flex** is a cheaper execution class for non-urgent jobs.
+* **Job bookmarks** persist state for incremental processing.
+* **Pushdown predicates** (`push_down_predicate`) prune partitions at read time, which is a primary performance feature.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Containers for data processing (Skill 1.2.1)">
+
+* **ECS on Fargate** for serverless containers (no cluster to manage); **ECS on EC2** when you need GPUs, special instance types, or cost control with reserved capacity.
+* **EKS** when the organization standardizes on Kubernetes; pair with Karpenter and Spot for cost.
+* Optimize: right-size CPU/memory, use **Fargate Spot** for fault-tolerant batch, use **ECR** with image caching/slim images, scale on queue depth (SQS) with Application Auto Scaling or KEDA, mount **EFS** for shared files.
+* **AWS Batch** is the managed scheduler for batch containers on EC2/Fargate/Spot.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Troubleshooting transformations (Skill 1.2.7)">
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Spark `OutOfMemoryError`, container killed | Skewed keys, too few/large partitions, collect() on large data | Larger worker type, repartition, salting, broadcast small tables |
+| Job slow, many tiny tasks | Small files problem | `groupFiles`/`groupSize`, compact upstream, coalesce on write |
+| Glue job reads everything each run | Bookmarks off or changed context | Enable bookmarks, set `transformation_ctx` |
+| `AccessDenied` | IAM role lacks S3/KMS/Catalog permissions | Fix role, KMS key policy, Lake Formation grants |
+| Cannot reach JDBC source | Subnet/SG/NAT/endpoint missing; self-referencing SG rule required for Glue | Add self-referencing SG rule and S3 VPC endpoint/NAT |
+| Lambda timeout / throttle | 15-min limit, low memory, concurrency cap | More memory, split work, use Glue/Step Functions Map |
+| Schema mismatch / null columns | Column type drift | `ResolveChoice`, schema evolution settings, crawler update behavior |
+
+Use **CloudWatch Logs** (driver/executor logs), **Spark UI** (history server via Glue/EMR), and **Glue job metrics** to diagnose.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Data APIs and the Three Vs (Skills 1.2.8, 1.2.9)
+
+* **Expose data through APIs:** API Gateway + Lambda (reads from DynamoDB/Athena/Redshift Data API), (AWS AppSync is on the out-of-scope list, so expect API Gateway), or Redshift Data API / Athena API directly. Add throttling, usage plans, caching, authorizers.
+* **Volume** = how much (TB/PB → partitioning, columnar, distributed engines). **Velocity** = how fast (streaming vs batch → Kinesis/MSK/Flink). **Variety** = structured (tables), semi-structured (JSON, Avro), unstructured (text, images, audio → S3 + Textract/Transcribe/Bedrock).
+
+---
+
+## 5. Integrating LLMs for Data Processing (Skill 1.2.10)
+
+* **Amazon Bedrock** provides foundation models by API (`InvokeModel`, `Converse`). Use it inside Lambda, Glue, or Step Functions (Step Functions has an optimized Bedrock integration) to summarize, classify, extract entities, or generate embeddings during ETL.
+* **Patterns:** (1) enrichment during ETL (classify support tickets, extract fields from documents); (2) **batch inference** for large offline datasets, cheaper than on-demand calls; (3) embedding generation for vector search (Module 09); (4) **Amazon Kendra** or **Bedrock Knowledge Bases** for retrieval over enterprise data.
+* **Operational concerns:** quotas and throttling (use backoff, SQS buffering), cost per token, data privacy and guardrails, deterministic output validation (JSON schema), caching.
+* Out of scope: model training and inference tuning. Know the integration, not the ML.
+
+```python
+import boto3, json
+br = boto3.client("bedrock-runtime")
+resp = br.converse(
+    modelId="anthropic.claude-3-haiku-20240307-v1:0",
+    messages=[{"role": "user", "content": [{"text": "Classify sentiment (pos/neg/neutral): 'Late delivery, great product.'"}]}],
+    inferenceConfig={"maxTokens": 50, "temperature": 0})
+print(resp["output"]["message"]["content"][0]["text"])
+```
+
+---
+
+## 6. Common Traps and Watchouts
+
+* **"Serverless Spark ETL, least ops"** → Glue (or EMR Serverless), not a self-managed EMR cluster.
+* **"Reduce Athena cost"** → Parquet + partitioning + compression, not more compute.
+* **"Custom Hadoop/HBase/Presto libraries"** → EMR.
+* **Lambda is not for multi-hour transforms.**
+* **Skew** is solved by salting, repartitioning, or broadcast joins; adding workers alone does not fix it.
+* **Glue in a VPC needs a self-referencing security group rule** and a path to S3 (VPC endpoint or NAT).
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Glue, EMR, Lambda, and Redshift for a given transformation.
+<details>
+<summary>Explanation</summary>
+
+Glue for serverless Spark ETL integrated with the Data Catalog; EMR for custom big-data frameworks or fine-grained cost/cluster control; Lambda for small event-driven transforms under 15 minutes; Redshift for SQL-based ELT on data already in the warehouse.
+
+</details>
+
+- [ ] I can convert CSV to Parquet in three different AWS ways.
+<details>
+<summary>Explanation</summary>
+
+Glue ETL job writing `glue_parquet`; Athena CTAS with `format='PARQUET'`; Firehose record format conversion (JSON input). Redshift `UNLOAD ... FORMAT PARQUET` is a fourth.
+
+</details>
+
+- [ ] I can diagnose a Glue job that is out of memory or very slow.
+<details>
+<summary>Explanation</summary>
+
+Check skew, partition count, small files, and shuffle-heavy operations. Fix with bigger worker type, repartition/salting, broadcast joins, `groupFiles`, pushdown predicates. Inspect Spark UI and CloudWatch metrics.
+
+</details>
+
+- [ ] I can describe how an LLM is integrated into a pipeline and the key risks.
+<details>
+<summary>Explanation</summary>
+
+Call Bedrock from Lambda/Glue/Step Functions to enrich or classify records, preferably via batch inference for offline data. Manage throttling with backoff and queues, control cost, validate outputs, protect sensitive data with guardrails and IAM/VPC endpoints.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/02-batch-ingestion-apis-schedulers-triggers" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 02: Batch Ingestion, Data APIs, Schedulers & Event Triggers
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/04-pipeline-orchestration-step-functions-mwaa" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 04: Pipeline Orchestration: Step Functions, MWAA, Glue Workflows & Eventing →
+  </a>
+</div>

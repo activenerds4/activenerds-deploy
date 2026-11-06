@@ -1,0 +1,213 @@
+---
+title: "Module 20: Emerging Topics (GenAI Security) & Exam Mastery Playbook"
+description: "Bedrock Guardrails, AgentCore Identity, human approval workflows with Step Functions, plus scenario keyword decoding and distractor patterns."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 20
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Bedrock Guardrails, AgentCore Identity, human approval workflows with Step Functions, plus scenario keyword decoding and distractor patterns.
+
+<Callout variant="info" title="Exam Blueprint Focus: Emerging Topics (Unscored Pretest) and Exam Strategy">
+The guide notes emerging-topic questions may appear as pretest items that do not affect your score: designing security and responsible AI controls for generative and agentic AI. Part A covers those skills. Part B converts the whole guide into a scenario-decoding playbook for exam day.
+</Callout>
+
+---
+
+## Part A: Security and Responsible AI Controls
+
+The guide lists three skills: (1) content filtering and regulatory compliance controls for generative AI (for example Amazon Bedrock Guardrails); (2) access controls for generative and agentic AI applications (for example AgentCore Identity); (3) human oversight workflows with approval mechanisms for AI operations (for example AWS Step Functions).
+
+### 1. Amazon Bedrock Guardrails
+
+| Capability | Purpose |
+|---|---|
+| Content filters | Configurable strength for harmful categories (hate, insults, sexual, violence, misconduct) and prompt-attack detection on inputs and outputs |
+| Denied topics | Block topics defined in natural language (for example investment advice) |
+| Word filters | Custom words and profanity lists |
+| Sensitive information filters | Detect, block or mask PII (names, SSNs, card numbers) and custom regex patterns |
+| Contextual grounding checks | Detect hallucinations by checking responses against source content and relevance to the query (useful for RAG) |
+| Automated Reasoning checks | Validate responses against formal policies for factual consistency in regulated domains |
+| ApplyGuardrail API | Apply the same guardrail to any model, including non-Bedrock models, and to arbitrary text |
+
+```
+ User prompt -> [Guardrail: input checks] -> Foundation model -> [Guardrail: output checks] -> Response
+                    block/mask PII, topics, attacks              filter harmful, ungrounded content
+```
+
+Related controls for compliant GenAI architectures: IAM least privilege on `bedrock:InvokeModel`, VPC interface endpoints (PrivateLink) so inference traffic stays private, KMS encryption of custom models/knowledge bases, model invocation logging to S3/CloudWatch for audit, CloudTrail for API activity, Macie/Comprehend for PII discovery in training or RAG data, SCPs to restrict which models/Regions are allowed, and data residency choices (cross-Region inference profiles move requests across Regions within a geography; account for this in regulatory scenarios).
+
+```bash
+aws bedrock create-guardrail --name support-bot --blocked-input-messaging "Request blocked." --blocked-outputs-messaging "Response blocked." \
+  --sensitive-information-policy-config 'piiEntitiesConfig=[{type=US_SOCIAL_SECURITY_NUMBER,action=BLOCK},{type=EMAIL,action=ANONYMIZE}]' \
+  --topic-policy-config 'topicsConfig=[{name=InvestmentAdvice,definition="Recommending specific investments",type=DENY}]'
+```
+
+<Callout variant="warning" title="Exam Trap">
+Guardrails govern model inputs and outputs. They do not replace IAM (who can call the model), network isolation (PrivateLink) or data-layer controls. A complete answer layers all of them. Also, filtering at the application with custom regex code is the high-overhead distractor when Guardrails exist.
+</Callout>
+
+### 2. Access Controls for Generative and Agentic AI (AgentCore Identity)
+
+Agentic applications let a model call tools and APIs on behalf of users. The risks are over-privileged agents, credential leakage in prompts, and confused-deputy behavior. Amazon Bedrock AgentCore provides managed building blocks for agents, and **AgentCore Identity** is its identity and credential management capability.
+
+| Concern | Control |
+|---|---|
+| Who is calling the agent (inbound) | Authenticate users or services via OAuth/OIDC with your identity provider (for example Cognito, Okta, Microsoft Entra ID) |
+| What the agent can access on the user's behalf (outbound) | Token vault / credential providers storing OAuth tokens or API keys, issued scoped and short-lived, with user consent flows; credentials never appear in prompts or code |
+| Agent's own AWS permissions | Agent workload identity with a least-privilege IAM role; separate roles per agent/tool; permission boundaries and SCPs |
+| Tool exposure | Gateway-style mediation of tools with authorization, rate limits and audit |
+| Auditing | CloudTrail, observability traces, invocation logging |
+
+Design principles: least privilege per tool, short-lived credentials, per-user delegation (not a shared super-user token), deny by default for destructive actions, and audit every tool call. Because this area evolves quickly, confirm current AgentCore feature names and limits in the AWS documentation when studying.
+
+### 3. Human Oversight Workflows with Step Functions
+
+Use human-in-the-loop approval for high-impact AI operations (payments, deletions, customer communications, production changes):
+
+```
+ Agent proposes action -> Step Functions Task (.waitForTaskToken) -> SNS/SES/SQS notifies approver
+        approver approves -> SendTaskSuccess(token)  -> execute action (Lambda / SDK integration)
+        approver rejects or timeout -> SendTaskFailure / Catch -> log, notify, abort
+```
+
+- **Standard workflows** (up to one year) fit long approval waits; Express workflows do not.
+- Add timeouts (`TimeoutSeconds`, heartbeat), `Catch` branches for rejection and escalation, and log all decisions (execution history, CloudTrail) for audit.
+- Combine with Bedrock Agents return-of-control patterns, EventBridge for routing approvals, and IAM so the approver identity is enforced (API Gateway with Cognito/IAM authorizer for the approval endpoint).
+
+```bash
+aws stepfunctions send-task-success --task-token "$TOKEN" --task-output '{"approved":true,"approver":"alice"}'
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Responsible AI Layers for a Regulated Chatbot">
+
+1. Data: classify and mask PII (Macie, Comprehend), restrict what the knowledge base can retrieve (metadata filters, per-user access).
+2. Model access: IAM, PrivateLink, SCP-approved models and Regions.
+3. Runtime safety: Guardrails with grounding checks and denied topics.
+4. Oversight: approval workflows for consequential actions; human escalation on low-confidence output.
+5. Evidence: invocation logs, CloudTrail, Audit Manager evidence for compliance frameworks.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## Part B: Exam Mastery Playbook
+
+### 4. Constraint-Keyword Decoder
+
+| If the stem says | Think first | Usual answer family |
+|---|---|---|
+| "Least operational overhead" | Managed or serverless | Fargate, Lambda, Aurora, Control Tower, Step Functions |
+| "Most cost-effective" | Tiering, commitments, Spot | Savings Plans, Intelligent-Tiering, gateway endpoints, Spot |
+| "Without changing the application" | Compatibility/rehost | MGN, Amazon MQ, RDS Custom, Storage Gateway, FSx |
+| "Minimal downtime migration" | Continuous replication | DMS CDC, MGN, read replica promotion |
+| "Centrally manage / all accounts" | Organization-level service | Organizations, SCP, StackSets, Firewall Manager, delegated admin |
+| "Prevent" | Preventive control | SCP, IAM boundary, resource policy, WAF |
+| "Detect / alert" | Detective control | GuardDuty, Config, CloudTrail, Security Hub |
+| "Near-zero RTO and RPO" | Multi-site | Active/active, DynamoDB global tables, Aurora Global (RTO about a minute) |
+| "Static IP / fast failover (TCP/UDP)" | Anycast | Global Accelerator, NLB with EIPs |
+| "Private connectivity to a service, overlapping CIDRs" | PrivateLink | NLB + endpoint service |
+| "Order/ replay / multiple consumers of the stream" | Streams | Kinesis, MSK, EventBridge archive |
+| "Encrypt, control keys, audit key usage" | KMS CMK | Customer managed key, key policy, CloudTrail |
+| "Compliance WORM" | Immutability | S3 Object Lock Compliance, Backup Vault Lock |
+| "On-premises to AWS, bulk and slow link" | Offline transfer | Snow Family |
+
+### 5. Distractor Patterns
+
+1. **Over-engineering:** multi-Region active/active for a stated RTO of hours.
+2. **Under-engineering:** single AZ or single tunnel when availability is required.
+3. **Custom code for a managed feature:** cron on EC2, DIY log shipping, home-grown rotation scripts.
+4. **Right service, wrong scope:** WAF on an NLB (not supported), Shield Advanced for something it does not protect, gateway endpoint for on-premises access.
+5. **Wrong direction or role:** Resolver inbound vs outbound; task role vs execution role; trust policy vs permission policy.
+6. **Ignores a hard constraint:** data residency, existing Direct Connect, "no internet access," "no code changes."
+7. **Detective answer to a preventive question:** Config rule when the stem says "prevent."
+8. **Outdated pattern:** OAI instead of OAC, Classic Load Balancer, gp2/io1 as defaults, Single-AZ standby.
+
+### 6. Fast Reference: Limits and Defaults to Memorize
+
+| Item | Value |
+|---|---|
+| Lambda max timeout / memory | 15 min / 10 GB |
+| SQS visibility timeout default / max | 30 s / 12 h; retention default 4 days, max 14 |
+| Kinesis shard | 1 MB/s or 1,000 records/s in; 2 MB/s out |
+| DynamoDB item max; RCU/WCU unit | 400 KB; 4 KB read / 1 KB write |
+| S3 max object / single PUT | 5 TB / 5 GB |
+| VPN tunnel throughput | 1.25 Gbps per tunnel |
+| Direct Connect port speeds (dedicated) | 1, 10, 100 Gbps (higher on newer ports) |
+| KMS direct encrypt limit | 4 KB |
+| Aurora storage replication | 6 copies, 3 AZs; up to 15 replicas |
+| Spot interruption notice | 2 minutes |
+| Role chaining max session | 1 hour |
+| Step Functions Standard / Express max | 1 year / 5 minutes |
+| API Gateway default integration timeout | 29 s |
+| Exam passing score | 750 of 1,000 |
+
+### 7. Study Plan (about 70-90 hours)
+
+| Week | Focus | Modules |
+|---|---|---|
+| 1 | Network and multi-account foundations | 01-04 |
+| 2 | Identity, encryption, DR | 05-06 |
+| 3 | Deployment, HA, security services | 07-09 |
+| 4 | Integration, storage, performance | 10-12 |
+| 5 | Data platforms, cost, operations | 13-15 |
+| 6 | Improvement playbook and migration | 16-18 |
+| 7 | Modernization, emerging topics, full practice exams | 19-20 |
+
+Practice method: after each module, build the architecture in a sandbox account, write down why each distractor fails, and take timed practice exams. Review wrong answers by constraint keyword rather than by service.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can explain what Bedrock Guardrails controls and what they do not replace.
+<details>
+<summary>Explanation</summary>
+
+Guardrails filter inputs and outputs (harmful content, denied topics, PII, grounding). They do not control who may invoke models (IAM), network exposure (PrivateLink), or data-layer permissions. A complete design layers all of these.
+
+</details>
+
+- [ ] I can design an access-control model for an AI agent calling third-party APIs for a user.
+<details>
+<summary>Explanation</summary>
+
+Authenticate the user with OIDC/OAuth, give the agent its own workload identity with a least-privilege role, store third-party tokens in a managed credential vault with per-user consent and short-lived scoped tokens (for example through AgentCore Identity), never place secrets in prompts, and audit every tool call.
+
+</details>
+
+- [ ] I can build a human approval step for a risky AI action.
+<details>
+<summary>Explanation</summary>
+
+Use a Step Functions Standard workflow with a `.waitForTaskToken` task that notifies the approver, resume with SendTaskSuccess or SendTaskFailure, set timeouts and Catch paths, and log decisions for audit.
+
+</details>
+
+- [ ] I can eliminate distractors systematically on exam day.
+<details>
+<summary>Explanation</summary>
+
+Underline constraint words, drop options that violate a hard technical rule, drop custom-code and self-managed options when a managed equivalent exists, drop over- or under-engineered options relative to stated RTO/RPO, then choose the lowest operational overhead and cost among those left.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/19-modernization-containers-serverless" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 19: Modernization: Containers, Serverless & Event-Driven Architectures
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    ✓ Complete: Back to Study Guide Hub →
+  </a>
+</div>

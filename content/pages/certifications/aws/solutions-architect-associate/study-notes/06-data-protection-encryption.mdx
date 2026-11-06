@@ -1,0 +1,180 @@
+---
+title: "Module 06: Data Protection: KMS, ACM, Backups & Retention"
+description: "Envelope encryption, key policies, rotation, TLS with ACM, S3 data protection, Object Lock, and AWS Backup."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 6
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 1.3 — encryption at rest and in transit, AWS KMS, CloudHSM, AWS Certificate Manager, key policies and rotation, S3 data protection, backups, replication, data lifecycle and retention
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1, Task 1.3 — Determine appropriate data security controls">
+The blueprint expects you to encrypt data at rest with KMS, in transit with ACM and TLS, implement key access policies, rotate keys and renew certificates, and implement backup, replication, and retention. Compliance-driven scenarios (WORM, audit, separate key custody) are common.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Envelope encryption">
+
+KMS can directly encrypt only small payloads (up to 4 KB). For larger data, services use **envelope encryption**:
+
+1. The service calls `GenerateDataKey` on a KMS key; KMS returns a plaintext data key and the same key encrypted under the KMS key.
+2. The service encrypts the data locally with the plaintext data key, then discards the plaintext key.
+3. The encrypted data key is stored alongside the data.
+4. To decrypt, the service calls `Decrypt` on KMS with the encrypted data key, then decrypts the data locally.
+
+KMS keys never leave KMS unencrypted, and every use is logged in CloudTrail.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Key policies and grants">
+
+Every KMS key has a **key policy**, the primary access control. IAM policies can grant access to a key only if the key policy allows IAM policies to do so (the default policy delegates to the account). For **cross-account** use, both the key policy in the owning account and an IAM policy in the calling account must allow it. **Grants** provide temporary, programmatic delegation to AWS services.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Key type | Who manages | Rotation | Visibility / cost |
+|---|---|---|---|
+| AWS owned key | AWS | AWS-managed, invisible | Free, no CloudTrail visibility |
+| AWS managed key (aws/s3, aws/ebs) | AWS, in your account | Automatic about every year, not configurable | Visible in KMS; no monthly key fee |
+| Customer managed key | You | Optional automatic rotation (annual default, configurable period) or manual | Monthly fee plus request cost; full key policy control |
+| Imported key material | You supply | Manual only | Use for strict key-origin requirements |
+| AWS CloudHSM | You (single-tenant HSM, FIPS 140-2 Level 3) | You manage keys and HSM clusters | Choose when you need exclusive key control; KMS custom key store can front it |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+Client --TLS--> CloudFront / ALB (certificate from ACM) --TLS--> App --> S3 / EBS / RDS
+                                                                       |
+                         encrypt data with data key  <-- GenerateDataKey --  AWS KMS (CMK + key policy)
+                                                                       |
+                                                           CloudTrail logs every Encrypt/Decrypt
+```
+
+### Encryption at rest by service
+
+| Service | Option | Exam nuance |
+|---|---|---|
+| Amazon S3 | SSE-S3 (default for new objects), SSE-KMS, DSSE-KMS, SSE-C, client-side | SSE-KMS adds audit and key control; S3 Bucket Keys reduce KMS request costs |
+| Amazon EBS | KMS encryption of volumes, snapshots, and data in transit to the instance | Unencrypted snapshot can be copied to an encrypted snapshot, then restored |
+| Amazon RDS | KMS at creation; covers storage, backups, replicas, snapshots | Cannot encrypt an existing unencrypted instance in place: snapshot, copy with encryption, restore |
+| Amazon DynamoDB | Always encrypted at rest (AWS owned, AWS managed, or customer managed key) | Choose customer managed key for audit and control |
+| Amazon EFS | KMS at creation; enforce TLS with the mount helper | Encryption at rest cannot be added later |
+
+### Encryption in transit
+
+* **AWS Certificate Manager (ACM):** provisions public TLS certificates for free, with automatic renewal when validated by DNS. Deploys to ELB, CloudFront (certificate must be in us-east-1), and API Gateway. Public ACM certificates **cannot be exported** or installed directly on EC2.
+* Enforce HTTPS in S3 with a bucket policy condition `aws:SecureTransport` set to false and an explicit Deny.
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```json
+{
+  "Sid": "DenyUnencryptedTransport",
+  "Effect": "Deny",
+  "Principal": "*",
+  "Action": "s3:*",
+  "Resource": ["arn:aws:s3:::example-data", "arn:aws:s3:::example-data/*"],
+  "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+}
+```
+
+```bash
+# Create a customer managed key and enable automatic rotation
+aws kms create-key --description "app data key"
+aws kms enable-key-rotation --key-id <key-id>
+
+# Encrypt an unencrypted RDS instance: snapshot -> encrypted copy -> restore
+aws rds create-db-snapshot --db-instance-identifier prod-db --db-snapshot-identifier prod-snap
+aws rds copy-db-snapshot --source-db-snapshot-identifier prod-snap \
+  --target-db-snapshot-identifier prod-snap-enc --kms-key-id <key-id>
+aws rds restore-db-instance-from-db-snapshot \
+  --db-instance-identifier prod-db-enc --db-snapshot-identifier prod-snap-enc
+```
+
+### Data protection, retention, and recovery
+
+| Control | Protects against | Details |
+|---|---|---|
+| S3 Versioning (plus MFA Delete) | Accidental overwrite or delete | Keeps prior versions; combine with lifecycle to expire old versions |
+| S3 Object Lock | Tampering for compliance | WORM; Governance mode (privileged users can override) versus Compliance mode (no one, including root, can delete until retention ends) |
+| S3 Glacier Vault Lock | Policy changes on archives | Locks a compliance policy permanently |
+| S3 Block Public Access | Accidental public exposure | Enable at account and bucket level |
+| S3 replication (CRR/SRR) | Regional loss, compliance copies | Requires versioning on source and destination |
+| AWS Backup | Centralized backup policy | Backup plans, cross-Region and cross-account copies, Vault Lock, supports EBS, RDS, DynamoDB, EFS, FSx, and more |
+| Amazon Macie | Unknown sensitive data | Classifies S3 data and finds PII |
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Trying to enable encryption on an existing unencrypted RDS instance or EFS file system directly. Use snapshot copy (RDS) or create a new encrypted file system and migrate (EFS).
+- **Trap 2:** Choosing KMS when the requirement is exclusive, single-tenant HSM control. That points to CloudHSM.
+- **Trap 3:** Assuming Governance mode Object Lock satisfies strict regulations. Compliance mode prevents deletion even by root.
+- **Trap 4:** Requesting an ACM public certificate for installation on an EC2 instance's web server. Terminate TLS at ELB or CloudFront instead.
+- **Trap 5:** Forgetting that CloudFront certificates must be in us-east-1.
+- **Trap 6:** Forgetting that cross-account KMS use needs both the key policy and an IAM policy in the caller account.
+- **Trap 7:** Enabling replication without versioning. S3 replication requires versioning on both buckets.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can explain envelope encryption and why KMS uses it.
+<details>
+<summary>Explanation</summary>
+
+KMS limits direct encryption to 4 KB, so services request a data key, encrypt data locally, and store the encrypted data key with the data. Only KMS can decrypt the data key, so access to data depends on permission to use the KMS key, and each use is auditable in CloudTrail.
+
+</details>
+
+- [ ] I can choose between AWS owned, AWS managed, and customer managed keys, or CloudHSM.
+<details>
+<summary>Explanation</summary>
+
+Customer managed keys give control over key policy, rotation, and audit. AWS managed keys are convenient but not configurable. AWS owned keys are invisible and free. CloudHSM is for single-tenant, customer-controlled HSMs when regulations require exclusive key custody.
+
+</details>
+
+- [ ] I can encrypt an existing unencrypted RDS database.
+<details>
+<summary>Explanation</summary>
+
+Take a snapshot, copy it with encryption enabled and a KMS key, and restore a new DB instance from the encrypted copy. Then redirect the application to the new endpoint. Encryption cannot be toggled on an existing instance.
+
+</details>
+
+- [ ] I can design WORM retention and backup protection for compliance.
+<details>
+<summary>Explanation</summary>
+
+Use S3 Object Lock in Compliance mode with versioning for immutable object retention, Glacier Vault Lock for archive policies, and AWS Backup with Vault Lock plus cross-Region or cross-account copies for protected backups. Add lifecycle rules to enforce retention and expiry.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/05-application-edge-security" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 05: Securing Applications: WAF, Shield, Cognito, GuardDuty & Secrets
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/07-loose-coupling-event-driven" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 07: Loosely Coupled & Event-Driven Architectures →
+  </a>
+</div>

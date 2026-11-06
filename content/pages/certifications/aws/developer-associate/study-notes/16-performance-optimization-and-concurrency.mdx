@@ -1,0 +1,216 @@
+---
+title: "Module 16: Performance Optimization: Concurrency, Memory Tuning & Caching"
+description: "Provisioned concurrency, Auto Scaling, connection pooling, memory right-sizing, messaging optimization, DAX, CloudFront, and bottleneck detection."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 16
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Troubleshooting and Optimization
+
+<Callout variant="info" title="Exam Focus: Troubleshooting and Optimization (Task 4.3, Skills 4.3.1 to 4.3.6)">
+DVA-C03 consolidated nine optimization skills into **six** and moved **Lambda performance tuning here from Domain 1**. Topics: concurrency (Lambda provisioned concurrency, EC2 Auto Scaling, thread and connection pools), memory and compute, messaging optimization, caching (ElastiCache, **DAX**, CloudFront), bottleneck detection, and **AI tools to find optimization opportunities (new)**.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Measure First, Then Fix the Biggest Constraint">
+
+Optimization is a loop: **measure** (percentile latency, error and throttle rates, utilization), **find the bottleneck** (the slowest or most saturated component), **change one thing**, **measure again**.
+
+* Use **percentiles (p95, p99)**, not averages, for latency; tail latency hurts real users.
+* The bottleneck is frequently **downstream** (database, external API, connection exhaustion), not the compute you are tempted to scale.
+* **Exam Trap:** Do not choose "increase memory" or "add instances" before evidence shows CPU or memory saturation. If the cause is a cold start, hot key, N+1 query pattern, or missing cache, bigger compute will not help.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Concurrency and Scaling (Skill 4.3.1)
+
+### Lambda
+
+| Lever | Effect | Notes |
+|---|---|---|
+| **Provisioned concurrency** | Pre-initialized environments, **no cold starts** for that capacity | Billed continuously; apply to **alias/version**; scale with **Application Auto Scaling** (target tracking on utilization or scheduled) |
+| **Reserved concurrency** | Guarantees capacity **and caps** the function; protects downstream systems | No extra cost; `0` stops all invocations |
+| **SnapStart** | Restores from a snapshot of an initialized environment, reducing startup latency | Supported runtimes only; beware uniqueness and connection state captured in the snapshot |
+| **Init outside the handler** | Reuse SDK clients, connections, and parsed config across warm invocations | Free and always applicable |
+| **Smaller package/fewer imports** | Faster init | Tree-shake, trim dependencies, lazy-load rarely used modules |
+| **Event source concurrency controls** | SQS ESM **maximum concurrency**, Kinesis **parallelization factor** | Protect downstream databases |
+
+Scaling is limited by **account concurrency** and a per-function scale-up rate, so sudden spikes can throttle even below the account limit; **buffer with SQS** or use provisioned concurrency for known peaks.
+
+### EC2, ECS, and Application Scaling
+
+| Policy | Use |
+|---|---|
+| **Target tracking** | Keep a metric near a target (for example 50% CPU, requests per target); simplest and recommended |
+| **Step scaling** | Different adjustments for different alarm breach sizes |
+| **Scheduled scaling** | Known patterns (business hours, sale events) |
+| **Predictive scaling** | ML-based forecast for cyclical traffic |
+
+Tuning: **cooldown / warm-up** to avoid thrashing, **health checks** (ELB type) for replacing bad instances, **min/max/desired** capacity bounds, and scaling on the **right metric** (queue depth per instance for workers, not CPU).
+
+### Thread Pools and Connection Pooling
+
+* **Reuse connections:** create database and HTTP clients once per process and enable HTTP **keep-alive**; avoid opening a connection per request.
+* **Size pools deliberately:** total connections = instances x pool size must stay below the database's `max_connections`. Too-large pools cause contention and exhaustion.
+* **Lambda + relational DB:** use **RDS Proxy** to multiplex thousands of short-lived environments onto a small, stable connection pool, and cap function concurrency.
+* **Thread pools:** bound worker threads to the CPU and I/O profile; unbounded threads cause memory pressure and context-switch overhead.
+
+---
+
+## 2. Optimizing Memory and Compute (Skill 4.3.2)
+
+* **Lambda memory sets CPU, network, and cost.** More memory can reduce duration enough to **lower total cost**: billing is memory x duration, so a 2x memory function that runs 3x faster is cheaper.
+* Find the sweet spot with the open-source **AWS Lambda Power Tuning** (a Step Functions state machine that runs your function at several memory sizes and charts cost vs speed), **AWS Compute Optimizer** recommendations for Lambda and EC2/ECS, and CloudWatch **Lambda Insights**.
+* **arm64 (Graviton)** often gives better price-performance for compatible code.
+* **Ephemeral storage** can be raised (up to 10,240 MB) for temp-file heavy work; **streaming** responses lowers memory for large outputs.
+* **ECS/Fargate:** choose valid CPU/memory combinations for the task; right-size using utilization metrics. **EC2:** pick instance families by profile (compute, memory, storage optimized).
+* **Do the work less:** batch requests, project only needed attributes, compress payloads, paginate, and parallelize independent I/O.
+
+| Symptom | Likely Fix |
+|---|---|
+| Duration high, `Max Memory Used` well below configured, CPU-bound | Increase memory (to get more CPU) and test |
+| Out-of-memory errors | Increase memory or reduce in-memory data |
+| Low CPU, long waits | I/O-bound: parallelize calls, cache, optimize the dependency; more memory will not help |
+| Long cold starts | Provisioned concurrency, SnapStart, smaller package, move init work |
+
+---
+
+## 3. Optimizing Messaging (Skill 4.3.3)
+
+| Technique | Benefit |
+|---|---|
+| **SQS batching** (`SendMessageBatch`, `DeleteMessageBatch`, receive up to 10) | Fewer API calls, lower cost and latency |
+| **Long polling** (`WaitTimeSeconds` up to 20) | Fewer empty receives |
+| **Right-size visibility timeout** and use **DLQ** with `maxReceiveCount` | Avoid duplicate processing and poison-message loops |
+| **Lambda batch size and batching window** | Higher throughput per invocation; fewer invocations (balance with latency) |
+| **Partial batch responses** | Retry only failed records |
+| **FIFO message groups** | Parallelism across groups while preserving order within each |
+| **SNS fan-out + subscription filter policies** | Each consumer receives only relevant messages; no wasted work |
+| **Claim-check (S3 pointer)** for big payloads | Smaller messages, lower cost |
+| **Kinesis enhanced fan-out** | Dedicated throughput per consumer; low latency |
+| **Scaling consumers on queue depth** | Match workers to backlog (`ApproximateNumberOfMessagesVisible` per instance) |
+| **EventBridge Pipes / filtering at the source** | Drop irrelevant events before compute runs |
+
+---
+
+## 4. Caching (Skills 4.3.4 and 1.3.3)
+
+| Layer | Service | Best For | Key Facts |
+|---|---|---|---|
+| **Edge** | **Amazon CloudFront** | Static assets, cacheable API responses, global latency | Cache policies (min/default/max TTL, defaults 0 / 86,400 s / 31,536,000 s), **versioned file names** instead of invalidations, **invalidations** cost after free allotment, **origin shield**, **OAC** to private S3, Lambda@Edge and CloudFront Functions for lightweight edge logic, honors `Cache-Control` and `Expires` |
+| **API** | **API Gateway cache** (REST) | Repeated identical API calls | Per-stage, TTL default 300 s, max 3,600 s, cache key from selected parameters/headers |
+| **Data (DynamoDB)** | **DAX** | Read-heavy DynamoDB, **microsecond** reads, hot keys | **Write-through** item cache and query cache; API-compatible client swap; **eventually consistent reads served from cache, strongly consistent reads bypass it**; runs in your VPC; not for write-heavy or strongly-consistent-only workloads |
+| **Data (general)** | **ElastiCache** (Redis OSS/Valkey, Memcached) | Relational query results, sessions, computed objects, leaderboards | Lazy loading, write-through, TTL; app manages logic and invalidation |
+| **In-process** | Lambda globals, `/tmp`, application memory | Config, parsed models, tokens | Per environment only; stale until environment recycles |
+| **Client** | Browser and HTTP caching | Static resources | `Cache-Control`, ETag |
+
+**Choosing:** DynamoDB hot reads with no code redesign → **DAX**. Cache results from RDS/Aurora or any computed object → **ElastiCache**. Global static content or cacheable GET responses → **CloudFront**. Cache a REST API's responses in front of Lambda → **API Gateway cache**.
+
+**Invalidation strategies:** short TTLs, event-driven invalidation (write path deletes or updates the key), versioned keys/URLs, jittered expirations to avoid **thundering herd**, and monitoring **hit ratio** and **evictions**.
+
+---
+
+## 5. Detecting Performance Bottlenecks (Skill 4.3.5)
+
+| Layer | Signals to Watch |
+|---|---|
+| **Lambda** | `Duration` p95/p99, `Throttles`, `ConcurrentExecutions`, `Init Duration`, `IteratorAge`, `AsyncEventAge`, `Errors` |
+| **API Gateway** | `Latency` vs `IntegrationLatency` (the gap is API Gateway overhead), `4XXError`, `5XXError`, `CacheHitCount/CacheMissCount` |
+| **DynamoDB** | `ThrottledRequests`, `ReadThrottleEvents/WriteThrottleEvents`, `ConsumedRead/WriteCapacityUnits`, `SuccessfulRequestLatency`; **Contributor Insights** to find hot keys |
+| **SQS** | `ApproximateNumberOfMessagesVisible`, **`ApproximateAgeOfOldestMessage`** (consumers falling behind) |
+| **Kinesis** | `WriteProvisionedThroughputExceeded`, `GetRecords.IteratorAgeMilliseconds` |
+| **ALB/ECS/EC2** | `TargetResponseTime`, `HTTPCode_Target_5XX_Count`, CPU and memory utilization, `RequestCountPerTarget` |
+| **RDS/Aurora** | CPU, `DatabaseConnections`, `ReadLatency/WriteLatency`, **Performance Insights** (top SQL by wait) |
+| **ElastiCache** | `CacheHits/CacheMisses`, `Evictions`, `CPUUtilization`, `CurrConnections` |
+
+**Tools:** **CloudWatch** dashboards and alarms, **X-Ray** latency distributions and service map, **Logs Insights** for slow-query and slow-request patterns, **Lambda Insights**, **Application Signals**, and **Performance Insights** for databases.
+
+---
+
+## 6. AWS AI Tools for Optimization (Skill 4.3.6, New in DVA-C03)
+
+AI-assisted tooling can **detect performance bottlenecks, recommend resource right-sizing, and suggest code efficiency improvements** (for example spotting N+1 queries, missing pagination, unbounded loops, or inefficient serialization).
+
+* Examples: **Kiro** reviewing code and proposing refactors; AWS **Compute Optimizer** rule-based and ML recommendations; generative AI assistants analyzing CloudWatch and X-Ray data.
+* **Validate with measurement:** run before/after benchmarks and load tests; confirm no functional regressions with your test suite.
+* Prefer **small, reviewable changes** and keep a rollback path (aliases, canary deployments).
+* Do not paste sensitive data into assistants; follow the protections from Module 10.
+
+---
+
+## 7. Common Exam Traps and Scenario Distractors
+
+* "Eliminate cold-start latency for a latency-sensitive Lambda" → **provisioned concurrency** (reserved concurrency does not pre-warm).
+* "Function is slow and CPU-bound but memory use is low" → **increase memory** to get more CPU, then measure cost.
+* "Lambda overwhelms the database with connections" → **RDS Proxy**, connection reuse, cap concurrency.
+* "Reduce DynamoDB read latency to microseconds without changing the data model" → **DAX**.
+* "DAX still shows high latency for a few reads" → those reads use **strong consistency** (bypass cache) or are cache misses.
+* "Users worldwide load static assets slowly" → **CloudFront**.
+* "Queue age keeps growing" → scale out consumers or raise concurrency; check for poison messages.
+* "Frequently changing config fetched on every invocation" → cache it (extension, global variable with TTL, AppConfig extension).
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A Lambda function averages 1,800 ms at 512 MB, CPU-bound, with 150 MB memory used. What should you test first?
+<details>
+<summary>Explanation</summary>
+
+Raise the memory setting (for example to 1,024 to 2,048 MB) to get proportionally more CPU. Use Lambda Power Tuning to compare duration and cost; a faster run can cost the same or less.
+
+</details>
+- [ ] A product-catalog table on DynamoDB gets millions of repeated reads. Which service reduces latency to microseconds with the least code change?
+<details>
+<summary>Explanation</summary>
+
+**DAX**, swapping the DynamoDB client for the DAX client. Remember strongly consistent reads are not served from the cache.
+
+</details>
+- [ ] Which setting prevents a nightly batch Lambda from consuming the whole account's concurrency?
+<details>
+<summary>Explanation</summary>
+
+**Reserved concurrency** on the batch function (a cap), and optionally SQS ESM maximum concurrency.
+
+</details>
+- [ ] A worker fleet should scale with backlog. What metric do you use?
+<details>
+<summary>Explanation</summary>
+
+A target-tracking policy on **queue backlog per instance** (visible messages divided by running tasks/instances) rather than CPU.
+
+</details>
+- [ ] An AI assistant suggests removing a database index to speed writes. How do you proceed?
+<details>
+<summary>Explanation</summary>
+
+Treat it as a hypothesis: measure query patterns (Performance Insights), test in a non-prod environment, benchmark before and after, and keep a rollback path.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/15-root-cause-analysis-and-troubleshooting" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 15: Root Cause Analysis & Troubleshooting Across AWS Services
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    ✓ Complete: Back to Study Guide Hub →
+  </a>
+</div>

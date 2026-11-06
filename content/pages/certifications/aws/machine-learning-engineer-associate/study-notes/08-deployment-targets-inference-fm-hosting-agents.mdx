@@ -1,0 +1,414 @@
+---
+title: "Module 08: Deployment Targets, Inference Strategies, FM Hosting & Agent Deployment"
+description: "Task 3.1: compute targets, multi-model/multi-container, real-time/async/serverless/batch inference, Bedrock FM deployment options (on-demand, provisioned throughput), Custom Model Import, agents/AgentCore, RAG configurations and reranking."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 8
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Task 3.1 (Skills 3.1.1 - 3.1.8): choosing compute and deployment targets, orchestrators and multi-model strategies, inference modes, foundation model deployment options, importing external models, deploying agents, FM hosting resources, and RAG retrieval configuration.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 3.1 - Manage deployment infrastructure for ML and AI model types">
+Domain 3 is 24% of scored content. Skills 3.1.4 - 3.1.8 are new in MLA-C02 (FM deployment options, models built outside AWS, agents, FM hosting resources, RAG configuration). Typical questions give latency, payload size, traffic pattern, and cost constraints and ask which inference mode or Bedrock option fits. Edge optimization with SageMaker Neo was removed from the blueprint, so do not spend time on it.
+</Callout>
+
+---
+
+## 1. Selecting Compute Environments and Deployment Targets (Skill 3.1.1)
+
+| Target | Best for | Strengths | Trade-offs |
+|---|---|---|---|
+| Amazon SageMaker AI endpoints | Most custom ML and self-hosted FMs | Managed hosting, auto scaling, variants, monitoring, built-in blue/green | Instances run (and bill) while the endpoint exists, except serverless and scale-to-zero modes |
+| Amazon Bedrock | Serverless access to hosted FMs | No infrastructure, pay per token or provisioned throughput | Limited to supported models and customization paths |
+| Amazon ECS or AWS Fargate | Container-based model servers inside an existing container platform | Reuse of existing CI/CD and service mesh | You own scaling, health checks, GPU placement, and patching |
+| Amazon EKS | Kubernetes-standardized organizations, complex multi-model platforms | Flexibility, portability | Highest operational overhead |
+| AWS Lambda | Small models, light pre- or post-processing, event-driven inference | Scale to zero, no servers | Limited memory, package size, and runtime, no GPU |
+| Amazon EC2 | Full control, specialized stacks | Any hardware, Spot and Savings Plans | Everything is manual |
+
+Selection rule of thumb for the exam: if the scenario says **least operational overhead** and the model is a supported FM, choose **Bedrock**. If it needs a custom model with managed scaling, choose **SageMaker AI**. Choose ECS or EKS only when the scenario states an existing container platform requirement.
+
+---
+
+## 2. Inference Strategies (Skill 3.1.3)
+
+SageMaker AI offers four inference modes. Matching the mode to the traffic shape is the most frequently tested concept in this task.
+
+| Mode | Latency | Payload and duration | Scaling | Choose when |
+|---|---|---|---|---|
+| Real-time endpoint | Milliseconds, always warm | Payload up to 25 MB, response within 60 seconds | Instances auto scale, never below the minimum you set | Steady, interactive traffic with strict latency |
+| Serverless inference | Cold start possible after idle | Smaller payloads (about 4 MB) and short requests, memory up to 6 GB, CPU only | Scales to zero, concurrency you configure | Intermittent, unpredictable traffic that tolerates cold starts |
+| Asynchronous inference | Seconds to minutes | Payload up to 1 GB, processing up to 1 hour | Queue-based, can scale to zero instances | Large inputs (video, big documents), long-running inference, bursts |
+| Batch transform | Offline | Whole datasets in Amazon S3 | Job-scoped instances, no persistent endpoint | Scoring a full dataset on a schedule, no need for real-time answers |
+
+```
+Need an answer inside the HTTP call?
+ ├─ yes ─► Traffic steady and latency strict? ─► Real-time endpoint
+ │         Traffic spiky/idle and cold start OK? ─► Serverless inference
+ └─ no  ─► Result for one large request later? ─► Asynchronous inference (queue, S3 output, SNS)
+           Score an entire dataset? ─► Batch transform job
+```
+
+```python
+import boto3
+smr = boto3.client("sagemaker-runtime")
+
+# Real-time
+r = smr.invoke_endpoint(EndpointName="churn-rt", ContentType="text/csv", Body=b"34,1,0,129.5")
+
+# Asynchronous: input is an S3 object, response is delivered to S3
+smr.invoke_endpoint_async(EndpointName="doc-async", InputLocation="s3://ml-bucket/in/doc1.json",
+                          ContentType="application/json")
+```
+
+```bash
+# Batch transform
+aws sagemaker create-transform-job --transform-job-name score-nightly \
+  --model-name churn-v3 \
+  --transform-input '{"DataSource":{"S3DataSource":{"S3DataType":"S3Prefix","S3Uri":"s3://ml-bucket/batch/in/"}},"ContentType":"text/csv","SplitType":"Line"}' \
+  --transform-output '{"S3OutputPath":"s3://ml-bucket/batch/out/"}' \
+  --transform-resources '{"InstanceType":"ml.m5.xlarge","InstanceCount":2}'
+```
+
+<Callout variant="warning" title="Exam Trap: Real-time endpoint for large or long requests">
+A 500 MB video analysis or a job that takes 20 minutes cannot use a real-time endpoint because of the payload and timeout limits. The answer is asynchronous inference. Likewise, nightly scoring of a data warehouse export is batch transform, not an always-on endpoint.
+</Callout>
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: How asynchronous inference works">
+
+The client uploads the payload to Amazon S3 and calls `InvokeEndpointAsync`. SageMaker AI places the request in an internal queue, the container processes it, and the result is written to an S3 output location. Success and error notifications can be sent through Amazon SNS. Because requests are queued, the endpoint can scale to zero instances when idle and scale out on queue backlog, which makes it the cheapest option for sporadic heavy requests.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Serverless inference cold starts">
+
+Serverless endpoints allocate compute on demand. The first request after an idle period pays model download and container start time. You can configure **provisioned concurrency** to keep a number of environments warm for latency-sensitive traffic, at additional cost. Serverless has no GPU support, so large deep learning models and LLMs do not fit.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Orchestrators and Multi-Model / Multi-Container Strategies (Skill 3.1.2)
+
+| Pattern | What it is | Use when | Watch out |
+|---|---|---|---|
+| Multi-model endpoint (MME) | Many models share one container and fleet, loaded from Amazon S3 on demand and cached in memory | Thousands of similar models (one per customer or region) with sporadic traffic | First call to a model has a load delay, all models must be compatible with the same framework container |
+| Multi-container endpoint (MCE) | Up to 15 distinct containers on one endpoint, invoked directly or as a serial pipeline | Different frameworks that must share infrastructure | Containers share instance resources |
+| Serial inference pipeline | Containers chained so each output feeds the next (preprocess, model, postprocess) | Same transformation logic for training and inference | Total latency is the sum of the stages |
+| Inference components | Per-model resource allocation (CPU, accelerators, memory) and independent copy counts on a shared endpoint | Hosting several FMs or LLMs with different resource needs on one endpoint, scaling each separately | Requires explicit resource configuration per component |
+
+```python
+# Invoke one model inside a multi-model endpoint
+smr.invoke_endpoint(EndpointName="per-customer-mme", TargetModel="customer-0421.tar.gz",
+                    ContentType="text/csv", Body=payload)
+
+# Invoke a specific container in a multi-container endpoint
+smr.invoke_endpoint(EndpointName="mce", TargetContainerHostname="container-b",
+                    ContentType="application/json", Body=payload)
+```
+
+Orchestration choice: SageMaker AI manages replicas, health checks, and rolling updates for you. Use Amazon ECS or Amazon EKS when the organization already operates those platforms, wants one control plane for ML and non-ML services, or needs fine-grained scheduling.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why a multi-model endpoint saves money">
+
+With one endpoint per model you pay for idle instances for every model. An MME loads models lazily from S3 and evicts the least recently used when memory is full, so a long tail of rarely used models shares one fleet. Cost savings are largest when models are small, similar, and individually low traffic. If a few models receive heavy constant traffic, give those their own endpoints.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Inference components for foundation models">
+
+Large models differ in GPU count and memory needs. With inference components you create an endpoint with a pool of instances, then attach components that each declare their required accelerators and memory plus a copy count. SageMaker AI places copies on available instances, and each component scales independently, including down to zero copies where supported. This improves GPU utilization compared with one endpoint per model.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Foundation Model Deployment Options (Skill 3.1.4)
+
+| Option | Billing | Customization | Choose when |
+|---|---|---|---|
+| Bedrock on-demand | Per input and output token, no commitment | Prompting, RAG, agents, guardrails | Variable or unknown traffic, fastest start |
+| Bedrock Provisioned Throughput | Hourly per model unit, with no-commitment or 1-month and 6-month terms | Required to serve a **fine-tuned (customized) Bedrock model**, also for guaranteed throughput | Steady high volume, consistent latency, custom models |
+| Bedrock batch inference | Discounted per token, asynchronous, S3 in and out | Same models | Non-urgent bulk jobs such as classifying millions of documents |
+| Bedrock Custom Model Import | Per model copy and active time, invoked on demand | Bring your own supported open architecture weights | Models fine-tuned outside Bedrock |
+| Cross-Region inference profile | Same pricing model, routes across Regions | None | Throughput bursts and resilience for on-demand traffic |
+| SageMaker AI JumpStart / self-hosted on endpoints | Instance hours | Full control (fine-tune, quantize, custom container) | Unsupported models, custom serving logic, private hosting needs |
+
+```python
+import boto3
+bedrock = boto3.client("bedrock")
+
+# Reserve capacity for a model (omit commitmentDuration for no commitment)
+bedrock.create_provisioned_model_throughput(
+    provisionedModelName="support-bot-pt",
+    modelId="arn:aws:bedrock:us-east-1:111122223333:custom-model/my-finetuned-model",
+    modelUnits=1,
+)
+```
+
+<Callout variant="warning" title="Exam Trap: On-demand for a custom fine-tuned Bedrock model">
+Models you customize with Bedrock fine-tuning or continued pre-training are served through Provisioned Throughput, not on-demand per-token pricing. If the scenario says "fine-tuned in Bedrock" and asks how to invoke it in production, the answer includes purchasing Provisioned Throughput. Custom Model Import is the exception: imported models are invoked on demand.
+</Callout>
+
+---
+
+## 5. Deploying Models Built Outside AWS (Skill 3.1.5)
+
+Two main paths, depending on the target service.
+
+### Path A: Amazon SageMaker AI
+
+1. Package the trained artifacts as `model.tar.gz` and upload to Amazon S3.
+2. Select a serving container: a SageMaker AI framework container (PyTorch, TensorFlow, scikit-learn, XGBoost, Hugging Face) with an `inference.py` entry point, or a Large Model Inference (LMI) container for LLMs.
+3. Create the model, endpoint configuration, and endpoint.
+
+```python
+from sagemaker.pytorch import PyTorchModel
+
+model = PyTorchModel(
+    model_data="s3://ml-bucket/external/model.tar.gz",
+    role=role,
+    entry_point="inference.py",      # defines model_fn, input_fn, predict_fn, output_fn
+    framework_version="2.3",
+    py_version="py311",
+)
+predictor = model.deploy(initial_instance_count=1, instance_type="ml.g5.xlarge")
+```
+
+The container contract matters: serving containers listen on port 8080, answer `/ping` for health and `/invocations` for inference, and read model files from `/opt/ml/model`.
+
+### Path B: Amazon Bedrock Custom Model Import
+
+Import model weights (for example Hugging Face format safetensors with config and tokenizer files) of supported open architectures from Amazon S3. Bedrock hosts them serverlessly and you call `InvokeModel` with the imported model ARN.
+
+```python
+bedrock.create_model_import_job(
+    jobName="import-llama-ft",
+    importedModelName="llama-ft-v1",
+    roleArn=role_arn,
+    modelDataSource={"s3DataSource": {"s3Uri": "s3://ml-bucket/external/llama-ft/"}},
+)
+```
+
+| Question | SageMaker AI hosting | Bedrock Custom Model Import |
+|---|---|---|
+| Any framework or architecture | Yes | Only supported architectures |
+| Infrastructure management | You pick instances and scaling | Serverless |
+| Use Bedrock Guardrails, Knowledge Bases, Agents with the model | Not natively | Yes, through Bedrock APIs |
+| Best when | Non-LLM models, custom serving code | Supported open LLM, want Bedrock features and least ops |
+
+---
+
+## 6. Deploying and Configuring Agents (Skill 3.1.6)
+
+An **agent** is an FM that plans, calls tools, and iterates toward a goal. AWS offers two main hosting paths.
+
+| Capability | Agents for Amazon Bedrock | Amazon Bedrock AgentCore |
+|---|---|---|
+| Model | Managed agent with instructions, action groups, knowledge bases | Platform services to run agents built with any framework (for example Strands Agents, LangGraph, CrewAI) |
+| Tools | Action groups defined by an OpenAPI schema or function definitions, executed by AWS Lambda, or return of control to the application | Gateway converts APIs, Lambda functions, and services into tools reachable over Model Context Protocol (MCP) |
+| Hosting | Fully managed by Bedrock | Runtime hosts agent code serverlessly with session isolation |
+| State | Session attributes and optional memory | Memory service for short-term and long-term memory |
+| Identity and observability | IAM, CloudWatch | Identity, Observability, plus Code Interpreter and Browser tools |
+| Pick when | Fast, low-code agent over your APIs and knowledge bases | Custom or framework-based agents needing secure production runtime |
+
+```
+User ──► Agent runtime ──► FM plans next step
+              │               │
+              │      ┌────────┴─────────┐
+              │      ▼                  ▼
+              │  Tool call          Knowledge base query
+              │ (Lambda / MCP /       (RAG retrieval)
+              │  API via Gateway)
+              ▼
+         Observation fed back to FM ──► repeat until final answer
+```
+
+**Agent communication protocols.** MCP standardizes how an agent discovers and calls tools. Agent-to-agent protocols (A2A) let separate agents delegate work to each other. Bedrock Agents also supports multi-agent collaboration, where a supervisor agent routes tasks to specialist agents.
+
+Key deployment mechanics for Bedrock Agents:
+
+* An **agent alias** points to an agent **version** and is what applications invoke, so you can move the alias to roll forward or back.
+* The agent resource role must allow invoking the chosen FM, and each action group Lambda needs a resource policy that lets Bedrock invoke it.
+* Instructions, tool descriptions, and OpenAPI descriptions strongly influence which tool the model selects, so write them precisely.
+
+```python
+import boto3
+rt = boto3.client("bedrock-agent-runtime")
+resp = rt.invoke_agent(agentId="AGENT123", agentAliasId="ALIAS456",
+                       sessionId="user-42-session-1", inputText="Where is order 1001?")
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Action groups and return of control">
+
+An action group maps agent intents to operations. The default executor is a Lambda function that receives the chosen operation and parameters. With **return of control**, the agent returns the parameters to your application instead, so your own code (possibly behind your firewall or requiring human approval) executes the action and sends the result back. Use it when the tool cannot be exposed to Lambda or when a human must approve side effects.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Why AgentCore exists alongside Bedrock Agents">
+
+Teams that already wrote agents with open-source frameworks need production concerns solved: isolated sessions, identity delegation to downstream tools, memory, observability, and scaling. AgentCore provides these as modular services without forcing a specific agent framework or model, while Bedrock Agents offers the quicker managed path when you do not need that flexibility.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 7. FM Hosting, Model Resources, and Allocation (Skill 3.1.7)
+
+When you host an FM yourself on SageMaker AI, three resource questions dominate.
+
+| Question | Guidance |
+|---|---|
+| Which instance family? | GPU instances (G5, G6 for smaller and mid-size models, P4d and P5 for the largest) or AWS Inferentia2 (Inf2) for cost-efficient inference of supported models |
+| Does the model fit in GPU memory? | If not, use tensor parallelism across GPUs on one instance, quantization to reduce weight size, or a larger instance |
+| How should the container be tuned? | LMI containers (DJL Serving with vLLM or TensorRT-LLM backends) and Hugging Face TGI expose settings for tensor parallel degree, maximum batch size, and quantization |
+| Why do endpoints time out on creation? | Very large models need extra time to download and load, so raise the container startup health check timeout and model data download timeout on the production variant |
+
+```python
+sm.create_endpoint_config(
+    EndpointConfigName="llm-config",
+    ProductionVariants=[{
+        "VariantName": "AllTraffic",
+        "ModelName": "llama-lmi",
+        "InstanceType": "ml.g5.12xlarge",
+        "InitialInstanceCount": 1,
+        "ContainerStartupHealthCheckTimeoutInSeconds": 900,
+        "ModelDataDownloadTimeoutInSeconds": 900,
+    }],
+)
+```
+
+Hosting in Bedrock removes this allocation work: you choose model units for Provisioned Throughput and AWS handles accelerators.
+
+---
+
+## 8. RAG System Configuration: Retrieval Strategies and Reranking (Skill 3.1.8)
+
+The retrieval layer is configurable, and each setting trades accuracy against cost and latency.
+
+| Setting | Options | Effect |
+|---|---|---|
+| Search type | Semantic (vector) only, or hybrid (semantic plus keyword) | Hybrid helps with product codes, names, and rare terms that embeddings blur |
+| Number of results (top k) | Small to large | Higher k raises recall but adds tokens, cost, and noise |
+| Metadata filtering | Filter by attributes such as department, date, or language | Raises precision and enforces tenant or access scoping |
+| Query reformulation or decomposition | Rewrite or split complex questions | Improves retrieval for multi-part questions |
+| Reranking | A reranker model rescoring the initial candidates | Retrieve broadly (for example top 50), rerank, pass the best few to the FM |
+| API choice | `Retrieve` returns passages, `RetrieveAndGenerate` retrieves and generates in one call | Use `Retrieve` when you control the prompt or need your own pipeline |
+
+```python
+rt = boto3.client("bedrock-agent-runtime")
+resp = rt.retrieve(
+    knowledgeBaseId="KB12345678",
+    retrievalQuery={"text": "How do I rotate my API key?"},
+    retrievalConfiguration={"vectorSearchConfiguration": {
+        "numberOfResults": 20,
+        "overrideSearchType": "HYBRID",
+        "filter": {"equals": {"key": "department", "value": "security"}},
+        "rerankingConfiguration": {
+            "type": "BEDROCK_RERANKING_MODEL",
+            "bedrockRerankingConfiguration": {
+                "modelConfiguration": {"modelArn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.rerank-v1:0"},
+                "numberOfRerankedResults": 5}}}},
+)
+```
+
+Why reranking works: the first-stage vector search compares independently computed embeddings, which is fast but coarse. A reranker reads the query and each candidate passage together, producing a finer relevance score, but it is too slow to run over the whole corpus, so it only rescores the shortlist.
+
+<Callout variant="warning" title="Exam Trap: Increasing top k to improve accuracy">
+Raising the number of retrieved chunks lifts recall but adds irrelevant context, tokens, cost, and latency, and can distract the model. When answers are noisy, the better fixes are metadata filters, hybrid search, and reranking with a small final count.
+</Callout>
+
+---
+
+## 9. Putting It Together: Scenario Quick Table
+
+| Scenario | Answer |
+|---|---|
+| Fraud scoring under 100 ms, steady traffic | SageMaker AI real-time endpoint with auto scaling |
+| Internal tool called a few times per day | Serverless inference (or Lambda for a tiny model) |
+| Process 800 MB satellite images, minutes per request | Asynchronous inference |
+| Nightly scoring of 40 million rows | Batch transform |
+| 5,000 per-tenant models with low traffic each | Multi-model endpoint |
+| Preprocess, model, postprocess on one endpoint | Serial inference pipeline (multi-container) |
+| Several LLMs with different GPU needs on one fleet | Inference components |
+| Summarize with a Bedrock FM, spiky usage, no ops | Bedrock on-demand |
+| Bedrock fine-tuned model in production | Provisioned Throughput |
+| Fine-tuned Llama trained in another cloud, want Bedrock Guardrails | Bedrock Custom Model Import |
+| Use custom PyTorch model trained on-premises | `model.tar.gz` plus PyTorch container with `inference.py` on SageMaker AI |
+| Agent built with an open-source framework needing session isolation | Amazon Bedrock AgentCore Runtime |
+| Quick agent over company APIs and a knowledge base | Agents for Amazon Bedrock |
+| RAG returns near-miss passages | Hybrid search, metadata filter, reranking |
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between real-time, serverless, asynchronous, and batch inference from payload size, latency, and traffic shape.
+<details>
+<summary>Explanation</summary>
+
+Real-time suits steady low-latency traffic with payloads up to 25 MB and responses within 60 seconds. Serverless suits sporadic traffic that tolerates cold starts and small payloads, with no GPU. Asynchronous handles payloads up to 1 GB and processing up to an hour through a queue, and can scale to zero. Batch transform scores whole datasets offline with no persistent endpoint. Large or long requests rule out real-time, and a requirement to score a complete dataset points to batch transform.
+
+</details>
+
+- [ ] I can explain when to use a multi-model endpoint, a multi-container endpoint, a serial inference pipeline, and inference components.
+<details>
+<summary>Explanation</summary>
+
+An MME shares one container and fleet across many similar models loaded lazily from S3, which is ideal for a long tail of low-traffic models. An MCE hosts up to 15 different containers on one endpoint, invoked directly or serially. A serial inference pipeline chains containers so outputs feed the next stage, such as preprocessing then model then postprocessing. Inference components allocate specific accelerators and memory per model on a shared endpoint and scale each independently, which suits multiple FMs.
+
+</details>
+
+- [ ] I know which Bedrock FM deployment option fits on-demand, steady high-volume, bulk offline, and fine-tuned custom model scenarios.
+<details>
+<summary>Explanation</summary>
+
+On-demand is per-token with no commitment and suits variable traffic. Provisioned Throughput reserves model units for steady volume and is required to serve models customized through Bedrock fine-tuning or continued pre-training. Batch inference gives discounted pricing for non-urgent bulk jobs with S3 in and out. Custom Model Import serves externally trained supported architectures on demand. Cross-Region inference profiles add throughput and resilience for on-demand traffic.
+
+</details>
+
+- [ ] I can describe how to deploy a model trained outside AWS into SageMaker AI and into Bedrock.
+<details>
+<summary>Explanation</summary>
+
+For SageMaker AI, upload `model.tar.gz` to S3, pair it with a framework container and an `inference.py` entry point (or an LMI container for LLMs), then create the model, endpoint configuration, and endpoint. Serving containers listen on port 8080 and implement `/ping` and `/invocations`. For Bedrock, run a Custom Model Import job pointing at S3 weights of a supported open architecture, then call `InvokeModel` with the imported model ARN. Bedrock import adds serverless hosting and access to Bedrock features, while SageMaker AI allows any framework.
+
+</details>
+
+- [ ] I can distinguish Agents for Amazon Bedrock from Amazon Bedrock AgentCore and name the roles of action groups, aliases, MCP, and return of control.
+<details>
+<summary>Explanation</summary>
+
+Agents for Amazon Bedrock is the managed, low-code path with instructions, action groups (OpenAPI or function schemas, executed by Lambda or returned to your app), and knowledge bases. AgentCore provides Runtime, Gateway, Memory, Identity, Observability, Code Interpreter, and Browser for agents built with any framework. Aliases point to agent versions so applications call a stable identifier and you roll forward or back by moving the alias. MCP standardizes tool access, and return of control lets your application execute actions, for example when a human must approve them.
+
+</details>
+
+- [ ] I can tune a RAG retrieval configuration and explain what reranking does.
+<details>
+<summary>Explanation</summary>
+
+Use hybrid search for exact terms and identifiers, metadata filters for precision and tenant scoping, and a moderate top k. Reranking retrieves a broad candidate list, then a reranker model scores each query and passage pair together and returns only the best few to the FM, improving relevance while keeping prompts short and cheap. Raising top k alone adds noise and cost rather than fixing precision. `Retrieve` returns passages for custom pipelines, while `RetrieveAndGenerate` produces the answer in one call.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/07-model-evaluation-explainability-genai-eval" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 07: Evaluating ML and GenAI Systems: Metrics, Drift Baselines, Explainability & LLM-as-a-Judge
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/09-provisioning-vpc-autoscaling-knowledge-bases" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 09: Provisioning Resources: Containers, VPC Endpoints, Auto Scaling, Knowledge Bases & GPU Scaling →
+  </a>
+</div>

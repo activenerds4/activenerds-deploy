@@ -1,0 +1,177 @@
+---
+title: "Module 08: Containers, Serverless & Elastic Compute"
+description: "Lambda, Fargate, ECS, EKS, EC2 families, placement groups, Auto Scaling policies, Batch, and EMR."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 8
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Tasks 2.1 and 3.2 — AWS Lambda, AWS Fargate, Amazon ECS and EKS, Amazon ECR, EC2 instance families, placement groups, Auto Scaling, AWS Batch, Amazon EMR, Elastic Beanstalk
+
+<Callout variant="info" title="Exam Blueprint Focus: Containers, serverless patterns, and elastic compute">
+The blueprint asks you to decide when to use containers versus serverless, select resource types and sizes (for example, Lambda memory), identify scaling metrics, and decouple workloads so components scale independently. Default toward the option with the least operational overhead that meets the constraints.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Lambda limits and tuning">
+
+* **Timeout:** up to 15 minutes. **Memory:** 128 MB to 10,240 MB; CPU scales proportionally with memory, so increasing memory can reduce duration and sometimes cost.
+* **Payload:** 6 MB synchronous, 256 KB asynchronous. **/tmp storage:** 512 MB default, configurable up to 10 GB.
+* **Concurrency:** account default of 1,000 concurrent executions per Region (raisable). **Reserved concurrency** guarantees and caps capacity for a function. **Provisioned concurrency** keeps environments initialized to avoid cold starts and is billed while configured.
+* **Event sources:** synchronous (API Gateway, ALB), asynchronous (S3, SNS, EventBridge; supports retries and destinations or DLQ), and polling event source mappings (SQS, Kinesis, DynamoDB Streams).
+* **VPC access:** attach to private subnets to reach private resources; use NAT or endpoints for outbound internet or AWS APIs.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: ECS, EKS, and Fargate decision">
+
+**Amazon ECS** is the AWS-native orchestrator and is simpler. **Amazon EKS** runs managed Kubernetes for portability and ecosystem tooling. Both can run on **AWS Fargate** (serverless, no instances to manage, pay per vCPU and memory per second) or on **EC2** (control over instance type, GPUs, and cost optimization with Spot and Savings Plans). Images live in **Amazon ECR**. Task roles (ECS) or IAM roles for service accounts (EKS) grant per-workload permissions.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Compute option | Best for | Operational overhead | Scaling unit |
+|---|---|---|---|
+| AWS Lambda | Event-driven, short tasks (under 15 min), spiky traffic | Lowest | Concurrent invocations |
+| AWS Fargate (ECS/EKS) | Containers without server management | Low | Tasks or pods |
+| ECS or EKS on EC2 | Containers needing GPUs, special instance types, or tight cost control | Medium | Tasks plus instances |
+| Amazon EC2 | Full OS control, legacy apps, long-running steady workloads | Highest | Instances |
+| AWS Batch | Queued batch jobs of any scale | Low (managed scheduling on Fargate or EC2, including Spot) | Jobs |
+| Amazon EMR | Big data frameworks (Spark, Hadoop) | Medium | Cluster nodes |
+| Elastic Beanstalk | Deploy web apps without managing infrastructure details | Low to medium | Environment |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+              +--------------------- Auto Scaling group (multi-AZ) ----------------------+
+Users -> ALB ->|  EC2 (AZ-a)   EC2 (AZ-b)   EC2 (AZ-c)    <- launch template (AMI, type) |
+              +----------------------------------------------------------------------+
+                         ^ CloudWatch alarm / target tracking (ALBRequestCountPerTarget)
+                         |
+              scheduled actions   predictive scaling   warm pool   lifecycle hooks
+```
+
+### EC2 instance families
+
+| Family | Prefix | Optimized for | Example use |
+|---|---|---|---|
+| General purpose | M, T (burstable), Mac | Balanced | Web and app servers; T uses CPU credits |
+| Compute optimized | C | High CPU | Batch, media encoding, HPC, gaming |
+| Memory optimized | R, X, z | Large in-memory data | In-memory databases, caches, analytics |
+| Storage optimized | I, D, H | High local disk IOPS or throughput | NoSQL, data warehouses, distributed file systems |
+| Accelerated computing | P, G, Inf, Trn | GPUs and accelerators | ML training, graphics |
+| Suffix notes | g = Graviton (Arm), d = local NVMe, n = network, a = AMD | Variants | Graviton is often better price-performance |
+
+### Placement groups
+
+| Type | Behavior | Use |
+|---|---|---|
+| Cluster | Packs instances close in one AZ | Low-latency, high-throughput HPC |
+| Spread | Each instance on distinct hardware (max 7 running per AZ per group) | Small set of critical instances |
+| Partition | Groups of instances on separate racks | Large distributed systems such as Hadoop, Cassandra, Kafka |
+
+### Auto Scaling policy types
+
+| Policy | Behavior | Choose when |
+|---|---|---|
+| Target tracking | Maintain a metric at a target (for example, 50% CPU) | Default, simplest |
+| Step scaling | Scale by amount according to alarm breach size | Different responses for different severities |
+| Scheduled | Scale at known times | Predictable load patterns |
+| Predictive | Forecasts load using ML | Recurring cyclical traffic |
+| Simple | Single adjustment plus cooldown | Legacy; prefer target tracking |
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```bash
+# Target tracking policy on average CPU
+aws autoscaling put-scaling-policy --auto-scaling-group-name web-asg \
+  --policy-name cpu50 --policy-type TargetTrackingScaling \
+  --target-tracking-configuration '{
+    "PredefinedMetricSpecification":{"PredefinedMetricType":"ASGAverageCPUUtilization"},
+    "TargetValue":50.0}'
+
+# Update Lambda memory (CPU scales with it)
+aws lambda update-function-configuration --function-name resize-image --memory-size 1024
+
+# Reserve concurrency to protect a downstream database
+aws lambda put-function-concurrency --function-name writer --reserved-concurrent-executions 50
+```
+
+**Health checks:** enable ELB health checks on the Auto Scaling group so instances failing application checks are replaced, not only those failing EC2 status checks. Use a **launch template** (not legacy launch configurations) and mixed instances policies to combine On-Demand and Spot.
+
+**Migrating an application into containers:** build the image, push to ECR, define a task or pod specification, run on Fargate for the least overhead, and externalize state to managed services.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Using Lambda for jobs longer than 15 minutes. Choose Fargate, Batch, or EC2.
+- **Trap 2:** Confusing reserved concurrency (cap and guarantee) with provisioned concurrency (pre-warmed, removes cold starts).
+- **Trap 3:** Scaling on CPU when the workload is queue-driven. Use backlog per instance.
+- **Trap 4:** Choosing EC2 when the stem emphasizes minimal operational overhead for containers. Choose Fargate.
+- **Trap 5:** Using a cluster placement group for high availability. Cluster packs instances together; spread or partition provides fault isolation.
+- **Trap 6:** Choosing vertical scaling for elasticity. Horizontal scaling with Auto Scaling is the exam default.
+- **Trap 7:** Believing T-family instances give sustained full CPU. Burstable instances run out of credits under constant load.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Lambda, Fargate, ECS/EKS on EC2, and EC2 based on constraints.
+<details>
+<summary>Explanation</summary>
+
+Lambda fits short event-driven work with the least management. Fargate fits containerized services without managing servers. ECS or EKS on EC2 suits GPUs, special hardware, or cost optimization at steady utilization. EC2 suits legacy software needing OS control. EKS is chosen when Kubernetes portability is a stated requirement.
+
+</details>
+
+- [ ] I can tune Lambda memory and concurrency for performance and protection.
+<details>
+<summary>Explanation</summary>
+
+Raising memory raises proportional CPU and often shortens runtime. Reserved concurrency limits a function so it cannot overwhelm a database and guarantees capacity. Provisioned concurrency pre-initializes environments for latency-sensitive workloads.
+
+</details>
+
+- [ ] I can pick the right Auto Scaling policy and metric.
+<details>
+<summary>Explanation</summary>
+
+Use target tracking for general cases, scheduled scaling for known events, predictive scaling for recurring patterns, and a custom backlog-per-instance metric for SQS-driven workers. ALBRequestCountPerTarget is better than CPU for request-bound web tiers.
+
+</details>
+
+- [ ] I can match placement groups to workload needs.
+<details>
+<summary>Explanation</summary>
+
+Cluster for low latency between nodes in one AZ (HPC), spread for a few critical instances on separate hardware, partition for large distributed systems that need rack-level fault isolation and topology awareness.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/07-loose-coupling-event-driven" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 07: Loosely Coupled & Event-Driven Architectures
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/09-high-availability-disaster-recovery" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 09: High Availability, Fault Tolerance & Disaster Recovery →
+  </a>
+</div>

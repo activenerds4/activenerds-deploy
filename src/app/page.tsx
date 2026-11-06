@@ -15,7 +15,6 @@ import PostCard from "@/components/content/PostCard";
 import NewsletterCTA from "@/components/growth/NewsletterCTA";
 import {
   TrendingTicker,
-  TopicPillBar,
   ModernDeveloperHero,
   DeveloperToolsShowcase,
   DeveloperResourcesDeck,
@@ -24,8 +23,14 @@ import {
   TrendingSidebar,
   FeaturedAuthorSpotlight,
 } from "@/components/home";
-import { Layers, ArrowRight, X } from "lucide-react";
+import { Layers, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
+import {
+  fetchUpcomingEvents,
+  processEventsList,
+  CURATED_FALLBACK_EVENTS,
+  type ConferenceEvent,
+} from "@/lib/integrations/events";
 
 /**
  * Modern Developer Community & Engineering Hub Homepage.
@@ -51,16 +56,30 @@ const Home = () => {
   const [categoryPosts, setCategoryPosts] = useState<Record<string, PostSummary[]>>({});
   const [authors, setAuthors] = useState<Author[] | null>(null);
   const [authorPosts, setAuthorPosts] = useState<PostSummary[] | null>(null);
-  const [selectedTopic, setSelectedTopic] = useState<string>("all");
+  const [imminentEvent, setImminentEvent] = useState<ConferenceEvent | null>(() => {
+    const initialList = processEventsList(CURATED_FALLBACK_EVENTS);
+    return initialList.length > 0 ? initialList[0] : null;
+  });
 
   useEffect(() => {
     let cancelled = false;
+
+    // Load upcoming events for the ticker & hero conference radar
+    fetchUpcomingEvents()
+      .then((loaded) => {
+        if (!cancelled && loaded.length > 0) {
+          setImminentEvent(loaded[0]);
+        }
+      })
+      .catch((err) => {
+        console.warn("[Home] Could not load upcoming events:", err);
+      });
 
     (async () => {
       // Round 1: Fetch all primary data in parallel
       const [ticker, feat, lat, trend, cats, auths] = await Promise.all([
         getHomepageTickerCached(5),
-        getHomepageFeaturedCached(1),
+        getHomepageFeaturedCached(6),
         getHomepageLatestCached(16),
         getHomepageTrendingCached(5),
         getAllCategoriesCached(),
@@ -80,8 +99,6 @@ const Home = () => {
         categoryMap[cat.slug] = catResults[idx];
       });
 
-      const featuredSlugs = new Set(feat.map((p) => p.slug));
-
       setTickerPosts(ticker);
       setFeatured(feat);
       setTrending(trend);
@@ -89,7 +106,7 @@ const Home = () => {
       setAuthors(auths);
       setCategoryPosts(categoryMap);
       setAuthorPosts(authorPosts);
-      setLatest(lat.filter((p) => !featuredSlugs.has(p.slug)));
+      setLatest(lat);
     })();
 
     return () => {
@@ -100,44 +117,42 @@ const Home = () => {
   const leadPost = featured?.[0] ?? null;
   const featuredAuthor = authors?.[0] ?? null;
 
-  // Filter latest articles if a category topic is selected
+  // Latest articles for feed
   const displayArticles = useMemo(() => {
     if (!latest) return [];
-    if (selectedTopic === "all") return latest.slice(0, 8);
-    // If specific category is selected, return from categoryPosts map or filtered latest
-    const fromCatMap = categoryPosts[selectedTopic];
-    if (fromCatMap && fromCatMap.length > 0) return fromCatMap;
-    return latest.filter((p) => p.category === selectedTopic);
-  }, [latest, selectedTopic, categoryPosts]);
-
-  const activeCategoryObj = useMemo(
-    () => categories?.find((c) => c.slug === selectedTopic),
-    [categories, selectedTopic],
-  );
+    return latest.slice(0, 8);
+  }, [latest]);
 
   return (
     <>
       {/* Breaking news / real-time ticker */}
-      {tickerPosts && tickerPosts.length > 0 ? <TrendingTicker posts={tickerPosts} /> : null}
+      {tickerPosts && tickerPosts.length > 0 ? (
+        <TrendingTicker posts={tickerPosts} event={imminentEvent} />
+      ) : null}
 
-      {/* Sticky Category / Topic Bar for 1-click filtering */}
-      <TopicPillBar
-        activeCategory={selectedTopic}
-        onSelectCategory={(catSlug) => setSelectedTopic(catSlug)}
-      />
-
-      {/* Modern Developer Split Hero Section */}
+      {/* Modern Developer Split Hero Section (Aligned with max-w-7xl) */}
       <section className="border-b border-border/80 bg-background">
-        <Container className="py-6 sm:py-8 lg:py-10" width="default">
-          {leadPost ? (
-            <ModernDeveloperHero lead={leadPost} trending={trending ?? []} />
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10">
+          {featured && featured.length > 0 ? (
+            <ModernDeveloperHero
+              slides={featured}
+              lead={leadPost}
+              trending={trending ?? []}
+              imminentEvent={imminentEvent}
+            />
+          ) : leadPost ? (
+            <ModernDeveloperHero
+              lead={leadPost}
+              trending={trending ?? []}
+              imminentEvent={imminentEvent}
+            />
           ) : (
             <div className="grid gap-6 lg:grid-cols-12 animate-pulse">
               <div className="lg:col-span-7 h-96 rounded-xl bg-muted" />
               <div className="lg:col-span-5 h-96 rounded-xl bg-muted" />
             </div>
           )}
-        </Container>
+        </div>
       </section>
 
       {/* Interactive Developer Tools Showcase */}
@@ -149,9 +164,9 @@ const Home = () => {
       {/* Developer Reference & Cheat Sheets Quick-Deck */}
       <DeveloperResourcesDeck />
 
-      {/* Latest Technical Articles Feed with Active Topic Filter */}
+      {/* Latest Technical Articles Feed with Active Topic Filter (Aligned with max-w-7xl) */}
       <section id="articles-feed" className="py-12 sm:py-16">
-        <Container width="default">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="grid gap-10 lg:grid-cols-3">
             {/* Articles Stream — 2/3 width */}
             <div className="lg:col-span-2">
@@ -160,39 +175,18 @@ const Home = () => {
                   <div className="flex items-center gap-2">
                     <Layers className="h-4 w-4 text-accent" />
                     <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground font-sans">
-                      {selectedTopic === "all"
-                        ? "Latest Technical Guides & Deep Dives"
-                        : `${activeCategoryObj?.name || "Track"} Articles`}
+                      Latest Technical Guides & Deep Dives
                     </h2>
                   </div>
-                  {activeCategoryObj?.description && (
-                    <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
-                      {activeCategoryObj.description}
-                    </p>
-                  )}
+                  <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
+                    Curated architecture patterns, security audits, and engineering breakdowns.
+                  </p>
                 </div>
-
-                {selectedTopic !== "all" && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTopic("all")}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground bg-muted px-2.5 py-1 rounded-md transition-colors"
-                  >
-                    Clear Filter <X className="h-3 w-3" />
-                  </button>
-                )}
               </div>
 
               {displayArticles.length === 0 ? (
                 <div className="rounded-xl border border-border bg-card p-8 text-center text-muted-foreground">
-                  <p className="text-sm">No articles found in this track yet.</p>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTopic("all")}
-                    className="mt-3 text-xs font-semibold text-accent hover:underline"
-                  >
-                    Return to all articles
-                  </button>
+                  <p className="text-sm">No articles available yet.</p>
                 </div>
               ) : (
                 <div className="grid gap-6 sm:grid-cols-2">
@@ -217,16 +211,15 @@ const Home = () => {
               {trending ? <TrendingSidebar posts={trending} /> : null}
             </div>
           </div>
-        </Container>
+        </div>
       </section>
 
-      {/* Category Deep-Dive Strips (when viewing all tracks) */}
-      {selectedTopic === "all" &&
-        categories?.slice(0, 4).map((cat) => {
-          const posts = categoryPosts[cat.slug];
-          if (!posts || posts.length === 0) return null;
-          return <CategorySectionBlock key={cat.slug} category={cat} posts={posts} />;
-        })}
+      {/* Category Deep-Dive Strips */}
+      {categories?.slice(0, 4).map((cat) => {
+        const posts = categoryPosts[cat.slug];
+        if (!posts || posts.length === 0) return null;
+        return <CategorySectionBlock key={cat.slug} category={cat} posts={posts} />;
+      })}
 
       {/* Featured Author Spotlight */}
       <FeaturedAuthorSpotlight author={featuredAuthor} posts={authorPosts ?? []} />

@@ -1,0 +1,179 @@
+---
+title: "Module 02: Batch Ingestion, Data APIs, Schedulers & Event Triggers"
+description: "S3, Glue, EMR, AppFlow, Lambda and Redshift batch reads, EventBridge and Airflow schedulers, S3 event triggers, IP allowlists, and rate-limit handling."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 2
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 1.1 batch skills: batch sources, batch ingestion configuration, consuming data APIs, schedulers (EventBridge, Airflow), event triggers (S3 Event Notifications), IP allowlists (Skills 1.1.2–1.1.6, 1.1.8).
+
+<Callout variant="info" title="Exam Blueprint Focus: Batch Ingestion & Triggers">
+Expect scenarios that ask for the *least operational overhead* way to start a pipeline on a schedule or when a file lands, and how to connect securely to a source behind an IP allowlist.
+</Callout>
+
+---
+
+## 1. Batch Source Options
+
+| Source / Tool | Best for | Key configuration | Exam nuance |
+|---|---|---|---|
+| Amazon S3 | Landing zone for files | Prefix layout, partitioning, event notifications | Many small files hurt Athena/Glue performance |
+| AWS Glue (ETL, JDBC) | Reading databases and S3 at scale | Job bookmarks, connections, worker type, `groupFiles` | Bookmarks track processed data for incremental loads |
+| Amazon EMR | Large Spark/Hadoop reads | Instance fleets, Spot, EMRFS | Use when you need custom frameworks |
+| AWS DMS | Database migration / CDC | Full load, CDC, task settings, replication instance | Needs source log access (binlog, WAL, redo) |
+| Amazon Redshift | Reading warehouse data | UNLOAD to S3, Data API, federated queries | UNLOAD produces Parquet for lake use |
+| AWS Lambda | Small, short pulls (15 min max) | Memory, timeout, concurrency | Not for large sets |
+| Amazon AppFlow | SaaS sources (Salesforce, SAP, Zendesk, Slack) | On-demand, scheduled, or event-driven flows | Fully managed, no code, supports PrivateLink for some sources |
+
+---
+
+## 2. Batch Ingestion Configuration (Skill 1.1.3)
+
+Key levers when configuring a batch load:
+
+* **Incremental vs full:** Glue job bookmarks, DMS CDC, watermark columns (`updated_at`), AppFlow incremental pull.
+* **Parallelism:** Glue DPUs/workers, JDBC `hashfield`/`hashpartitions`, Spark partitions, DMS parallel-load.
+* **File format & size:** target 128 MB–1 GB columnar files (Parquet/ORC); compact small files.
+* **Batch size and retries:** Lambda batch window, SQS batch size, backoff.
+* **Failure handling:** DLQs, Step Functions retry/catch, idempotent writes.
+* **Landing layout:** `s3://lake/raw/source=crm/table=orders/dt=2026-11-05/` (Hive-style partitions for catalog and pruning).
+
+```
+ SaaS / DB / Files                    Landing                 Processing
++----------------+   AppFlow/DMS   +-----------+   Glue    +-------------+
+| Salesforce     |---------------->| S3 raw/   |---------->| S3 curated/ |
+| RDS (CDC)      |   Glue JDBC     | (immutable)|  bookmark | Parquet     |
+| SFTP partner   |--Transfer Fam-->+-----------+           +------+------+
++----------------+                       |                        |
+                                  S3 Event -> EventBridge     Glue Catalog
+```
+
+---
+
+## 3. Consuming Data APIs (Skill 1.1.4)
+
+* Call REST APIs from **Lambda** (short), **Glue Python shell/Spark** (larger), or **AppFlow** (supported connectors).
+* Handle **pagination**, **auth** (OAuth tokens kept in Secrets Manager), **rate limits** (429/`Retry-After`, exponential backoff with jitter), and **schema drift**.
+* Use **API Gateway** in front of your own data APIs; **Redshift Data API** and **Athena `StartQueryExecution`** are asynchronous, HTTPS-based APIs with no persistent connections or drivers (ideal for Lambda).
+
+```python
+import boto3, time
+rs = boto3.client("redshift-data")
+r = rs.execute_statement(WorkgroupName="analytics", Database="dev",
+                         Sql="SELECT count(*) FROM sales WHERE dt = :d",
+                         Parameters=[{"name": "d", "value": "2026-11-05"}])
+while rs.describe_statement(Id=r["Id"])["Status"] not in ("FINISHED", "FAILED", "ABORTED"):
+    time.sleep(1)
+rows = rs.get_statement_result(Id=r["Id"])["Records"]
+```
+
+---
+
+## 4. Schedulers and Event Triggers (Skills 1.1.5, 1.1.6)
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Scheduling options compared">
+
+| Option | Use when | Notes |
+|---|---|---|
+| **EventBridge Scheduler / rules** (cron, rate) | Simple time-based start of Lambda, Step Functions, Glue, ECS | Serverless, per-schedule time zones, one-time schedules, flexible windows |
+| **Glue triggers** (scheduled, conditional, on-demand) | Chaining Glue jobs and crawlers | Native to Glue workflows |
+| **Crawler schedules** | Refresh catalog on a cadence | Cron expression on the crawler |
+| **Amazon MWAA (Apache Airflow)** | Complex DAGs, dependencies, backfills, existing Airflow code | Schedules defined in DAGs (`schedule_interval`); environment runs continuously |
+| **Step Functions** | Stateful workflows with retries/branching | Started by EventBridge or API |
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: S3 Event Notifications vs EventBridge">
+
+* **S3 Event Notifications** go directly to Lambda, SQS, or SNS (filter by prefix/suffix). Simple and low latency.
+* **S3 to EventBridge** (enable per bucket) allows rich filtering, multiple targets (Step Functions, Glue workflows, Kinesis, API destinations), archive and replay.
+* Events are **at-least-once**; design consumers to be idempotent. Use SQS between S3 and Lambda for buffering and throttling.
+* A common pattern: `S3 PutObject -> EventBridge -> Step Functions -> Glue job`.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Allowlisting IPs for data sources (Skill 1.1.8)">
+
+* **Source-side allowlists:** when a partner database or API only accepts known IPs, give it a **stable egress IP**: run Glue/Lambda in a VPC private subnet routed through a **NAT gateway** with an **Elastic IP**, then allowlist that EIP.
+* **Inbound to AWS resources:** use **security group** rules (stateful, allow-only) and NACLs (stateless) to allow source IP ranges to RDS/Redshift/MSK; use **S3 bucket policy** `aws:SourceIp` or `aws:SourceVpce` conditions.
+* **Redshift/RDS in a VPC:** DMS and Glue need a network path (VPC, subnets, security groups, endpoints). Glue connections define the VPC/subnet/security group.
+* Prefer **PrivateLink / VPC endpoints** over public paths when possible.
+
+</AccordionItem>
+</AccordionGroup>
+
+```bash
+# Schedule a Glue job nightly at 02:00 UTC using EventBridge Scheduler
+aws scheduler create-schedule --name nightly-orders \
+  --schedule-expression "cron(0 2 * * ? *)" \
+  --flexible-time-window Mode=OFF \
+  --target '{"Arn":"arn:aws:scheduler:::aws-sdk:glue:startJobRun","RoleArn":"arn:aws:iam::111122223333:role/sched-role","Input":"{\"JobName\":\"orders-etl\"}"}'
+```
+
+---
+
+## 5. Common Traps and Watchouts
+
+* **"Ingest from Salesforce with no code"** → AppFlow, not a custom Lambda.
+* **"Run when a file arrives"** → S3 event (to Lambda/SQS/EventBridge), not a cron schedule.
+* **"Process only new data on each run"** → Glue job bookmarks (or CDC), not re-reading everything.
+* **Lambda has a 15-minute limit.** Long extracts need Glue, EMR, or ECS/Fargate.
+* **Many small files** slow Spark and Athena; compact or use Glue `groupFiles`.
+* **Glue bookmarks** do not work if you change the transformation context names or disable them.
+* **A static IP for a managed service** is solved with NAT gateway + Elastic IP in a VPC.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can pick the right batch ingestion tool for SaaS, database, and file sources.
+<details>
+<summary>Explanation</summary>
+
+SaaS → AppFlow. Databases (migration/CDC) → DMS; large reads for ETL → Glue JDBC or EMR. Files from partners over SFTP/FTPS → AWS Transfer Family into S3. Small API calls → Lambda; long or large → Glue/EMR/Fargate.
+
+</details>
+
+- [ ] I can explain how to ingest only new data incrementally.
+<details>
+<summary>Explanation</summary>
+
+Use Glue job bookmarks, a watermark column filter, DMS CDC, or AppFlow incremental transfer. Pair with idempotent writes so reruns do not create duplicates.
+
+</details>
+
+- [ ] I know when to use S3 Event Notifications vs EventBridge vs a cron schedule.
+<details>
+<summary>Explanation</summary>
+
+Cron/rate schedules for time-based jobs (EventBridge Scheduler, Glue triggers, MWAA). S3 events for file arrival. Route through EventBridge when you need advanced filtering, multiple targets, or replay; through SQS when you need buffering and throttling.
+
+</details>
+
+- [ ] I can give a data source a stable IP to satisfy a partner allowlist.
+<details>
+<summary>Explanation</summary>
+
+Place the compute (Glue connection, Lambda) in a private subnet whose route table sends internet traffic through a NAT gateway with an Elastic IP. The partner allowlists that EIP.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/01-streaming-ingestion-kinesis-msk-dms" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 01: Streaming Ingestion: Kinesis, MSK, DynamoDB Streams & DMS
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/03-transform-glue-emr-lambda-redshift" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 03: Data Transformation with Glue, EMR, Lambda, Flink & Redshift →
+  </a>
+</div>

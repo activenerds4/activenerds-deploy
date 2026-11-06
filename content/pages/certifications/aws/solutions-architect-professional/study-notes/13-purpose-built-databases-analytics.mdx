@@ -1,0 +1,180 @@
+---
+title: "Module 13: Purpose-Built Databases & Analytics Services"
+description: "Aurora, DynamoDB, ElastiCache, MemoryDB, Redshift, Neptune, Keyspaces, Timestream, plus Athena, Glue, Lake Formation and OpenSearch selection."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 13
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Aurora, DynamoDB, ElastiCache, MemoryDB, Redshift, Neptune, Keyspaces, Timestream, plus Athena, Glue, Lake Formation and OpenSearch selection.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 2.5, 4.3 and 4.4 Purpose-Built Databases">
+The exam rewards matching the data model and access pattern to the right engine instead of defaulting to a relational database. Also know the analytics services that sit beside them (Athena, Glue, Lake Formation, EMR, QuickSight, OpenSearch).
+</Callout>
+
+---
+
+## 1. Database Selection Matrix
+
+| Workload | Service | Why |
+|---|---|---|
+| Relational, MySQL/PostgreSQL compatible, high performance, HA | Amazon Aurora | Shared storage, 15 replicas, Global Database, Serverless v2, Backtrack (MySQL) |
+| Relational, specific engine (Oracle, SQL Server, MariaDB, Db2) or Custom (RDS Custom for OS access) | Amazon RDS | Managed backups, patching, Multi-AZ |
+| Key-value/document, single-digit-ms at any scale, serverless | Amazon DynamoDB | On-demand capacity, global tables, DAX, streams |
+| MongoDB-compatible documents | Amazon DocumentDB | Managed document store (cluster volume across 3 AZs) |
+| Cassandra-compatible wide column | Amazon Keyspaces | Serverless CQL |
+| Graph relationships (fraud, social, knowledge graphs) | Amazon Neptune | Gremlin, openCypher, SPARQL |
+| Time series (IoT, metrics) | Amazon Timestream | Memory and magnetic tiering, built-in time functions |
+| Data warehouse, petabyte-scale SQL analytics | Amazon Redshift | Columnar MPP, RA3 managed storage, Spectrum, Serverless, data sharing |
+| Search and log analytics | Amazon OpenSearch Service | Full-text search, dashboards |
+| In-memory cache | Amazon ElastiCache (Redis/Valkey, Memcached) | Sub-millisecond |
+| Durable in-memory primary database, Redis-compatible | Amazon MemoryDB | Multi-AZ transaction log durability |
+| Vector and semantic search | Aurora PostgreSQL (pgvector), OpenSearch, MemoryDB, others | Retrieval-augmented generation (see Module 20) |
+
+## 2. Amazon Aurora in Depth
+
+- **Architecture:** compute separated from a distributed storage volume (up to 128 TiB) replicating 6 copies across 3 AZs, self-healing, quorum writes (4 of 6) and reads (3 of 6).
+- **Endpoints:** cluster (writer), reader (load-balanced replicas), custom, instance.
+- **Aurora Global Database:** one primary Region plus up to five read-only secondary Regions, storage-based replication (typically under 1 second lag), local low-latency reads, disaster recovery with RTO about a minute; **write forwarding** lets secondaries forward writes to the primary.
+- **Aurora Serverless v2:** scales in fine-grained ACU increments, including scaling to low capacity, for spiky or unpredictable workloads; can mix with provisioned instances in one cluster.
+- **Other:** parallel query, fast cloning (copy-on-write, minutes), Backtrack, Blue/Green Deployments, zero-ETL integration with Redshift, I/O-Optimized configuration for I/O-heavy workloads.
+- **Cross-account/Region:** snapshot sharing (needs CMK), cloning across accounts via RAM.
+
+## 3. DynamoDB in Depth
+
+| Topic | Detail |
+|---|---|
+| Capacity modes | On-demand (pay per request, no planning, instant scaling) vs provisioned (RCU/WCU with auto scaling; cheaper for steady predictable load; reserved capacity available) |
+| Table classes | Standard vs Standard-IA for infrequently accessed data |
+| Capacity math | 1 RCU = one strongly consistent read up to 4 KB per second (two eventually consistent; transactional costs double); 1 WCU = one write up to 1 KB per second (transactional double) |
+| Item size | Max 400 KB |
+| Indexes | **LSI:** same partition key, different sort key, must be defined at table creation, shares table capacity, 10 GB per partition key limit. **GSI:** any keys, eventually consistent, own capacity; back-pressure from a throttled GSI can throttle base table writes |
+| Streams | Ordered change log for 24 hours (NEW_IMAGE, OLD_IMAGE, both, KEYS_ONLY) feeding Lambda, Kinesis, replication |
+| Global tables | Multi-Region, multi-active replication, last-writer-wins, requires streams, typically sub-second replication |
+| Backup | On-demand backups, point-in-time recovery (35 days), export to S3 |
+| TTL | Free deletion of expired items within about 48 hours, emits stream events |
+| Transactions | `TransactWriteItems` and `TransactGetItems` for ACID across items (up to 100 items) |
+| DAX | Microsecond cache; eventually consistent reads only benefit |
+| Access patterns | Design keys for even distribution; avoid hot partitions; single-table design; use sparse indexes |
+
+```bash
+aws dynamodb create-table --table-name Orders --billing-mode PAY_PER_REQUEST \
+  --attribute-definitions AttributeName=customerId,AttributeType=S AttributeName=orderTs,AttributeType=S \
+  --key-schema AttributeName=customerId,KeyType=HASH AttributeName=orderTs,KeyType=RANGE \
+  --stream-specification StreamEnabled=true,StreamViewType=NEW_AND_OLD_IMAGES
+aws dynamodb update-table --table-name Orders --replica-updates 'Create={RegionName=eu-west-1}'
+```
+
+<Callout variant="warning" title="Exam Trap: Relational by Default">
+If the stem describes key-based lookups at massive scale with unpredictable traffic and no joins, the answer is DynamoDB, not RDS with more replicas. If it describes complex joins, multi-row transactions and existing SQL code, the answer is Aurora/RDS.
+</Callout>
+
+## 4. ElastiCache vs MemoryDB, Redis vs Memcached
+
+| Feature | Redis (ElastiCache) | Memcached | MemoryDB |
+|---|---|---|---|
+| Data structures | Rich (sets, sorted sets, hashes, streams) | Simple key-value | Redis-compatible |
+| Persistence / durability | Snapshots, AOF | No | Multi-AZ transaction log; durable primary database |
+| Replication / Multi-AZ failover | Yes | No | Yes |
+| Multi-threaded | No (single-threaded core, I/O threads) | Yes | n/a |
+| Cluster mode (sharding) | Yes | Client-side sharding | Yes |
+| Global | Global Datastore | No | Multi-Region options |
+| Use | Cache, session, leaderboards, pub/sub | Simple horizontally scaled cache | Microservices needing primary store with microsecond reads and durability |
+
+## 5. Analytics and Data Lake Services
+
+| Service | Role |
+|---|---|
+| Amazon S3 + AWS Glue Data Catalog | Data lake storage and metadata |
+| AWS Glue | Serverless ETL, crawlers, Data Catalog, Glue Data Quality |
+| Amazon Athena | Serverless SQL on S3 (pay per data scanned; use Parquet/ORC, partitioning and compression to cut cost) |
+| AWS Lake Formation | Central fine-grained permissions (database, table, column, row, cell) and governance for the lake; cross-account sharing |
+| Amazon EMR | Managed Hadoop/Spark/Presto; EMR Serverless; use Spot for task nodes |
+| Amazon Redshift | Warehouse; Spectrum queries S3; materialized views; concurrency scaling; data sharing across clusters/accounts |
+| Amazon QuickSight | BI dashboards, SPICE in-memory engine, row-level security, ML insights |
+| Amazon OpenSearch Service | Search, log analytics, vector search |
+| Amazon Managed Service for Apache Flink | Real-time stream processing (SQL/Java/Python) |
+| Amazon Kinesis / MSK / Firehose | Ingestion (see Module 10) |
+| AWS Data Exchange | Subscribe to third-party datasets |
+
+```
+ Sources -> Firehose/Kinesis -> S3 (raw) -> Glue ETL -> S3 (curated, Parquet)
+        -> Athena / Redshift Spectrum / EMR -> QuickSight
+        Lake Formation governs access across Athena, Redshift, EMR, Glue
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Reducing Athena and Redshift Cost">
+
+Convert to columnar formats (Parquet/ORC), compress, partition by common filter columns (date), and use partition projection. In Redshift use RA3 nodes (compute and storage scale independently), Redshift Serverless for intermittent workloads, pause/resume provisioned clusters, and Spectrum for cold data in S3 rather than loading everything.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Choosing Between RDS Custom, RDS and Self-Managed on EC2">
+
+RDS Custom (Oracle, SQL Server) allows OS/database customization with managed automation for legacy apps needing it. Standard RDS minimizes operations. Self-managed on EC2 is justified only for unsupported versions/engines, special OS-level access, or unusual licensing, and then you own HA, backup and patching (the exam usually treats it as the high-overhead option).
+
+</AccordionItem>
+</AccordionGroup>
+
+## 6. Common Traps & Distractors
+
+- "Spiky, unpredictable relational workload and want to pay only for use": Aurora Serverless v2.
+- "Millisecond global reads and writes in multiple Regions": DynamoDB global tables (multi-active), Aurora Global DB is single-writer.
+- "Query data in S3 with SQL, no infrastructure": Athena.
+- "Column-level permissions on S3 data lake across accounts": Lake Formation.
+- "Social graph with relationship traversal": Neptune.
+- "Redis-compatible but durable primary database": MemoryDB (not ElastiCache).
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can justify DynamoDB vs Aurora for a given access pattern.
+<details>
+<summary>Explanation</summary>
+
+DynamoDB for known key-based access at massive scale, flexible schema and serverless operations; Aurora for relational integrity, ad-hoc queries, joins and SQL compatibility with existing applications.
+
+</details>
+
+- [ ] I can calculate DynamoDB read and write capacity.
+<details>
+<summary>Explanation</summary>
+
+Round item sizes up to 4 KB per read unit and 1 KB per write unit. Example: 100 strongly consistent reads per second of 6 KB items requires 100 x 2 = 200 RCU; eventually consistent halves it to 100 RCU; transactional doubles the strongly consistent figure to 400 RCU. 50 writes per second of 2.5 KB items requires 50 x 3 = 150 WCU.
+
+</details>
+
+- [ ] I can explain Aurora Global Database vs DynamoDB global tables.
+<details>
+<summary>Explanation</summary>
+
+Aurora Global Database has one writable primary Region with up to five read-only secondaries (storage replication, about one-second lag, failover in about a minute). DynamoDB global tables are multi-active with writes accepted in every Region and last-writer-wins conflict resolution.
+
+</details>
+
+- [ ] I can design a cost-effective analytics pipeline on S3.
+<details>
+<summary>Explanation</summary>
+
+Land raw data in S3, transform to partitioned Parquet with Glue, catalog it in the Glue Data Catalog, query with Athena or Redshift Spectrum, govern with Lake Formation, and visualize in QuickSight. This is serverless and avoids paying for idle clusters.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/12-compute-caching-global-performance" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 12: Compute, Caching & Global Performance: EC2, CloudFront & Global Accelerator
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/14-cost-optimization-visibility-purchasing" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 14: Cost Optimization, Visibility & Purchasing Options →
+  </a>
+</div>

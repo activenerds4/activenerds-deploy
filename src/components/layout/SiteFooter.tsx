@@ -14,9 +14,17 @@ const exploreNav = [
   { label: "Browse by Tag", to: "/articles#tags" },
 ];
 
+const certificationsNav = [
+  { label: "Certifications Hub", to: "/certifications" },
+  { label: "AWS Certifications Hub", to: "/certifications/aws" },
+  { label: "VMware Cloud Foundation", to: "/certifications/vmware" },
+  { label: "Cloud Foundation Administrator (2V0-17.25)", to: "/certifications/vmware/vcf-administrator" },
+  { label: "Cloud Foundation Architect (2V0-13.25)", to: "/certifications/vmware/vcf9-architect" },
+  { label: "VCF vSphere Kubernetes Service (3V0-24.25)", to: "/certifications/vmware/vks-tanzu" },
+];
+
 const deepLearningNav = [
   { label: "Deep Learning Hub", to: "/learning" },
-  { label: "Certs Central (VMware)", to: "/learning/certs-central/vmware/study-notes" },
   { label: "Learning Paths", to: "/learning/paths" },
   { label: "Engineering Glossary", to: "/learning/glossary" },
   { label: "Q&A Challenges", to: "/learning/challenges" },
@@ -51,7 +59,7 @@ export const SiteFooter = () => {
         <FooterNewsletterCTA />
 
         {/* SLOT 2: Brand and Multi-Column Sitemap Grid */}
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
           {/* Brand Column */}
           <div className="max-w-xs">
             <Link
@@ -69,6 +77,23 @@ export const SiteFooter = () => {
             <ul className="space-y-2">
               {exploreNav.map((item) => (
                 <li key={item.to}>
+                  <Link
+                    to={item.to}
+                    className="text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring rounded-sm"
+                  >
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          {/* Certifications Column */}
+          <nav aria-label="Technical certifications">
+            <h2 className="eyebrow mb-3">Certifications</h2>
+            <ul className="space-y-2">
+              {certificationsNav.map((item) => (
+                <li key={item.to + item.label}>
                   <Link
                     to={item.to}
                     className="text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring rounded-sm"

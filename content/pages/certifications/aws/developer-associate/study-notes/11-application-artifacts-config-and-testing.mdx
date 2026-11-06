@@ -1,0 +1,252 @@
+---
+title: "Module 11: Application Artifacts, Configuration Management & Testing"
+description: "Container images with ECR, CodeArtifact, AppConfig, Parameter Store, SAM local testing, mock APIs, test events, aliases, and AI-generated tests."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 11
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Testing and Deployment
+
+<Callout variant="info" title="Exam Focus: Testing and Deployment (Tasks 3.1 and 3.2)">
+Task 3.1 (prepare artifacts) now explicitly includes **building and managing container images with Amazon ECR** and API Gateway stages. Task 3.2 is a **merged test-and-automate task** that adds **AI tools to generate tests**. Unit testing with AWS SAM moved here from Domain 1.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Build Once, Promote the Same Artifact">
+
+A core release principle: **build an artifact once, then promote that exact artifact through environments** (dev, test, prod), changing only **configuration**. Rebuilding per environment risks shipping something different from what you tested.
+
+* **Immutable artifacts:** Lambda **versions**, container images referenced by **digest** or immutable tags, versioned S3 packages.
+* **Mutable pointers:** Lambda **aliases**, API Gateway **stages**, `latest` tags, which are moved to promote or roll back.
+* **Configuration outside the artifact:** AppConfig, Parameter Store, Secrets Manager, environment variables, stage variables.
+
+* **Exam Trap:** "Use the same code in dev and prod with different database endpoints" → externalize configuration (Parameter Store/AppConfig/env vars via alias or stage), not separate code branches.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Managing Dependencies and Packages (Skill 3.1.1)
+
+| Packaging Need | Approach |
+|---|---|
+| Small function with a few libraries | **.zip** including dependencies (`pip install -t ./package`, `npm ci --omit=dev`), build with `sam build` |
+| Shared libraries across functions | **Lambda layer** (up to 5 layers, counts toward 250 MB unzipped) |
+| Large or native dependencies (ML libraries, custom OS packages) | **Container image** (up to 10 GB) |
+| Private or approved package supply chain | **AWS CodeArtifact** |
+
+### AWS CodeArtifact
+
+A managed **artifact repository** for npm, PyPI, Maven, NuGet, Swift, and others. Structure: **domain** (groups repositories, shares storage, one KMS key) → **repositories**. A repository can have **upstream repositories** and an **external connection** to public registries (npmjs, PyPI, Maven Central), so builds fetch packages through a controlled, cached, auditable path and you can **block or pin** versions.
+
+```bash
+aws codeartifact login --tool npm --domain my-domain --repository my-repo
+aws codeartifact login --tool pip --domain my-domain --repository my-repo
+```
+
+The authorization token lasts **12 hours by default**, so CI jobs log in at build time. CodeBuild's service role needs `codeartifact:GetAuthorizationToken` and `sts:GetServiceBearerToken`.
+
+---
+
+## 2. Container Images and Amazon ECR (Skill 3.1.2)
+
+```dockerfile
+# Multi-stage build keeps the final image small
+FROM public.ecr.aws/lambda/python:3.12 AS base
+COPY requirements.txt .
+RUN pip install -r requirements.txt --target "${LAMBDA_TASK_ROOT}"
+COPY app.py ${LAMBDA_TASK_ROOT}
+CMD ["app.handler"]
+```
+
+```bash
+aws ecr create-repository --repository-name orders-api --image-tag-mutability IMMUTABLE \
+  --image-scanning-configuration scanOnPush=true
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 111122223333.dkr.ecr.us-east-1.amazonaws.com
+docker build -t orders-api:1.4.2 .
+docker tag orders-api:1.4.2 111122223333.dkr.ecr.us-east-1.amazonaws.com/orders-api:1.4.2
+docker push 111122223333.dkr.ecr.us-east-1.amazonaws.com/orders-api:1.4.2
+```
+
+| ECR Feature | What to Know |
+|---|---|
+| **Authentication** | Token from `get-login-password` is valid **12 hours**; permissions via IAM and **repository policies** |
+| **Tag immutability** | `IMMUTABLE` prevents overwriting a tag; use **semantic versions or Git commit SHAs**, avoid deploying `latest` to production |
+| **Digest pinning** | `repo@sha256:...` identifies exact image content |
+| **Image scanning** | **Scan on push** (basic) or **enhanced scanning** with Amazon Inspector (continuous) |
+| **Lifecycle policies** | Rules to **expire untagged images** or **keep only the last N images** to control cost; evaluated by priority |
+| **Replication** | Cross-Region and cross-account replication for DR and multi-Region deployment |
+| **Pull-through cache** | Cache images from upstream public registries in ECR |
+| **Encryption** | Images are encrypted at rest (AES-256 or KMS) |
+
+```json
+{ "rules": [{ "rulePriority": 1, "description": "Keep last 10 images",
+   "selection": { "tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10 },
+   "action": { "type": "expire" } }] }
+```
+
+**Lambda container images** must be in ECR in the **same Region** as the function and use an AWS-provided base image or implement the **Lambda Runtime Interface Client**; test locally with the **Runtime Interface Emulator**.
+
+---
+
+## 3. Code Repositories in Deployment Environments (Skill 3.1.3)
+
+* **CodePipeline sources:** GitHub, GitLab, Bitbucket (via **AWS CodeConnections**), Amazon S3, Amazon ECR, and AWS CodeCommit (where available). Repository events can trigger pipelines through EventBridge or webhooks.
+* **AWS Amplify Hosting** connects to a Git repository and **builds per branch**, creating a separate environment for each branch or pull request (useful for front-end previews).
+* **CodeBuild** can pull directly from repositories and S3; it needs credentials/connection permissions to private repositories.
+* Never store credentials in the repo; use Secrets Manager, CodeConnections, or roles.
+
+---
+
+## 4. Environment-Specific Configuration (Skill 3.1.4)
+
+| Service | Best For | Highlights |
+|---|---|---|
+| **Lambda environment variables** | Simple settings per function version | 4 KB limit; visible in console; **not** for secrets (or encrypt with KMS helper) |
+| **SSM Parameter Store** | Hierarchical config (`/myapp/prod/db/host`) | Free standard tier; `SecureString`; IAM by path; `GetParametersByPath` |
+| **Secrets Manager** | Credentials needing rotation | Rotation, replication |
+| **AWS AppConfig** | **Dynamic configuration and feature flags** with safe rollout | **Validators** (JSON Schema or Lambda), **gradual deployment strategies**, **automatic rollback on CloudWatch alarm**, Lambda extension for caching |
+| **API Gateway stage variables** | Per-stage endpoint/alias selection | Not for secrets |
+| **Lambda aliases** | Environment pointers | Weighted routing |
+
+**Pick AppConfig** when the scenario says change behavior without redeploying, validate the configuration before release, roll out gradually, or **roll back automatically if errors rise**. Choose **Parameter Store** for plain, static, hierarchical configuration.
+
+---
+
+## 5. Developing and Validating Tests (Skills 3.2.1 to 3.2.4)
+
+### Unit and Local Testing
+
+* **Unit tests** exercise your logic with **mocked AWS calls** (moto or botocore Stubber for Python, `aws-sdk-client-mock` for JavaScript) so they run fast and offline.
+* **AWS SAM CLI** (needs Docker for local emulation):
+
+```bash
+sam validate --lint
+sam build
+sam local invoke OrdersFunction -e events/order-created.json     # run one function with a test event
+sam local start-api                                              # local API Gateway on localhost:3000
+sam local generate-event s3 put --bucket demo --key a.csv > events/s3.json
+sam sync --stack-name orders-dev --watch                         # fast cloud iteration in a dev stack
+sam logs --stack-name orders-dev --tail
+```
+
+* **Infrastructure tests:** `cfn-lint`, **CloudFormation change sets**, and **CDK assertions** (`Template.fromStack(stack).hasResourceProperties(...)`, snapshot tests) validate templates before deployment.
+* **Integration tests** run against a real **dev stack** deployed from the same template.
+
+### Test Events (Skill 3.2.3)
+
+```json
+{
+  "httpMethod": "POST",
+  "path": "/orders",
+  "headers": { "Content-Type": "application/json" },
+  "body": "{\"orderId\":\"A1\",\"quantity\":2}",
+  "isBase64Encoded": false
+}
+```
+
+* Save **test events** in the Lambda console (private or shareable) or as JSON files for `sam local invoke` and `aws lambda invoke --payload`.
+* Test API Gateway with the console **Test** feature or `aws apigateway test-invoke-method`.
+* Use realistic **event shapes** for each trigger (S3, SQS, API Gateway proxy, EventBridge); `sam local generate-event` creates them.
+
+### Mock APIs for External Dependencies (Skill 3.2.2)
+
+* **API Gateway Mock integration** returns canned responses with no backend; ideal for front-end development and contract tests.
+* Stub third-party APIs behind an interface in code, or point **stage variables** at a mock endpoint in dev and test.
+* Use **Lambda functions** as simple stub services, or recorded responses.
+
+### Creating Environments (Skill 3.2.4)
+
+| Mechanism | Environment Unit |
+|---|---|
+| **Lambda versions and aliases** | `dev`, `test`, `prod` aliases pointing to versions |
+| **ECR image tags** | `1.4.2-dev`, `1.4.2-prod` or promote by retagging |
+| **API Gateway stages** | `dev`, `test`, `prod` with stage variables |
+| **Amplify branches** | One environment per Git branch |
+| **AWS Copilot environments** | `copilot env init` creates isolated ECS/Fargate environments (VPC, cluster) for a service |
+| **CloudFormation/SAM/CDK stacks** | Stack per environment with parameters |
+
+### AI Tools for Tests (Skill 3.2.5, New in DVA-C03)
+
+AI-assisted tools such as **Kiro** can **generate unit and property-based tests from a spec's requirements**, propose edge cases, expand **test coverage**, analyze **failed test output**, and (through agent hooks) **run tests automatically on save** or before commit. Good practice:
+
+* Make tests trace to **requirements**, then **review every assertion**: AI can write tests that pass without verifying anything meaningful (for example asserting only that no exception occurred).
+* Keep generated tests in the **CI pipeline** (CodeBuild test reports) so regressions are caught automatically.
+* Use AI for **regression automation and result analysis**, but keep humans accountable for what counts as passing.
+
+---
+
+## 6. Common Exam Traps and Scenario Distractors
+
+* "Run a Lambda function locally with a sample S3 event" → `sam local generate-event s3 put` + `sam local invoke -e`.
+* "Frontend team blocked while backend is being built" → API Gateway **Mock integration**.
+* "Hundreds of old untagged images are increasing ECR cost" → **lifecycle policy**.
+* "Prevent anyone from overwriting the `1.4.2` image tag" → **tag immutability**.
+* "Change a feature flag without redeploying, validate it, and roll back on errors" → **AppConfig**.
+* "Pull npm packages only from an approved, cached source" → **CodeArtifact** with upstream repositories.
+* "Image build in CodeBuild fails to run Docker" → enable **privileged mode** on the build project.
+* "Prod uses `latest` tag and pulled a different image after a restart" → pin by **immutable tag or digest**.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A team wants Lambda dev, test, and prod environments from the same code with different table names. What is the cleanest approach?
+<details>
+<summary>Explanation</summary>
+
+Publish a **version**, create **aliases** per environment, and supply environment-specific configuration (env vars per deployment, Parameter Store paths, or AppConfig profiles). Do not branch the code.
+
+</details>
+- [ ] ECR holds thousands of images from nightly builds. How do you retain only the latest 20?
+<details>
+<summary>Explanation</summary>
+
+Add an ECR **lifecycle policy** with `imageCountMoreThan: 20` and action `expire`.
+
+</details>
+- [ ] Which tool lets you invoke a function locally with a saved JSON event and Docker?
+<details>
+<summary>Explanation</summary>
+
+`sam local invoke FunctionName -e event.json`.
+
+</details>
+- [ ] A new config value caused errors for 5% of requests. How do you limit the blast radius next time?
+<details>
+<summary>Explanation</summary>
+
+Use **AppConfig** with a gradual deployment strategy, a validator, and a CloudWatch alarm so AppConfig **rolls back automatically**.
+
+</details>
+- [ ] An AI tool generated unit tests that all pass but never assert results. What should you do?
+<details>
+<summary>Explanation</summary>
+
+Review and strengthen the assertions against requirements, add edge cases, measure coverage, and keep the tests in CI. Passing tests are not proof of correctness.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/10-securing-ai-services-and-agents" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 10: Securing AI Services & Agents: Bedrock Guardrails, PrivateLink & AgentCore
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/12-infrastructure-as-code-sam-cdk" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 12: Infrastructure as Code: CloudFormation, AWS SAM & AWS CDK →
+  </a>
+</div>

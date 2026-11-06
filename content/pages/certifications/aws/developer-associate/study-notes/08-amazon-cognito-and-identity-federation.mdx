@@ -1,0 +1,202 @@
+---
+title: "Module 08: Amazon Cognito & Identity Federation"
+description: "User pools vs identity pools, JWT tokens, OAuth 2.0 flows, Lambda triggers, SAML and OIDC federation, and web identity federation."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 8
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Security
+
+<Callout variant="info" title="Exam Focus: Security (Task 2.1, Skills 2.1.1 and 2.1.2)">
+Implementing identity federation and access control for applications. The key distinction the exam loves: **user pools authenticate, identity pools authorize access to AWS resources.** Know which tokens go where.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Two Different Cognito Components">
+
+* **User pool:** a user directory and **identity provider**. It handles sign-up, sign-in, MFA, password policies, and issues **JSON Web Tokens (JWTs)**. Output: tokens that prove *who the user is* to **your** application or API.
+* **Identity pool (federated identities):** exchanges a trusted identity (a user pool token, social login, SAML, OIDC, or guest) for **temporary AWS credentials** via STS. Output: credentials that let the client call **AWS services directly** (S3, DynamoDB, IoT).
+
+```
+User ──sign in──> User Pool ──JWT──> API Gateway (Cognito authorizer) ──> Lambda
+                      │
+                      └──JWT──> Identity Pool ──STS──> temporary AWS credentials ──> S3 / DynamoDB
+```
+
+* **Exam Trap:** "Mobile app users must upload directly to S3 with their own scoped permissions" → **identity pool** (credentials) after a user pool sign-in. "Protect a REST API with sign-in" → **user pool authorizer**.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Cognito User Pools
+
+**Features:** sign-up and sign-in with username, email, or phone; email and SMS verification; **MFA** (TOTP authenticator apps, SMS, and email options); password policy; account recovery; groups; custom attributes; hosted/managed login pages; **social IdPs** (Google, Facebook, Apple, Amazon) and **SAML and OIDC** federation; adaptive authentication and compromised-credential detection in higher feature plans.
+
+### The Three Tokens
+
+| Token | Purpose | Contains | Default Lifetime |
+|---|---|---|---|
+| **ID token** | Proves identity to your app | User profile claims (`email`, `cognito:groups`, custom attributes) | 1 hour (configurable 5 minutes to 1 day) |
+| **Access token** | Authorizes API access | Scopes, groups, `client_id`, `username` | 1 hour (configurable) |
+| **Refresh token** | Gets new ID and access tokens | Opaque to your app | 30 days (configurable 60 minutes to 10 years) |
+
+**Validating a JWT yourself:** download the user pool's public keys from its **JWKS** endpoint (`/.well-known/jwks.json`), verify the signature, then check `iss` (the user pool), `exp` (not expired), `token_use` (`id` or `access`), and `aud` (ID token) or `client_id` (access token).
+
+### OAuth 2.0 / OIDC Flows
+
+| Flow | Use | Notes |
+|---|---|---|
+| **Authorization code grant (with PKCE)** | Web, mobile, SPA | **Recommended**; tokens never exposed in the URL |
+| **Implicit grant** | Legacy SPAs | Discouraged |
+| **Client credentials** | **Machine-to-machine** | Requires an app client secret, a **resource server**, and **custom scopes** |
+| **USER_PASSWORD_AUTH / USER_SRP_AUTH** | Direct SDK sign-in | SRP avoids sending the password in the clear |
+
+**App clients:** public clients (browser or mobile, **no secret**) vs confidential clients (server-side, **with secret**). Never embed a client secret in a mobile or browser app.
+
+### Lambda Triggers (Customize the Flow)
+
+| Trigger | Typical Use |
+|---|---|
+| **Pre sign-up** | Auto-confirm, reject by email domain |
+| **Post confirmation** | Create a profile row in DynamoDB, send a welcome message |
+| **Pre authentication / Post authentication** | Block or audit sign-ins |
+| **Pre token generation** | Add, override, or suppress claims in tokens |
+| **Custom auth challenge triggers** | Passwordless or CAPTCHA flows |
+| **User migration** | Migrate users lazily from a legacy directory on first sign-in |
+| **Custom message** | Customize verification emails and SMS |
+
+Triggers run **synchronously** and have a timeout of 5 seconds, so keep them fast.
+
+```bash
+# Sign in via SDK-style flow with the CLI (public client, SRP is preferred in real apps)
+aws cognito-idp initiate-auth --client-id 1h57kf5cpq17m0eml12EXAMPLE \
+  --auth-flow USER_PASSWORD_AUTH --auth-parameters USERNAME=alice,PASSWORD='S3cure!pass'
+```
+
+---
+
+## 2. Cognito Identity Pools
+
+* Accepts **authenticated** identities (Cognito user pool, Amazon, Google, Facebook, Apple, SAML, any OIDC provider, or a developer-authenticated provider) and optionally **unauthenticated (guest)** identities.
+* Maps each identity to an **IAM role** (one role for authenticated, one for guest, or rules-based and claim-based mapping, for example by a `cognito:groups` claim or `cognito:preferred_role`).
+* Returns **temporary credentials** from STS. Keep guest roles extremely restrictive.
+* **Fine-grained, per-user access** uses IAM policy variables so that each user only touches their own data:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["s3:GetObject", "s3:PutObject"],
+  "Resource": "arn:aws:s3:::user-files/${cognito-identity.amazonaws.com:sub}/*"
+}
+```
+
+DynamoDB equivalent: condition `dynamodb:LeadingKeys` = `${cognito-identity.amazonaws.com:sub}`.
+
+---
+
+## 3. Identity Federation Options Compared
+
+| Scenario | Service | Mechanism |
+|---|---|---|
+| Customers of your app sign up and in | **Cognito user pool** | Directory + JWTs |
+| App users need direct AWS API access | **Cognito identity pool** | Token to STS credentials |
+| Customers sign in with Google or Apple | User pool with **social IdP** | Federation through the hosted UI |
+| Workforce signs in with corporate directory (SAML 2.0) to **AWS accounts and console/CLI** | **IAM Identity Center** (recommended) or IAM SAML federation with `AssumeRoleWithSAML` | Central SSO and permission sets |
+| Corporate users sign in to **your app** using their company IdP | User pool with **SAML or OIDC IdP** | Federation, tokens issued by Cognito |
+| Workloads outside AWS (CI/CD such as GitHub Actions, Kubernetes pods) need AWS access without long-lived keys | **IAM OIDC identity provider** + `AssumeRoleWithWebIdentity` (or EKS IRSA / Pod Identity) | Trust the OIDC issuer, scope by claims such as `sub` |
+
+**Application Load Balancer** can also authenticate users with a Cognito user pool or any OIDC provider before forwarding requests, offloading auth from your code.
+
+---
+
+## 4. Putting It Together: Secure Serverless App Pattern
+
+```
+Browser (SPA) ──auth code + PKCE──> Cognito Managed Login ──> tokens
+Browser ──Authorization: Bearer <token>──> API Gateway (Cognito/JWT authorizer) ──> Lambda ──> DynamoDB
+Browser ──tokens──> Identity Pool ──> short-lived AWS creds scoped by ${cognito-identity.amazonaws.com:sub} ──> S3 upload
+```
+
+Implementation tips:
+
+* Store tokens in memory or secure storage; avoid `localStorage` for high-risk apps when possible, and never log tokens.
+* Verify authorization in the **backend** as well (check `cognito:groups` or scopes). Client-side checks are not security.
+* Use **groups** (and the `cognito:groups` claim) for coarse role-based access, and fine-grained IAM or application logic for resource-level decisions.
+
+---
+
+## 5. Common Exam Traps and Scenario Distractors
+
+* "Users sign in with Facebook and need S3 access" → social IdP (user pool or identity pool) + **identity pool** to obtain AWS credentials.
+* "REST API method with OAuth scopes expects which token?" → the **access token**. With **no scopes** configured, the authorizer expects the **ID token**.
+* "Machine-to-machine service calls without a user" → **client credentials** with a resource server and custom scopes.
+* "Embedding the app client secret in a mobile app" → **wrong**; use a public client with PKCE.
+* "Add custom claims to the token, such as a tenant ID" → **pre token generation** Lambda trigger.
+* "Migrate users without forcing password resets" → **user migration** trigger.
+* "CI pipeline needs AWS access without storing keys" → **OIDC provider + AssumeRoleWithWebIdentity**.
+* "Guests can read the whole bucket" → the **unauthenticated role** is over-permissive.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A single-page app signs users in through Cognito and then uploads files directly to S3 under `uploads/userId/`. Which components are needed?
+<details>
+<summary>Explanation</summary>
+
+A **user pool** for authentication plus an **identity pool** that maps authenticated users to an IAM role scoped with `${cognito-identity.amazonaws.com:sub}`. The app uses the temporary credentials for S3.
+
+</details>
+- [ ] Which OAuth flow should a mobile or SPA client use for user sign-in?
+<details>
+<summary>Explanation</summary>
+
+**Authorization code grant with PKCE.** Implicit is discouraged because tokens appear in the redirect URL.
+
+</details>
+- [ ] A backend job must call an API protected by a Cognito authorizer without any user. How?
+<details>
+<summary>Explanation</summary>
+
+Create a resource server with custom scopes and an app client with a secret using the **client credentials** flow; call the API with the resulting access token.
+
+</details>
+- [ ] You must include the customer's tenant ID in every ID token. What do you build?
+<details>
+<summary>Explanation</summary>
+
+A **pre token generation Lambda trigger** that adds the claim (from a custom attribute or database lookup).
+
+</details>
+- [ ] A GitHub Actions workflow needs to deploy to AWS without long-lived keys. What do you set up?
+<details>
+<summary>Explanation</summary>
+
+Create an **IAM OIDC identity provider** for the GitHub token issuer and a role whose trust policy allows `sts:AssumeRoleWithWebIdentity` conditioned on the repository and branch claims.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/07-iam-sts-and-programmatic-access" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 07: IAM Policies, STS, Programmatic Access & Presigned URLs
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/09-encryption-kms-and-secrets" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 09: Encryption, KMS, Certificates & Secrets Management →
+  </a>
+</div>

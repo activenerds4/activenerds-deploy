@@ -1,0 +1,243 @@
+---
+title: "Section 11: Workload Migration Strategies with VMware HCX"
+description: "HCX bulk migration, Cross-Cloud vMotion, Network Extension (L2 stretch), Cold migration, bandwidth and MTU sizing."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VCF 9.0 Architect Exam Revision Notes"
+trackSlug: "/certifications/vmware/vcf9-architect"
+moduleNumber: 11
+totalModules: 13
+layout: "article"
+---
+
+**Design a Workload Migration / Onboarding Strategy**
+
+→ Verify product names, packaging, supported source/destination platforms, HCX service limits and version-compatibility rules against the current VCF 9.0 / HCX documentation and exam guide. HCX is delivered as part of the VCF Operations family in VCF 9.0 (e.g., VCF Operations HCX); confirm current naming and entitlement. Latency, bandwidth and concurrency figures below are typical design guidance, not authoritative limits.
+
+---
+
+## 0. Migration Fundamentals
+
+| Concept | Meaning |
+|---|---|
+| **Migration (onboarding) strategy** | Plan and method for moving workloads into VCF 9.0 with acceptable risk, downtime, effort and cost |
+| **The 6 Rs** | **Rehost** (lift and shift, as-is), **Replatform** (minor optimisation), **Refactor** (re-architect), **Repurchase** (SaaS), **Retire** (decommission), **Retain** (leave in place) |
+| **Typical VCF onboarding** | Mostly **rehost** (VM migration) plus **retire/retain** decisions; refactor for modern-app targets (VKS) |
+| **Source types** | Legacy vSphere (older versions), non-VCF vSphere, other hypervisors, physical servers, public cloud |
+| **Key drivers** | Datacentre exit, hardware refresh, platform consolidation, M&A, brownfield-to-VCF adoption, cost/licensing |
+| **Trade-offs** | Faster/less-downtime methods need more infrastructure, tooling and planning; simple methods cost more downtime |
+
+**Migration vs conversion:** moving workloads **to a new VCF instance/domain** (migration) differs from **converting/importing an existing vSphere environment into VCF** (brownfield convert/import, Objective 2.1/3.6). Choose by hardware age, version gap and risk tolerance.
+
+---
+
+## 1. Design Decisions Overview
+
+| Decision | Options | Guidance |
+|---|---|---|
+| **Scope and discovery** | Application inventory, dependency mapping, utilisation data | Use discovery/assessment (VCF Operations, application dependency mapping) before planning |
+| **Disposition (6 Rs)** | Rehost/replatform/refactor/retire/retain | Retire and right-size **before** migrating to reduce effort and target capacity |
+| **Target placement** | Which workload domain/cluster/tenant per workload | Map by compliance, SLA, performance tier, licensing, tenant |
+| **Migration method** | Hot (vMotion-class), warm (replication + switchover), cold (power-off), bulk | Driven by **downtime tolerance, size, distance, source version, network** |
+| **Wave planning** | Group by application/dependency, criticality, owner, change window | Start with low-risk pilot wave; scale up |
+| **Network strategy** | Extend L2, re-IP, or hybrid | See Section 4 |
+| **Capacity at target** | Pre-build target capacity incl. HA headroom and migration overhead | Don't migrate into a cluster with no headroom |
+| **Security carry-over** | Recreate/translate firewall policy, tags, RBAC | Apply NSX DFW policy **before or at cutover** to avoid exposure |
+| **Backup / DR carry-over** | Re-protect on target (backup agents/jobs, replication, SRM plans) | Part of acceptance criteria |
+| **Rollback plan** | Keep source intact until validation passes; define go/no-go | Mandatory for every wave |
+| **Governance** | Change control, communications, ownership, sign-off | Business owner approval per wave |
+
+---
+
+## 2. Migration Tools and Methods
+
+### 2.1 Comparison
+
+| Method | Downtime | Source → Target | Requirements | Best for |
+|---|---|---|---|---|
+| **vMotion (same vCenter / cross-vCenter)** | **None** (live) | Between hosts/clusters/vCenters (including cross-vCenter, and with storage via Storage vMotion) | Supported version compatibility, network reachability, low latency (typically ≤150 ms RTT for cross-site, verify), shared or migrated storage, CPU compatibility/EVC | Moving within or between vCenters you control with good connectivity |
+| **Storage vMotion** | None | Datastore to datastore | Storage connectivity | Moving disks to vSAN/new storage |
+| **Cross-vCenter vMotion / Advanced Cross vCenter vMotion** | None | vCenter ↔ vCenter | Network, compatible versions/SSO or linked-style trust, bandwidth | Moving VMs into a new VCF workload domain in the same datacentre/campus |
+| **Cold migration** | **Yes** (VM powered off) | Any supported source/target | Network/storage access | Simple, low-risk for non-critical VMs, version/CPU gaps, large datasets with tolerated downtime |
+| **VMware HCX (vMotion / Bulk / RAV / Cold / OS Assisted)** | Varies by mode (see 2.2) | Source site (legacy vSphere, other vSphere, KVM/Hyper-V via OS-assisted, cloud) → VCF | HCX Manager at source and destination, service mesh, WAN/network connectivity, licences | **Inter-site, cross-version, large-scale migration waves** |
+| **Replication-based (vSphere Replication, array replication, SRM)** | Short (switchover) | Site to site | Replication links and tooling | DR-style planned migration, orchestrated cutover |
+| **Backup/restore or image-based** | Yes | Any | Backup infrastructure | Simple moves for tolerant workloads, last-resort/no-network-extension cases |
+| **Physical-to-virtual (P2V)** | Yes | Physical → VM | Conversion tooling, agents | Onboarding legacy physical servers |
+| **Application-level migration** | Minimal (app-driven) | Any | App support (DB replication, clustering, DNS cutover) | Databases, stateful apps with native replication |
+| **Rebuild / redeploy (IaC)** | Planned cutover | Any | Automation, app deployability | Refactored/modern apps via **VCF Automation**/VKS |
+
+### 2.2 HCX Migration Modes
+
+| Mode                                       | Downtime                         | How it works                                                                                 | Use when                                                                                |
+| ------------------------------------------ | -------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **HCX vMotion**                            | None                             | Live migration over HCX transport, one VM at a time                                          | Few critical VMs needing zero downtime, good WAN                                        |
+| **HCX Bulk Migration**                     | **Brief** (reboot at switchover) | Host-based replication (vSphere Replication-style), then scheduled switchover with VM reboot | Large numbers of VMs, scheduled cutover, parallel moves                                 |
+| **HCX Replication Assisted vMotion (RAV)** | **None** (live at switchover)    | Bulk replication + vMotion-style live switchover                                             | **Large-scale migrations with no downtime**; combines bulk parallelism and live cutover |
+| **HCX Cold Migration**                     | Yes (powered off)                | Powered-off VM transfer                                                                      | Powered-off VMs/templates, simple moves                                                 |
+| **HCX OS Assisted Migration (OSAM)**       | Yes (reboot)                     | Guest-based migration for non-vSphere sources (e.g., KVM, Hyper-V)                           | Non-vSphere hypervisor sources                                                          |
+| **HCX Disaster Recovery / protection**     | Varies                           | Replication-based protection (when used)                                                     | Protection use cases (verify scope)                                                     |
+
+**Takeaways**
+- **vMotion = zero downtime but needs connectivity/compat**; **cold = simplest but has downtime**; **HCX = bridge for distance, version gaps, scale and network extension**.
+- **RAV** is the typical answer for **large-scale, zero-downtime** migrations; **Bulk** for **scheduled brief downtime**; **HCX vMotion** for a **small number of critical VMs**.
+
+### 2.3 HCX Architecture Essentials
+
+| Component | Role |
+|---|---|
+| **HCX Manager (source and destination)** | Control plane, integrated with vCenter/NSX; pairing via **site pairing** |
+| **Interconnect (IX) appliance** | Migration data path (vMotion, bulk, RAV) |
+| **WAN Optimization (WAN-OPT)** | Optional: compression/dedupe to improve throughput |
+| **Network Extension (NE) appliance** | L2 extension of source networks to destination |
+| **Service Mesh** | Logical construct linking source and destination compute/network profiles; deploys IX/NE/WAN-OPT |
+| **Profiles** | **Compute, network, and storage profiles** define resources/networks used |
+| **Connectivity** | IP connectivity between sites over WAN, VPN or direct link (e.g., private line); ports and bandwidth planned |
+| **Mobility Optimized Networking (MON)** | Optimises routing for extended-network VMs to avoid hair-pinning via source gateway |
+| **Licensing / entitlement** | Verify under VCF 9.0 packaging |
+
+---
+
+## 3. Network Extension and Cutover Strategies
+
+| Strategy | Description | Pros | Cons | Use when |
+|---|---|---|---|---|
+| **Re-IP (change addresses)** | Assign new IPs on target networks; update DNS, firewalls, dependencies | Clean design; no stretched L2; strongest long-term architecture | App changes, DNS/firewall updates, longer planning, higher outage risk | Greenfield network design, hard-coded IP minimal, decommissioning source network |
+| **Layer 2 extension (HCX Network Extension)** | Stretch source VLAN/segment to NSX segment at target; VMs keep IP/MAC | **Keep IPs**; migrate VM-by-VM without app reconfig; low risk | Traffic **tromboning** through source gateway until network cutover (mitigate with **MON**); added latency; extra appliance and bandwidth; stretched failure domain; temporary state | Phased migration, IP-dependent apps, wave-based moves |
+| **Network cutover after migration** | Move subnet gateway to target (NSX T1/T0), then retire the extension | Final state without stretch; eliminate hair-pinning | Coordination, short outage of gateway change, must migrate all VMs in subnet first | End of a subnet's migration |
+| **Overlay (NSX) segments at target** | Pre-build target segments, T1 gateways, security policy | Consistent, automated, secure-by-default | Planning effort | Standard target design |
+| **VLAN-backed segments at target** | Use existing VLANs mapped into NSX VLAN segments | Easy attach to existing infrastructure | Less agility than overlay | Legacy/performance or transitional cases |
+| **Hybrid (re-IP most, extend selected)** | Extend only subnets with hard dependencies | Limits stretch footprint | More complexity | Mixed estates |
+| **DNS/CNAME/load-balancer based cutover** | Move service via DNS/VIP | Minimal app change | TTL management, app support | Web/app tiers |
+| **NSX Federation / stretched segments (VCF-to-VCF)** | Stretch overlay across VCF instances | Consistent policy and mobility between VCF sites | Complexity, latency, bandwidth | Moves between VCF instances/sites |
+
+**Design rules**
+- **Minimise the time networks stay extended**; extension is a **transitional** state, not a permanent architecture.
+- **Plan MON and gateway cutover** to avoid traffic tromboning and latency.
+- **Extended networks widen the failure domain**: the WAN link failing breaks connectivity between split application tiers. Migrate **whole application groups per wave** where possible.
+- **Match MTU** across the extension path (overlay and WAN, with HCX handling encapsulation) to avoid fragmentation.
+- **Bandwidth drives timeline**: estimate data size ÷ effective throughput; account for change rate and parallelism.
+- **Update firewall/NSX policy and DNS** as part of each wave.
+
+---
+
+## 4. Onboarding Workflow (End to End)
+
+| Phase | Activities | Outputs |
+|---|---|---|
+| **1. Assess and discover** | Inventory VMs/physical; dependency mapping; performance baselines; compatibility (OS, VM hardware version, VMware Tools, drivers, licensing); identify constraints (RDMs, pass-through, FT, shared disks, snapshots) | Application inventory, dependency map, risk list |
+| **2. Plan and design** | Disposition (6 Rs); target domain/tenant/cluster mapping; sizing/right-sizing; network strategy; migration method per workload; wave plan; downtime windows; rollback criteria | Migration plan, wave schedule, design decisions with implications |
+| **3. Prepare target** | Deploy/validate VCF target capacity; workload domains, clusters, NSX segments/T1/T0, DFW policies, storage policies, backup/DR, monitoring (VCF Operations), identity/RBAC; connectivity (VPN/direct link); deploy/pair HCX and service mesh; create profiles | Ready landing zone, validated connectivity |
+| **4. Pilot** | Migrate a small, low-risk wave; test performance, security, backup, monitoring; measure achieved throughput and downtime | Lessons learned, tuned runbook, go/no-go |
+| **5. Migrate in waves** | Pre-checks (snapshots removed, tools current, CD-ROM disconnected, disk consolidation); replicate/migrate; schedule switchover; cutover (network/DNS); validate | Migrated workloads per wave |
+| **6. Validate and accept** | Functional, performance, security and backup verification; business owner sign-off; monitor hypercare period | Acceptance records |
+| **7. Optimise and decommission** | Right-size, enable day-2 operations (VCF Operations, VCF Automation catalogue), retire source VMs/hosts/networks after retention period, reclaim licences, remove network extensions | Closed-out source, final topology |
+| **8. Govern** | Track progress, risks, issues, communications; update documentation and CMDB | Reporting, updated as-built documentation |
+
+### 4.1 Pre-Migration Checklist (VM level)
+- **VMware Tools/VM hardware version** supported by the target
+- **Snapshots removed**; no unsupported devices (RDMs, passthrough, FT, shared VMDK clustering) without special handling
+- **CPU/EVC compatibility** (for live moves)
+- **Backups current**; rollback path clear
+- **DNS/IP/firewall** change plan ready
+- **Licensing** (OS/app) valid on target
+- **Storage policy** mapped (vSAN policy at target)
+- **Dependencies** (other VMs/services) accounted for in the same wave
+
+### 4.2 Onboarding to the Consumption Model (VCF Automation)
+- Register migrated workloads under **tenants/projects** where applicable.
+- Apply **tags/labels** for NSX DFW policy, cost showback and lifecycle.
+- Align to **quotas/leases/governance**.
+- Add to **backup, monitoring and DR** policies (VCF Operations, backup, SRM/Live Site Recovery).
+
+---
+
+## 5. Capacity, Performance and Risk Considerations
+
+| Area | Guidance |
+|---|---|
+| **Target capacity** | Size for migrated workload **plus** HA headroom and temporary double-counting during replication/cutover |
+| **Bandwidth** | Estimated transfer time = data ÷ effective throughput; plan for change rate during replication; throttle to protect production links |
+| **Concurrency** | HCX/vMotion concurrent migration limits per mesh/appliance; scale with additional IX appliances/service meshes where needed |
+| **Right-sizing** | Adjust vCPU/memory/disk to actual usage during migration (avoid carrying over over-provisioning) |
+| **Storage policy mapping** | Map source datastores to vSAN storage policies (FTT/RAID) per tier |
+| **Time windows** | Align cutovers to business change windows; avoid month-end/peak |
+| **Risks** | Unknown dependencies, unsupported VM configs, bandwidth shortfall, extended-network tromboning, app licensing/IP binding, rollback complexity |
+| **Mitigations** | Discovery and dependency mapping, pilot wave, staged waves, rollback plan, bandwidth testing, early stakeholder engagement |
+
+---
+
+## 6. Scenario Cheat Sheet
+
+| Scenario | Design decision |
+|---|---|
+| Datacentre exit, hundreds of VMs, **no downtime**, keep IPs | **HCX RAV** + **Network Extension**, wave-based, MON, later gateway cutover |
+| Large estate, scheduled maintenance window, brief downtime acceptable | **HCX Bulk Migration** with scheduled switchover |
+| Few mission-critical VMs, zero downtime, good WAN | **HCX vMotion** (or cross-vCenter vMotion if connectivity/versions allow) |
+| Source and target in same campus, compatible versions, same SSO/trust | **Cross-vCenter vMotion** (no HCX needed) |
+| Old vSphere version incompatible with target features | **HCX** (cross-version support, verify) or cold migration |
+| Source is KVM/Hyper-V | **HCX OS Assisted Migration** or conversion/rebuild tools |
+| Powered-off VMs, templates, non-critical systems | **Cold migration** (simple) |
+| App hard-codes IPs and cannot be re-IP'd | **L2 extension**, then migrate whole subnet and cut over gateway |
+| Clean network redesign, minimal IP dependencies | **Re-IP** with DNS/firewall updates; avoid stretching |
+| Tromboning causing latency after extension | Enable **Mobility Optimized Networking**, accelerate subnet cutover |
+| Physical servers to onboard | **P2V** conversion, then treat as VM wave |
+| Database with native replication | **Application-level migration** (replicate, cutover with DNS), minimal downtime |
+| Compliance workloads must keep isolation after move | Land in dedicated workload domain, apply **DFW policy before cutover**, validate and document |
+| Migrating between two VCF instances/sites | **HCX** or vMotion/replication-based tooling; **NSX Federation** for consistent network/policy where required |
+| WAN bandwidth is limited | WAN-OPT, throttling, schedule off-peak, seed/offline transfer, or smaller waves |
+| Modern/containerised target | **Refactor** and redeploy via **VKS** and **VCF Automation**/IaC |
+
+---
+
+## 7. Migration Trade-offs (AMPRS Lens)
+
+| Choice | Improves | Costs |
+|---|---|---|
+| Zero-downtime methods (vMotion/RAV) | A (service continuity) | Infrastructure, bandwidth, tooling, complexity |
+| L2 extension | Speed, low app risk (M) | Tromboning (P), wider failure domain (A), temporary complexity |
+| Re-IP | Clean long-term network, security (S) | Planning, app/DNS change effort, outage risk |
+| Right-sizing during migration | P, cost | Analysis effort, risk of under-sizing |
+| Pilot + waves | Risk reduction | Longer timeline |
+| Dedicated domain for regulated workloads | S, compliance | Cost, overhead |
+| Cold migration | Simplicity | Downtime |
+| Keeping source until validated | R (rollback) | Dual running cost, capacity |
+
+---
+
+## 8. Exam Traps
+
+- **HCX Bulk has a brief reboot at switchover**; **RAV and HCX vMotion are live (no downtime)**. Don't confuse them.
+- **RAV = scale + zero downtime**; **HCX vMotion = one-at-a-time live**, not for mass migration.
+- **Network extension is temporary**: plan the gateway cutover and retire the extension.
+- **Tromboning** is the typical side effect of L2 extension; **MON** mitigates it.
+- **Cross-vCenter vMotion ≠ HCX**: native vMotion requires direct connectivity, version compatibility and latency limits; HCX removes many of those constraints.
+- **Don't migrate before retiring and right-sizing**; unnecessary workloads inflate scope.
+- **Apply NSX security policy before cutover**, not after.
+- **Unsupported configurations (RDMs, FT, shared disks, snapshots)** need special handling or exclusion.
+- **Always keep a rollback path** until acceptance is signed off.
+- **Bandwidth and change rate** determine migration time; test throughput in the pilot.
+
+---
+
+## 9. Quick Recall
+
+- **Process**: assess → plan (6 Rs, waves) → prepare target → pilot → migrate waves → validate → optimise/decommission.
+- **Tools**: **vMotion** (live, needs connectivity/compat), **cold** (simple, downtime), **HCX** (cross-site/version/scale: vMotion, Bulk, **RAV**, Cold, OSAM; service mesh with IX, NE, WAN-OPT), replication/SRM, P2V, app-level, rebuild via IaC.
+- **Network**: **re-IP** (clean) vs **L2 extension** (keep IPs, transitional) → MON, gateway cutover, retire extension; MTU and bandwidth planning.
+- **Security carry-over**: DFW policy, tags, RBAC, backup/DR and monitoring on target before or at cutover.
+- **Onboarding**: land in correct domain/tenant, tag, enrol in VCF Operations/Automation, right-size, decommission source after retention.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vcf9-architect/study-notes/10-security" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 10: Security Architecture & Zero-Trust Governance
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    VCF 9.0 Architect Track
+  </a>
+  <a href="/certifications/vmware/vcf9-architect/study-notes/12-consumption" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 12: Consumption Architecture & Private Cloud Self-Service →
+  </a>
+</div>

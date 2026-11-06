@@ -1,0 +1,241 @@
+---
+title: "Module 13: Authentication & Authorization: IAM, Secrets Manager & Lake Formation"
+description: "IAM roles and custom policies, least privilege, Secrets Manager vs Parameter Store, VPC security groups, PrivateLink, S3 Access Points, Redshift grants, Lake Formation, and ABAC/TBAC."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 13
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Tasks 4.1 and 4.2: authentication (VPC security groups, IAM groups/roles/endpoints, Secrets Manager rotation, role setup for Lambda/API Gateway/CLI/CloudFormation, S3 Access Points, PrivateLink, managed vs unmanaged services, SageMaker Unified Studio domains) and authorization (custom IAM policies, Parameter Store, Redshift users/groups/roles, Lake Formation, RBAC/TBAC/ABAC, least privilege) (Skills 4.1.1–4.1.7, 4.2.1–4.2.6).
+
+<Callout variant="info" title="Exam Blueprint Focus: Identity & Access (Domain 4 = 18%)">
+Default to **IAM roles with temporary credentials**, **least privilege**, **Secrets Manager** for rotating credentials, and **Lake Formation** for fine-grained lake access. Authentication = *who are you*; authorization = *what may you do*.
+</Callout>
+
+---
+
+## 1. Authentication Building Blocks (Skills 4.1.1–4.1.5)
+
+| Mechanism | Purpose | Key facts |
+|---|---|---|
+| **IAM users / groups** | Human identities and permission bundles | Prefer IAM Identity Center (SSO) + roles over long-lived users and access keys |
+| **IAM roles** | Temporary credentials for services, apps, and cross-account access | Trust policy (who can assume) + permissions policy (what they can do); `sts:AssumeRole` |
+| **Service roles / execution roles** | Let Glue, Lambda, EMR, Redshift, Step Functions, Firehose act on your behalf | Lambda execution role, Glue job role, EMR service role + EC2 instance profile, Redshift IAM roles for COPY/UNLOAD/Spectrum |
+| **Security groups** | Stateful instance-level virtual firewalls (allow rules only) | Allow inbound 5439 (Redshift), 3306/5432 (RDS), 9092/9094 (MSK) from specific SGs/CIDRs; Glue connections need a **self-referencing** rule |
+| **Network ACLs** | Stateless subnet-level rules (allow and deny) | Remember return traffic |
+| **VPC endpoints** | Private access to AWS services | **Gateway** (S3, DynamoDB, free) vs **Interface** (PrivateLink; most other services, hourly + data charges) |
+| **AWS PrivateLink** | Private connectivity to services/partners without internet | Endpoint policies restrict actions and resources |
+| **S3 Access Points** | Named endpoints with their own policy and optional VPC restriction | Scale policy management for shared buckets, one access point per team/application |
+| **Secrets Manager** | Store and automatically rotate credentials, API keys | Native rotation for RDS/Aurora/Redshift/DocumentDB; custom Lambda rotation; KMS encrypted; cross-Region replication |
+
+```
+ Glue job role ──(assume)──> S3 / KMS / Catalog access
+        │
+        ├── Glue connection (VPC subnet + SG) ──> RDS (SG allows 5432 from Glue SG)
+        └── Secrets Manager (get-secret-value) ──> DB credentials, auto-rotated by Lambda
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: IAM roles for Lambda, API Gateway, CLI, and CloudFormation (Skill 4.1.4)">
+
+* **Lambda:** *execution role* (permissions the function uses) trusted by `lambda.amazonaws.com`; resource-based *function policy* controls who may invoke it (for example S3, EventBridge, API Gateway).
+* **API Gateway:** IAM authorization (SigV4) for callers, Lambda authorizers, Cognito authorizers; for backends, an *execution role* lets API Gateway invoke Lambda or call AWS services directly; resource policies restrict by IP/VPC/account.
+* **AWS CLI / SDKs:** use named profiles with IAM Identity Center (`aws sso login`), `assume-role` profiles, or instance/task roles; avoid hard-coded access keys. Credential provider chain: env vars → profile → container/instance role.
+* **CloudFormation:** a **service role** can be passed to a stack (`--role-arn`) so deploying users need only `iam:PassRole` and stack permissions; `CAPABILITY_IAM` / `CAPABILITY_NAMED_IAM` acknowledges IAM resource creation.
+* `iam:PassRole` is the permission that lets a principal hand a role to a service; scope it by role ARN and `iam:PassedToService`.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Managed vs unmanaged services (Skill 4.1.6)">
+
+| Aspect | Managed (Glue, Athena, Redshift Serverless, DynamoDB, Kinesis) | Unmanaged / self-managed (Hadoop on EC2, Kafka on EC2, self-hosted DB) |
+|---|---|---|
+| AWS responsibility | Infrastructure, patching, HA, scaling, much of the security of the platform | Hardware only |
+| Your responsibility | Data, IAM, network config, encryption choices, app logic | OS, patching, runtime, scaling, backups, HA, encryption, all of the above |
+| Auth model | IAM-integrated | May need local users, Kerberos/LDAP, manual secrets |
+
+This follows the **shared responsibility model**: security *of* the cloud (AWS) vs security *in* the cloud (you).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: SageMaker Unified Studio domains, domain units, and projects (Skill 4.1.7)">
+
+* A **domain** is the top-level boundary for a Unified Studio deployment (identity via IAM Identity Center or IAM, shared catalog, governance). **Domain units** organize business units/teams hierarchically with delegated administration and policies. **Projects** are collaborative workspaces with a **project role** (an IAM role granting access to project resources), members/owners, and blueprints (environment templates for compute and storage).
+* Access to data assets flows through **subscriptions** and project membership, enforced via Lake Formation/Redshift grants, not by sharing credentials.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Authorization (Skills 4.2.1–4.2.6)
+
+### IAM policy types
+
+| Policy type | Attached to | Purpose |
+|---|---|---|
+| **AWS managed** | Identities | Convenient, broad (for example `AmazonS3ReadOnlyAccess`); often over-permissive |
+| **Customer managed** | Identities | Custom least privilege (Skill 4.2.1) |
+| **Inline** | One identity | Strict 1:1 embedded policy |
+| **Resource-based** | Resources (S3 bucket, KMS key, SQS, Lambda, Secrets) | Cross-account access without role assumption |
+| **Permission boundary** | User/role | Maximum permissions ceiling |
+| **SCP** (Organizations) | OU/account | Guardrails that cap what accounts can do (never grant) |
+| **Session policy** | Assumed session | Further restricts a session |
+
+**Evaluation logic:** explicit **Deny** always wins → otherwise need an explicit **Allow** (identity and/or resource policy; in cross-account both sides must allow for identity-based principals) → default deny. SCPs and boundaries must also allow.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "ReadCuratedOrders", "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::lake", "arn:aws:s3:::lake/curated/orders/*"] },
+    { "Sid": "DecryptWithLakeKey", "Effect": "Allow",
+      "Action": ["kms:Decrypt"], "Resource": "arn:aws:kms:us-east-1:111122223333:key/1111-2222",
+      "Condition": { "StringEquals": { "kms:ViaService": "s3.us-east-1.amazonaws.com" } } },
+    { "Sid": "DenyNonTLS", "Effect": "Deny", "Action": "s3:*",
+      "Resource": ["arn:aws:s3:::lake", "arn:aws:s3:::lake/*"],
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } } }
+  ]
+}
+```
+
+### Credential storage (Skill 4.2.2)
+
+| Feature | Secrets Manager | Systems Manager Parameter Store |
+|---|---|---|
+| Purpose | Secrets with lifecycle | Config values and secrets |
+| Automatic rotation | **Yes** (native for RDS, Redshift, DocumentDB; Lambda for others) | No (can rotate yourself) |
+| Encryption | Always KMS | `String`, `StringList`, **`SecureString`** (KMS) |
+| Cost | Per secret per month + API calls | Standard tier free; advanced tier charged |
+| Cross-account / replication | Yes (resource policies, multi-Region secrets) | Limited (advanced tier sharing) |
+| Pick when | DB credentials needing rotation | Cheap config/endpoints, non-rotating secrets |
+
+### Database-level authorization (Skill 4.2.3, Redshift)
+
+```sql
+CREATE USER analyst1 PASSWORD DISABLE;               -- IAM / federated auth, no password
+CREATE GROUP analysts;  ALTER GROUP analysts ADD USER analyst1;
+CREATE ROLE sales_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA sales TO ROLE sales_reader;
+GRANT ROLE sales_reader TO GROUP analysts;
+-- Column-level and row-level security
+GRANT SELECT (order_id, region, amount) ON sales.orders TO ROLE sales_reader;
+CREATE RLS POLICY region_policy WITH (region VARCHAR(20)) USING (region = 'EMEA');
+ATTACH RLS POLICY region_policy ON sales.orders TO ROLE sales_reader;
+-- Dynamic data masking
+CREATE MASKING POLICY mask_email WITH (email VARCHAR(256)) USING ('****@****.com'::VARCHAR(256));
+```
+
+Redshift supports **IAM identity federation**, **IAM Identity Center**, temporary credentials via `GetClusterCredentials`/`redshift-serverless:GetCredentials`, and **default IAM roles** for COPY/Spectrum.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: AWS Lake Formation permissions (Skill 4.2.4)">
+
+* Central **fine-grained access control** for the Glue Data Catalog and S3 data: grant `SELECT`, `INSERT`, `DELETE`, `ALTER`, `DROP`, `DESCRIBE` on **databases, tables, columns**, plus **row filters** and **cell-level** security via **data filters**.
+* **Register S3 locations** with Lake Formation using a service-linked or custom role; Lake Formation then vends **temporary credentials** to integrated engines (**Athena, Redshift Spectrum, EMR, Glue, Quick**).
+* **Permission model:** Lake Formation permissions *and* IAM permissions both apply unless the "Use only IAM access control" default is retained for existing databases. For new setups, turn off IAM-only default and use Lake Formation as the authority.
+* **LF-Tags (tag-based access control, TBAC):** tag databases/tables/columns (for example `sensitivity=pii`, `domain=sales`) and grant by tag expression; scales better than named-resource grants.
+* **Cross-account sharing** with LF grants (via RAM) and **resource links**. **Hybrid access mode** allows gradual migration.
+* **Data lake administrators** manage grants; use **grantable permissions** for delegation.
+
+```bash
+aws lakeformation grant-permissions \
+  --principal DataLakePrincipalIdentifier=arn:aws:iam::111122223333:role/AnalystRole \
+  --resource '{"TableWithColumns":{"DatabaseName":"curated","Name":"customers","ColumnNames":["id","region"]}}' \
+  --permissions SELECT
+```
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: RBAC vs TBAC vs ABAC (Skill 4.2.5)">
+
+| Model | Decision based on | AWS implementation | Scales when |
+|---|---|---|---|
+| **Role-based (RBAC)** | The role/job function of the principal | IAM roles/groups, Redshift roles, Lake Formation named grants | Stable job functions |
+| **Tag-based (TBAC)** | Tags on **resources** (and principals) | **LF-Tags**, IAM `aws:ResourceTag` conditions | Many datasets with consistent classification |
+| **Attribute-based (ABAC)** | Attributes of principal, resource, request, environment | IAM `aws:PrincipalTag`/`aws:ResourceTag` condition keys, session tags from IdP | Many teams/projects; avoids policy explosion |
+
+Example ABAC condition: allow if `aws:PrincipalTag/team` equals `s3:ResourceTag/team`.
+
+**Least privilege (Skill 4.2.6):** start with no access, grant only required actions on specific resources with conditions; use IAM Access Analyzer (policy generation from CloudTrail, unused access findings, policy validation), permission boundaries, and regular reviews.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Common Traps and Watchouts
+
+* **"Rotate database credentials automatically"** → Secrets Manager, not Parameter Store.
+* **"Cheapest place for non-secret config"** → Parameter Store standard.
+* **"Column- or row-level access across Athena/Redshift/EMR"** → Lake Formation, not bucket policies.
+* **"Thousands of datasets with consistent classification"** → LF-Tags / ABAC.
+* **"Private access to S3 from a VPC"** → Gateway endpoint (free); Interface endpoint when on-prem/private reach or PrivateLink is required.
+* **Security group is stateful allow-only;** NACLs are stateless.
+* **Explicit deny overrides everything.**
+* **Do not embed access keys** in code, AMIs, or templates; use roles.
+* **Cross-account access** needs both a trust/resource policy and an identity policy allowing the action.
+* **`iam:PassRole` missing** is a common cause of "cannot create Glue job/Lambda/Step Function."
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can pick the right credential store and explain rotation.
+<details>
+<summary>Explanation</summary>
+
+Secrets Manager for secrets needing automatic rotation (native for RDS/Aurora/Redshift/DocumentDB, Lambda-based otherwise). Parameter Store for configuration and simple encrypted values at lower cost.
+
+</details>
+
+- [ ] I can design a least-privilege role for a Glue job reading S3 and writing to Redshift.
+<details>
+<summary>Explanation</summary>
+
+Trust `glue.amazonaws.com`; allow `s3:GetObject/ListBucket` on specific prefixes, `kms:Decrypt/GenerateDataKey` on the key, Glue Catalog actions, `secretsmanager:GetSecretValue` on the DB secret, and network/ENI actions through the Glue service policy. Scope by ARN and condition.
+
+</details>
+
+- [ ] I can explain how Lake Formation and IAM interact and when to use LF-Tags.
+<details>
+<summary>Explanation</summary>
+
+Lake Formation grants fine-grained catalog/S3 access and vends temporary credentials to integrated engines; the principal's IAM policy must still permit the underlying Lake Formation/Glue actions. LF-Tags provide scalable tag-based access control for many resources.
+
+</details>
+
+- [ ] I can distinguish RBAC, TBAC, and ABAC with AWS examples.
+<details>
+<summary>Explanation</summary>
+
+RBAC: IAM roles/groups. TBAC: LF-Tags or resource tags. ABAC: policy conditions comparing principal and resource attributes (`aws:PrincipalTag` vs `aws:ResourceTag`).
+
+</details>
+
+- [ ] I can choose between gateway endpoints, interface endpoints, PrivateLink, and S3 Access Points.
+<details>
+<summary>Explanation</summary>
+
+Gateway endpoints for S3/DynamoDB private routing at no cost. Interface endpoints (PrivateLink) for other services or private/on-prem access. S3 Access Points simplify per-application policies and can be restricted to a VPC.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/12-data-quality-sampling-skew" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 12: Data Quality: Glue Data Quality, DataBrew Rules, Sampling & Skew
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/14-encryption-kms-masking-macie" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 14: Encryption, KMS, Data Masking & PII Discovery →
+  </a>
+</div>

@@ -1,0 +1,170 @@
+---
+title: "Module 08: High Availability & Reliability: Load Balancing, Scaling & Failover"
+description: "ELB types, Auto Scaling policies and warm pools, Multi-AZ database behavior, Route 53 routing policies, quotas and designing for failure."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 8
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** ELB types, Auto Scaling policies and warm pools, Multi-AZ database behavior, Route 53 routing policies, quotas and designing for failure.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 2.4 and 3.4 Reliability">
+Know exactly how each managed service fails over, how long it takes, and what the client experiences. Combine load balancing, Auto Scaling, Multi-AZ data stores, DNS routing policies and service quotas into designs with no single point of failure.
+</Callout>
+
+---
+
+## 1. Elastic Load Balancing Selection
+
+| Type | Layer | Key features | Choose when |
+|---|---|---|---|
+| Application Load Balancer | 7 | Host/path/header routing, Lambda and IP targets, OIDC/Cognito auth, WAF, gRPC, weighted target groups | HTTP/HTTPS microservices, containers, blue/green by weight |
+| Network Load Balancer | 4 | Ultra-low latency, millions of requests per second, static or Elastic IP per AZ, preserves source IP, TLS termination, PrivateLink provider | TCP/UDP/TLS, fixed IPs for firewall allow lists, PrivateLink |
+| Gateway Load Balancer | 3 | Transparent inline appliances, GENEVE port 6081 | Third-party firewalls and IDS/IPS |
+| Classic | 4/7 | Legacy | Not the answer for new designs |
+
+- **Cross-zone load balancing:** enabled by default for ALB (can be disabled per target group); disabled by default for NLB and GWLB (inter-AZ data charges apply when enabled).
+- **Connection draining / deregistration delay:** lets in-flight requests finish.
+- **Slow start, sticky sessions (cookie based), health checks** per target group.
+- ALB with NLB in front (ALB-type target group) gives static IPs plus L7 routing.
+
+## 2. Auto Scaling Policies
+
+| Policy | Behavior | Notes |
+|---|---|---|
+| Target tracking | Maintain a metric at a target (for example 50% CPU or RequestCountPerTarget) | Simplest and recommended default |
+| Step scaling | Different adjustments for alarm breach sizes | More control for bursty load |
+| Simple scaling | Single adjustment with cooldown | Legacy |
+| Scheduled | Time-based capacity | Known peaks |
+| Predictive | ML forecasts from history to scale ahead | Cyclical patterns |
+
+Other features: **lifecycle hooks** (pause at launching/terminating to run scripts), **warm pools** (pre-initialized instances to shorten scale-out latency), **instance refresh** (rolling replacement for AMI updates), **mixed instances policy** (multiple types and On-Demand/Spot split with capacity-optimized allocation), **scale on SQS backlog per instance** (custom metric), termination policies, and AZ rebalancing.
+
+```bash
+aws autoscaling put-scaling-policy --auto-scaling-group-name web --policy-name cpu50 \
+  --policy-type TargetTrackingScaling \
+  --target-tracking-configuration '{"PredefinedMetricSpecification":{"PredefinedMetricType":"ASGAverageCPUUtilization"},"TargetValue":50}'
+aws autoscaling put-warm-pool --auto-scaling-group-name web --pool-state Stopped
+```
+
+## 3. Data Tier High Availability
+
+| Service | Within-Region HA | Failover | Notes |
+|---|---|---|---|
+| RDS Multi-AZ instance | Synchronous standby in another AZ | Automatic, typically 60-120 seconds, same DNS endpoint | Standby is not readable; it improves availability, not read scaling |
+| RDS Multi-AZ DB cluster (MySQL/PostgreSQL) | One writer + two readable standbys across 3 AZs | Typically about 35 seconds or less | Readable standbys and lower write latency |
+| Aurora | Shared storage with 6 copies across 3 AZs; up to 15 replicas | Promotes a replica, typically under a minute (often around 30 seconds) | Use the cluster endpoint (writer) and reader endpoint (load balanced replicas); custom endpoints for subsets |
+| Aurora Serverless v2 | Scales capacity in fine increments | Same cluster HA | Variable or unpredictable workloads |
+| RDS Proxy | Pools connections, preserves connections during failover | Reduces failover time substantially | Essential for Lambda to relational databases |
+| DynamoDB | 3 AZs automatically | None needed | Global tables for multi-Region |
+| ElastiCache Redis | Multi-AZ with replicas and automatic failover | Seconds to a minute | Memcached has no replication |
+| OpenSearch | Multi-AZ with standby, dedicated masters | Automatic | 3 AZs for production |
+| EFS / S3 | Multi-AZ by default | n/a | One Zone variants are single AZ |
+
+<Callout variant="warning" title="Exam Trap: Read Replicas vs Multi-AZ">
+Read replicas (async) scale reads and can be promoted for DR, but they are not an automatic HA mechanism for RDS non-Aurora engines. Multi-AZ gives automatic failover but its standby (classic Multi-AZ) serves no reads. Aurora replicas serve both: they scale reads AND are failover targets.
+</Callout>
+
+## 4. DNS Routing Policies (Route 53)
+
+| Policy | Use |
+|---|---|
+| Simple | Single resource; multiple values returned randomly with no health checks |
+| Weighted | Percent-based splits, blue/green or canary at DNS level |
+| Latency-based | Route to the Region with lowest measured latency |
+| Failover | Active/passive with health checks |
+| Geolocation | Route by user location (compliance, localization); needs a default record |
+| Geoproximity | Route by geographic distance with bias, via Traffic Flow |
+| Multivalue answer | Up to 8 healthy records returned, basic client-side load balancing |
+| IP-based | Route by client CIDR (for example by ISP) |
+
+Alias records: free for queries to AWS resources, work at the zone apex, follow target health ("evaluate target health"). Health checks can be combined with calculated or CloudWatch-alarm checks.
+
+## 5. Designing for Failure
+
+```
+ Route 53 (health checks) --> CloudFront/ALB (multi-AZ) --> ASG across 3 AZs (stateless)
+                                      |
+                         SQS buffer --+--> workers (scale on backlog)
+                                      |
+                  Aurora writer + replicas in 3 AZs  /  ElastiCache replicas
+```
+
+Principles: remove single points of failure (one NAT gateway per AZ, redundant VPN tunnels, multiple DX), loose coupling (queues, event buses), idempotent operations and retries with exponential backoff and jitter, graceful degradation, health checks that verify dependencies sensibly (shallow vs deep), static stability (keep running without control plane calls), and cell-based isolation to limit blast radius.
+
+**Service quotas and limits:** defaults are per Region per account. Use **Service Quotas** to view and request increases, CloudWatch usage metrics and alarms on quota utilization, Trusted Advisor service limit checks, and plan for DR Regions (quota in the recovery Region must be raised in advance). Examples: Lambda account concurrency, EC2 vCPU by instance family, VPCs per Region, Elastic IPs, Kinesis shards per Region.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Retries, Backoff and Throttling Storms">
+
+Without jitter, synchronized retries create thundering herds that prolong an outage. AWS SDKs implement exponential backoff with jitter. Combine with SQS (buffering), circuit breakers, and request quotas (API Gateway throttling, Lambda reserved concurrency) to protect downstream databases.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Aurora Endpoints and Failover Behavior">
+
+Cluster endpoint always points at the writer; after failover its DNS record changes (apps must respect low DNS TTL, JVM DNS caching is a classic issue). Reader endpoint load-balances across replicas. Failover priority (tiers 0-15) decides which replica is promoted; matching replica size to the writer avoids a performance drop after promotion. RDS Proxy or the AWS JDBC wrapper drivers speed up reconnection.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 6. Common Traps & Distractors
+
+- "Need fixed IP addresses for partner allow lists with load balancing": NLB with Elastic IPs (or Global Accelerator).
+- "Lambda exhausting database connections": RDS Proxy.
+- "Spike each morning at 9": scheduled or predictive scaling, with warm pools for slow boot.
+- "Users in Europe must stay in EU endpoints": geolocation routing; "lowest latency": latency-based routing.
+- "Single NAT gateway for all AZs": an AZ-level single point of failure and cross-AZ charges.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can explain differences in failover behavior between RDS Multi-AZ, Multi-AZ DB cluster and Aurora.
+<details>
+<summary>Explanation</summary>
+
+Classic Multi-AZ uses a synchronous non-readable standby and fails over in about a minute or two. Multi-AZ DB clusters have two readable standbys and fail over in roughly 35 seconds or less. Aurora uses shared storage across 3 AZs and promotes a replica, typically in under a minute, and its replicas also serve reads.
+
+</details>
+
+- [ ] I can choose the right ELB type for static IPs, path routing and appliance insertion.
+<details>
+<summary>Explanation</summary>
+
+NLB for static/Elastic IPs and TCP/UDP; ALB for path and host-based routing and HTTP features; GWLB for transparent third-party network appliance insertion.
+
+</details>
+
+- [ ] I can select between target tracking, step and predictive scaling.
+<details>
+<summary>Explanation</summary>
+
+Target tracking for steady proportional response with minimal tuning; step scaling for fine-grained response sizes; predictive scaling for recurring daily/weekly patterns where scaling must lead the demand; combine with scheduled scaling for known events.
+
+</details>
+
+- [ ] I can plan for service quotas in a DR Region.
+<details>
+<summary>Explanation</summary>
+
+Quotas are Region-specific. Request increases in the DR Region ahead of time (vCPUs, Lambda concurrency, Elastic IPs, etc.), monitor utilization with CloudWatch alarms, and validate through drills, since failover that hits a default quota would fail.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/07-iac-cicd-deployment-strategies" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 07: Infrastructure as Code, CI/CD & Deployment Strategies
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/09-security-services-edge-protection" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 09: Security Services & Edge Protection: GuardDuty, Security Hub, WAF, Shield & Network Firewall →
+  </a>
+</div>

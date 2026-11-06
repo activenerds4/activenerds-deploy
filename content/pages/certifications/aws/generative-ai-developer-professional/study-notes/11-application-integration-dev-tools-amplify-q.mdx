@@ -1,0 +1,195 @@
+---
+title: "Module 11: Application Integration Patterns & Developer Tooling"
+description: "Amplify, OpenAPI, Prompt Flows no-code, Bedrock Data Automation, Amazon Q Developer, and GenAI troubleshooting aids (Tasks 2.5.2-2.5.6)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 11
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 2.5, Skills 2.5.2 - 2.5.6: accessible AI interfaces, business system enhancements, developer productivity, advanced GenAI application orchestration, and troubleshooting efficiency for FM applications.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 2, Task 2.5">
+These skills are broad and service-heavy. Match the goal to the tool: **Amplify** for front ends, **OpenAPI** for API-first design, **Prompt Flows** for no-code workflows, **Bedrock Data Automation** for multimodal extraction, **Amazon Q Developer** for coding assistance, **CloudWatch Logs Insights and X-Ray** for troubleshooting.
+</Callout>
+
+---
+
+## 1. Accessible AI Interfaces (Skill 2.5.2)
+
+| Approach | Service | Value |
+|---|---|---|
+| Declarative UI components for chat and AI features | **AWS Amplify** (including AI kit and UI components), hosting, auth, and data integration | Fast front-end delivery with Cognito auth built in |
+| API-first development | **OpenAPI specifications** | Contract defined first; API Gateway import, generated SDKs/clients, mock servers, agent action-group schemas |
+| No-code / low-code workflows | **Bedrock Prompt Flows**, Amazon Q Business apps, Amazon Quick | Business users compose AI workflows without code |
+| Real-time UI data | AWS AppSync (GraphQL subscriptions) | Push model output updates to clients |
+
+```yaml
+openapi: 3.0.3
+info: { title: Summarizer API, version: "1.0" }
+paths:
+  /summaries:
+    post:
+      operationId: createSummary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 20000 }
+      responses:
+        "200": { description: Summary created }
+```
+
+The same OpenAPI document can define an **API Gateway** API, drive client generation, and serve as the **action group schema** for a Bedrock agent, which is why API-first is a recurring exam theme.
+
+---
+
+## 2. Business System Enhancements (Skill 2.5.3)
+
+| Scenario | Implementation |
+|---|---|
+| CRM enrichment (summaries of customer history, suggested replies) | Lambda triggered by CRM webhook or EventBridge calls Bedrock, writes results back |
+| Document processing at scale (intake, extraction, classification) | Step Functions orchestrates Textract/Data Automation, Bedrock summarization, validation, human review, and storage |
+| Automated multimodal data processing | **Amazon Bedrock Data Automation (BDA)** extracts structured output from documents, images, audio, and video with defined blueprints |
+| Email and ticket triage | EventBridge or SQS-triggered Lambda classifies and routes |
+
+```
+S3 (invoice PDF) --> EventBridge --> Step Functions
+   --> BDA/Textract extract --> Bedrock validate + normalize
+   --> Choice: confidence low? --> human review (A2I) / high --> write to ERP API
+   --> DynamoDB audit record
+```
+
+---
+
+## 3. Developer Productivity (Skill 2.5.4)
+
+**Amazon Q Developer** accelerates GenAI application development:
+
+| Capability | Use |
+|---|---|
+| Code generation and completion | Scaffold Lambda handlers, Bedrock calls, CDK stacks |
+| Refactoring and upgrades | Modernize code, apply patterns |
+| API assistance | Suggestions for AWS SDK usage |
+| Test generation | Unit tests for AI components |
+| Performance optimization hints | Identify inefficient calls |
+| Troubleshooting | Explain errors and suggest fixes in the console and IDE |
+
+Also in scope for development workflows: **Kiro** (an agentic IDE/spec-driven development tool), AWS CDK, CloudFormation, and the AWS CLI and SDKs.
+
+---
+
+## 4. Advanced GenAI Applications (Skill 2.5.5)
+
+| Pattern | AWS implementation |
+|---|---|
+| AWS-native multi-agent orchestration | **Strands Agents** and **AWS Agent Squad**; deploy on AgentCore, Lambda, or containers |
+| Orchestrated agent design patterns | **Step Functions** implementing supervisor/worker, parallel fan-out with Map, or evaluator-optimizer loops |
+| Prompt chaining | **Bedrock** prompt chains in code or Prompt Flows |
+| Evaluator-optimizer | Generator model produces output; evaluator model scores; loop until threshold or max iterations |
+
+```
+Supervisor agent --> delegates in parallel (Step Functions Map)
+     |-- research agent (KB + web tool)
+     |-- data agent (SQL via Athena tool)
+     '-- writer agent
+ --> aggregator/judge --> final answer
+```
+
+---
+
+## 5. Troubleshooting Efficiency (Skill 2.5.6)
+
+| Tool | Purpose |
+|---|---|
+| **CloudWatch Logs Insights** | Query prompts, responses, latency, and error fields across log groups |
+| **X-Ray** | Trace the request path through API Gateway, Lambda, and Bedrock calls to find latency sources |
+| **Amazon Q Developer** | Interpret GenAI-specific error patterns and suggest remediation |
+| Bedrock model invocation logging | Capture full request/response metadata (must be enabled) |
+
+```
+# CloudWatch Logs Insights: slowest, highest-token requests in the last hour
+fields @timestamp, modelId, input.inputTokenCount, output.outputTokenCount, @message
+| filter ispresent(modelId)
+| stats avg(output.outputTokenCount) as avgOut, max(output.outputTokenCount) as maxOut, count(*) as n by modelId
+| sort maxOut desc
+```
+
+Field names depend on your invocation log format; inspect a sample record first.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why Logs Insights and X-Ray answer different questions">
+
+Logs Insights answers **what** happened in aggregate or per record (which prompts produced errors, which model had the highest tokens). X-Ray answers **where** time was spent along one request path (gateway, Lambda init, Bedrock call, retrieval). Use both: find a bad pattern with Logs Insights, then open representative traces in X-Ray to localize latency or failure.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 6. Exam Traps & Common Distractors
+
+- **Trap 1:** Building a custom UI framework when Amplify components meet the need.
+- **Trap 2:** Writing separate hand-built schemas for API Gateway and agents when one OpenAPI document serves both.
+- **Trap 3:** Choosing Prompt Flows for flows needing human approval and durable waits.
+- **Trap 4:** Expecting invocation logs without enabling model invocation logging.
+- **Trap 5:** Using X-Ray alone to analyze prompt content patterns across thousands of requests.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can explain the benefits of an API-first approach with OpenAPI.
+<details>
+<summary>Explanation</summary>
+
+A single contract drives API Gateway configuration, validation, client SDK generation, mocks, and Bedrock agent action group schemas, keeping all consumers consistent and enabling parallel development.
+
+</details>
+
+- [ ] I can design an intelligent document processing workflow.
+<details>
+<summary>Explanation</summary>
+
+S3 event triggers Step Functions; Textract or Bedrock Data Automation extracts content; an FM validates and normalizes; low-confidence items route to human review; results go to the business system with an audit trail.
+
+</details>
+
+- [ ] I can describe how Amazon Q Developer helps and where it fits.
+<details>
+<summary>Explanation</summary>
+
+It generates and refactors code, suggests SDK usage, creates tests, flags optimizations, and helps diagnose errors, speeding development of GenAI applications. It assists developers; it is not a runtime component of your application.
+
+</details>
+
+- [ ] I can pick CloudWatch Logs Insights versus X-Ray for a diagnostic task.
+<details>
+<summary>Explanation</summary>
+
+Logs Insights to query and aggregate prompt/response and error data across many requests; X-Ray to trace one request's path and latency across services including Bedrock calls.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/10-fm-api-integration-streaming-resilience-routing" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 10: FM API Integration: Sync/Async, Streaming, Resilience & Intelligent Routing
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/12-input-output-safety-guardrails-threat-detection" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 12: Input & Output Safety: Guardrails, Hallucination Control & Threat Detection →
+  </a>
+</div>

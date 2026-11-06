@@ -1,0 +1,172 @@
+---
+title: "Module 15: Cost-Optimized Compute & Database Solutions"
+description: "Savings Plans, Reserved Instances, Spot, right-sizing, Graviton, serverless economics, and database cost levers."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 15
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Tasks 4.2 and 4.3 — EC2 purchasing options, Savings Plans, Spot, right-sizing, Graviton, hibernation, serverless economics, Outposts, and database cost levers (engine choice, capacity mode, backups, replicas, caching)
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 4, Tasks 4.2 and 4.3 — Cost-optimized compute and database solutions">
+Pair the workload profile with the purchasing model: steady and predictable gets commitments, interruptible and flexible gets Spot, spiky and event-driven gets serverless, and short unpredictable gets On-Demand. Also match availability needs to the workload class: non-production rarely needs Multi-AZ.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Savings Plans versus Reserved Instances">
+
+* **Compute Savings Plans:** commit to a USD per hour spend for 1 or 3 years; apply automatically across EC2 (any family, size, Region, OS, tenancy), AWS Fargate, and AWS Lambda; savings up to about 66%.
+* **EC2 Instance Savings Plans:** lock to an instance family in a Region for deeper discounts (up to about 72%) with flexibility across size, OS, and tenancy within that family.
+* **Standard Reserved Instances:** up to about 72% off, tied to attributes such as instance type and Region; can be sold on the Reserved Instance Marketplace. **Convertible RIs** allow changing attributes for somewhat lower discounts.
+* **Scope:** a *Regional* RI applies discounts across AZs and offers flexibility; a *zonal* RI additionally reserves capacity in one AZ.
+* Payment options: all upfront, partial upfront, no upfront (more upfront means a higher discount).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Spot Instances">
+
+Spot uses spare capacity at up to about 90% off On-Demand, but AWS can reclaim capacity with a **two-minute interruption notice**. Use for stateless, fault-tolerant, flexible workloads: batch, CI/CD, big data (EMR task nodes), containers, and rendering. Diversify across instance types and AZs, use Auto Scaling mixed instances policies or Spot Fleet with the price-capacity-optimized allocation strategy, and checkpoint work or use queues. Never use Spot for the only copy of critical state or strict-SLA singletons.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Purchasing option | Commitment | Best for | Risk |
+|---|---|---|---|
+| On-Demand | None | Short, unpredictable, new workloads | Highest price |
+| Compute Savings Plan | 1 or 3 years of hourly spend | Steady usage with changing architecture (EC2, Fargate, Lambda) | Underuse of commitment still billed |
+| EC2 Instance Savings Plan / Standard RI | 1 or 3 years, family and Region | Stable, well-known workloads | Less flexible |
+| Spot | None | Interruptible, flexible workloads | Interruptions |
+| Dedicated Hosts | On-Demand or reserved | BYOL licensing by socket or core, compliance | Higher cost |
+| Capacity Reservations | None (billed while reserved) | Guarantee capacity in an AZ | Pay even when unused |
+
+| Compute service | Most cost-effective when |
+|---|---|
+| Lambda | Spiky, event-driven, or low-utilization; pay per request and GB-second; Arm (Graviton) functions cost less per millisecond |
+| Fargate | Variable container loads, no cluster management; Fargate Spot for interruptible tasks |
+| EC2 with Savings Plans | Steady, high-utilization workloads; ECS or EKS on EC2 for dense bin-packing |
+| AWS Batch on Spot | Large queued batch jobs |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+Right-sizing and elasticity loop
+
+ Measure (CloudWatch, Compute Optimizer) --> Right-size family/size (Graviton? newer generation?)
+          |                                                  |
+          v                                                  v
+ Scale to demand (Auto Scaling, scheduled stop of non-prod) --> Commit steady baseline (Savings Plan)
+          |                                                  |
+          +---------- run variable/fault-tolerant on Spot <--+
+ Monitor (Cost Explorer, Budgets) -----------------------------> repeat
+```
+
+**Cost-saving techniques:** stop or schedule non-production environments outside business hours; use **EC2 hibernation** to preserve in-memory state and avoid restart time (instance RAM written to an encrypted root EBS volume; requires supported instance types and size limits); choose **Graviton** (Arm) instances for better price-performance when software supports Arm; use AWS Compute Optimizer recommendations; use **AWS Outposts** only when on-premises placement or low latency is mandatory.
+
+### Database cost levers
+
+| Lever | Detail |
+|---|---|
+| Engine choice | Open-source engines (Aurora, PostgreSQL, MySQL, MariaDB) avoid commercial licensing; use DMS plus Schema Conversion Tool to migrate from Oracle or SQL Server; BYOL with License Manager when you must keep licenses |
+| Instance purchasing | RDS and ElastiCache Reserved Instances for steady workloads; DynamoDB reserved capacity for provisioned tables |
+| Serverless | Aurora Serverless v2 for variable or infrequent workloads; DynamoDB on-demand for unpredictable traffic; DynamoDB provisioned with auto scaling for steady traffic |
+| Tables and storage | DynamoDB Standard-IA table class for infrequently accessed data; TTL to expire old items; gp3 storage for RDS; Aurora I/O-Optimized when I/O charges are a large share of spend (commonly cited threshold: above roughly a quarter of total cost) |
+| Availability class | Multi-AZ for production only; single-AZ for dev and test; stop non-production RDS instances when idle (RDS auto-restarts a stopped instance after up to 7 days) |
+| Caching | ElastiCache or DAX reduces read capacity and instance size needs; cheaper than scaling the database for repeated reads |
+| Backups and retention | RDS automated backup storage is free up to the size of provisioned storage; tune retention days and snapshot frequency; delete manual snapshots you no longer need |
+| Right data type | Columnar warehouse (Redshift) for analytics instead of oversized OLTP; time series data in a time series optimized store or DynamoDB with TTL and tiering instead of one large relational table |
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```bash
+# Auto Scaling group mixing On-Demand base and Spot (diversified)
+aws autoscaling create-auto-scaling-group --auto-scaling-group-name batch-asg \
+  --min-size 2 --max-size 40 --vpc-zone-identifier "subnet-a,subnet-b,subnet-c" \
+  --mixed-instances-policy '{
+    "LaunchTemplate":{"LaunchTemplateSpecification":{"LaunchTemplateId":"lt-0abc","Version":"$Latest"},
+      "Overrides":[{"InstanceType":"c6g.large"},{"InstanceType":"c6i.large"},{"InstanceType":"c5.large"}]},
+    "InstancesDistribution":{"OnDemandBaseCapacity":2,"OnDemandPercentageAboveBaseCapacity":0,
+      "SpotAllocationStrategy":"price-capacity-optimized"}}'
+
+# Stop a non-production RDS instance outside working hours
+aws rds stop-db-instance --db-instance-identifier dev-db
+
+# Change DynamoDB table class to Standard-IA
+aws dynamodb update-table --table-name AuditLog --table-class STANDARD_INFREQUENT_ACCESS
+```
+
+**Decision shortcut:** run the **baseline** on Savings Plans or Reserved Instances, the **burst** on On-Demand or Spot, and **event-driven pieces** on Lambda.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Buying Reserved Instances for a workload that will change instance families or move to containers or Lambda. Compute Savings Plans cover that flexibility.
+- **Trap 2:** Running databases or stateful singletons on Spot.
+- **Trap 3:** Using Dedicated Hosts when no licensing or compliance requirement exists.
+- **Trap 4:** Over-provisioning for peak with always-on instances instead of Auto Scaling and scheduled shutdown for non-production.
+- **Trap 5:** Choosing Multi-AZ and read replicas for every environment regardless of requirement.
+- **Trap 6:** Using Lambda for high-utilization, constant, long-running compute where EC2 with a commitment is cheaper.
+- **Trap 7:** Keeping a commercial database engine when the stem asks to eliminate licensing costs and the app can move to Aurora.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can recommend a purchasing model for steady, spiky, and interruptible workloads.
+<details>
+<summary>Explanation</summary>
+
+Steady baseline: Savings Plans or Reserved Instances. Spiky or short-lived unpredictable: On-Demand or serverless. Fault-tolerant, flexible batch: Spot with diversified instance types. Combining them in an Auto Scaling group with a mixed instances policy is a common best practice.
+
+</details>
+
+- [ ] I can compare Compute Savings Plans, EC2 Instance Savings Plans, and Reserved Instances.
+<details>
+<summary>Explanation</summary>
+
+Compute Savings Plans are the most flexible (any EC2 family or Region, plus Fargate and Lambda) with slightly lower maximum discounts. EC2 Instance Savings Plans give deeper discounts but lock to a family and Region. Standard RIs are similar in discount but tied to specific attributes, and Convertible RIs trade some discount for the ability to change attributes.
+
+</details>
+
+- [ ] I can pick compute services based on utilization and operational overhead.
+<details>
+<summary>Explanation</summary>
+
+Use Lambda for intermittent event-driven work, Fargate for containers without server management, EC2 with commitments for constant high utilization, and Batch with Spot for large batch jobs. Right-size using Compute Optimizer and consider Graviton for price-performance.
+
+</details>
+
+- [ ] I can lower database cost without hurting requirements.
+<details>
+<summary>Explanation</summary>
+
+Match capacity mode to traffic (on-demand versus provisioned with auto scaling, Aurora Serverless v2), use Multi-AZ only where availability demands it, add caching to cut read cost, purchase reserved capacity for steady databases, adjust backup retention, and migrate off commercial engines when licensing is the driver.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/14-cost-optimized-storage-transfer" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 14: Cost-Optimized Storage & Data Transfer
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/16-cost-optimized-networking-governance" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 16: Cost-Optimized Networking, Cost Governance & Final Playbook →
+  </a>
+</div>

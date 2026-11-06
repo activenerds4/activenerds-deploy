@@ -1,0 +1,269 @@
+---
+title: "Module 12: Infrastructure as Code: CloudFormation, AWS SAM & AWS CDK"
+description: "Template anatomy, intrinsic functions, change sets, SAM transform and CLI, CDK constructs, and Lambda packaging methods."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 12
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Testing and Deployment
+
+<Callout variant="info" title="Exam Focus: Testing and Deployment (Skills 3.3.1, 3.3.3, 3.3.7)">
+Use IaC templates (CloudFormation, SAM), choose Lambda packaging methods, and implement rollbacks. **Designing** CI/CD pipelines and architectures is out of scope, but you must read, write, and debug templates, and know what the SAM and CDK CLIs do.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: How SAM and CDK Relate to CloudFormation">
+
+Both tools **compile down to CloudFormation**. CloudFormation is the deployment engine that creates, updates, and deletes a **stack**.
+
+* **SAM:** a CloudFormation **transform** (`AWS::Serverless-2016-10-31`). Shorthand resource types such as `AWS::Serverless::Function` expand into Lambda, IAM roles, API Gateway, event source mappings, and more when the stack is created.
+* **CDK:** write infrastructure in a programming language; `cdk synth` generates a CloudFormation template (stored under `cdk.out`), and `cdk deploy` runs it through CloudFormation.
+
+* **Exam Trap:** "Deploy a template with a transform or nested IAM roles and get `InsufficientCapabilitiesException`" → pass `--capabilities CAPABILITY_IAM` (or `CAPABILITY_NAMED_IAM`, `CAPABILITY_AUTO_EXPAND` for macros and transforms).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. CloudFormation Template Anatomy
+
+| Section | Required? | Purpose |
+|---|---|---|
+| `AWSTemplateFormatVersion` | No | Template version (`2010-09-09`) |
+| `Description` | No | Text |
+| `Metadata` | No | Extra info, console grouping |
+| `Parameters` | No | Inputs at deploy time (`Type`, `Default`, `AllowedValues`, `NoEcho`) |
+| `Mappings` | No | Static lookup tables (`Fn::FindInMap`), for example AMI by Region |
+| `Conditions` | No | Create resources conditionally (`Fn::If`, `Fn::Equals`) |
+| `Transform` | No | Macros such as `AWS::Serverless-2016-10-31` |
+| **`Resources`** | **Yes** | The AWS resources |
+| `Outputs` | No | Values to display or **export** for other stacks |
+
+**Intrinsic functions:** `!Ref` (parameter value or resource ID), `!GetAtt` (resource attribute such as ARN), `!Sub` (string substitution with `${}`), `!Join`, `!Select`, `!Split`, `!FindInMap`, `!If`, `!ImportValue` (consume another stack's export), `!Base64`. **Pseudo parameters:** `AWS::Region`, `AWS::AccountId`, `AWS::StackName`, `AWS::StackId`, `AWS::NoValue`.
+
+```yaml
+Parameters:
+  Env: { Type: String, AllowedValues: [dev, prod], Default: dev }
+Conditions:
+  IsProd: !Equals [!Ref Env, prod]
+Resources:
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub "orders-${Env}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: !If [IsProd, Enabled, Suspended]
+Outputs:
+  BucketArn:
+    Value: !GetAtt Bucket.Arn
+    Export: { Name: !Sub "${AWS::StackName}-BucketArn" }
+```
+
+### Stack Lifecycle Features
+
+| Feature | Use |
+|---|---|
+| **Change sets** | **Preview** what an update will create, modify, or replace before executing |
+| **Drift detection** | Find resources changed outside CloudFormation |
+| **DeletionPolicy** | `Delete` (default), `Retain`, `Snapshot` (for volumes, RDS, etc.) on stack or resource deletion |
+| **UpdateReplacePolicy** | What happens to the old resource when an update **replaces** it |
+| **DependsOn** | Force creation order when no implicit dependency exists |
+| **Stack policy** | Protect critical resources from updates |
+| **Nested stacks** | Reuse templates as resources (`AWS::CloudFormation::Stack`) within a parent |
+| **Cross-stack references** | `Export` and `!ImportValue` (an export in use cannot be deleted) |
+| **StackSets** | Deploy a stack to multiple accounts and Regions |
+| **CreationPolicy / `cfn-signal`** | Wait for software on EC2 to signal success |
+| **`cfn-init` / helper scripts** | Declarative instance configuration in `AWS::CloudFormation::Init` |
+| **Custom resources** | Run your own Lambda logic during stack events (must send a response to the pre-signed URL or the stack hangs) |
+| **Dynamic references** | `{{resolve:ssm:...}}` and `{{resolve:secretsmanager:...}}` |
+
+### Rollback Behavior (Skill 3.3.7)
+
+* **Create failure:** the stack **rolls back** (deletes created resources) and ends in `ROLLBACK_COMPLETE`; you must **delete** the stack before retrying with the same name. Use `--disable-rollback` (or "preserve successfully provisioned resources") to troubleshoot.
+* **Update failure:** automatic rollback to the previous state (`UPDATE_ROLLBACK_COMPLETE`). If rollback itself fails (`UPDATE_ROLLBACK_FAILED`), fix the cause and use **continue update rollback** (optionally skipping resources).
+* Add **rollback triggers** (CloudWatch alarms) to automatically roll back during updates if alarms fire.
+
+```bash
+aws cloudformation deploy --template-file template.yaml --stack-name orders-dev \
+  --parameter-overrides Env=dev --capabilities CAPABILITY_IAM
+aws cloudformation create-change-set --stack-name orders-dev --change-set-name preview \
+  --template-body file://template.yaml --capabilities CAPABILITY_IAM
+aws cloudformation describe-stack-events --stack-name orders-dev      # find the first FAILED event
+aws cloudformation package --template-file t.yaml --s3-bucket artifacts --output-template-file packaged.yaml
+```
+
+---
+
+## 2. AWS SAM (Serverless Application Model)
+
+```yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Globals:
+  Function: { Runtime: python3.12, Timeout: 15, MemorySize: 512, Architectures: [arm64] }
+Resources:
+  OrdersTable:
+    Type: AWS::Serverless::SimpleTable
+  OrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: src/
+      AutoPublishAlias: live
+      Environment: { Variables: { TABLE: !Ref OrdersTable } }
+      Policies: [ DynamoDBCrudPolicy: { TableName: !Ref OrdersTable } ]
+      Events:
+        Api: { Type: Api, Properties: { Path: /orders, Method: post } }
+        Queue: { Type: SQS, Properties: { Queue: !GetAtt OrdersQueue.Arn, BatchSize: 10 } }
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes
+        Alarms: [ !Ref ErrorsAlarm ]
+```
+
+| SAM Resource Type | Creates |
+|---|---|
+| `AWS::Serverless::Function` | Lambda function (+ role, event sources, optional alias and CodeDeploy deployment group) |
+| `AWS::Serverless::Api` / `HttpApi` | API Gateway REST / HTTP API |
+| `AWS::Serverless::SimpleTable` | DynamoDB table with a simple primary key |
+| `AWS::Serverless::LayerVersion` | Lambda layer |
+| `AWS::Serverless::StateMachine` | Step Functions state machine |
+| `AWS::Serverless::Application` | Nested app from SAR or S3 |
+| `AWS::Serverless::Connector` | Generates least-privilege permissions between resources |
+
+* **Policy templates** (`DynamoDBCrudPolicy`, `S3ReadPolicy`, `SQSPollerPolicy`) give least-privilege shortcuts.
+* **`AutoPublishAlias` + `DeploymentPreference`** automatically publishes a version, shifts alias traffic using **CodeDeploy** (Canary, Linear, AllAtOnce), runs **pre/post-traffic hook functions**, and **rolls back on CloudWatch alarm**.
+
+| SAM CLI Command | Does |
+|---|---|
+| `sam init` | Scaffold a project from templates |
+| `sam build` | Build and resolve dependencies into `.aws-sam/build` (`--use-container` builds in Docker) |
+| `sam validate` | Check the template |
+| `sam local invoke` / `start-api` / `start-lambda` | Run functions and APIs locally |
+| `sam deploy --guided` | Package, upload, and deploy; saves `samconfig.toml` |
+| `sam sync --watch` | Rapidly sync code changes to a dev stack |
+| `sam logs --tail` | Stream function logs |
+| `sam pipeline init` | Generate CI/CD pipeline definitions |
+| `sam delete` | Delete the stack and artifacts |
+
+---
+
+## 3. AWS CDK
+
+* **Construct tree:** `App` → `Stack` → constructs. **L1** constructs (`CfnBucket`) map 1:1 to CloudFormation; **L2** constructs (`s3.Bucket`) add defaults, helper methods (`grantRead`), and sensible security; **L3** (patterns) compose multiple resources (for example an ALB-fronted Fargate service).
+* Languages: TypeScript, JavaScript, Python, Java, C#, Go.
+* **`cdk bootstrap`** creates the `CDKToolkit` stack (an S3 bucket for assets, an ECR repository, IAM roles) in each account/Region **once** before the first deployment that needs assets.
+
+```typescript
+const fn = new lambda.Function(this, 'Fn', {
+  runtime: lambda.Runtime.NODEJS_20_X, handler: 'index.handler', code: lambda.Code.fromAsset('src'),
+});
+const table = new dynamodb.Table(this, 'T', { partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING } });
+table.grantReadWriteData(fn);            // generates the least-privilege IAM policy for you
+```
+
+| CDK CLI | Does |
+|---|---|
+| `cdk init app --language typescript` | New project |
+| `cdk synth` | Produce CloudFormation templates |
+| `cdk diff` | Compare local code with the deployed stack |
+| `cdk deploy` | Deploy (prompts for IAM-sensitive changes) |
+| `cdk destroy` | Delete the stack |
+| `cdk watch` | Auto-deploy on file change (dev) |
+
+### Choosing a Tool
+
+| Need | Best Fit |
+|---|---|
+| Plain declarative YAML/JSON for any AWS resource | **CloudFormation** |
+| Serverless-focused shorthand, local testing, built-in safe deployments | **SAM** |
+| Real programming language, loops, abstraction, unit tests of infrastructure | **CDK** |
+
+---
+
+## 4. Lambda Deployment Packaging Methods (Skill 3.3.1)
+
+| Method | Limits | Strengths | Choose When |
+|---|---|---|---|
+| **.zip archive** | 50 MB zipped (direct), 250 MB unzipped | Fast cold start, simple | Most functions |
+| **Layers** | 5 per function; counts toward 250 MB | Share code and dependencies; smaller deployment packages | Common libraries, custom runtimes |
+| **Container image** | 10 GB | Large dependencies, familiar Docker tooling, consistent local and prod environments | ML libraries, native binaries, existing container pipelines |
+
+**Optimize deployment efficiency:** include only production dependencies, **bundle and tree-shake** (esbuild for Node.js), put heavy stable dependencies in a **layer** so code-only updates upload faster, use **arm64**, and keep container images lean (multi-stage builds, AWS base images). Smaller packages mean **faster uploads and shorter cold starts**.
+
+---
+
+## 5. Common Exam Traps and Scenario Distractors
+
+* "See what a stack update will change before applying it" → **change set**.
+* "Stack stuck in `ROLLBACK_COMPLETE` after failed create" → **delete** it and recreate.
+* "Retain the database when the stack is deleted" → `DeletionPolicy: Retain` (or `Snapshot`).
+* "SAM deployment shifts 10% of traffic and rolls back on alarm" → `DeploymentPreference` with CodeDeploy.
+* "Template references a Lambda zip on a local path" → run `aws cloudformation package` (or `sam package/deploy`) so artifacts upload to S3.
+* "Reuse a VPC ID created by another stack" → `Export` and `Fn::ImportValue`.
+* "CDK deploy fails: needs assets bucket" → run **`cdk bootstrap`**.
+* "Custom resource stack hangs for an hour" → the Lambda never **sent a response** to the callback URL.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A stack creation failed and now shows `ROLLBACK_COMPLETE`. What must you do before launching it again with the same name?
+<details>
+<summary>Explanation</summary>
+
+**Delete the stack.** A stack in `ROLLBACK_COMPLETE` cannot be updated. Review stack events to find the root failure first.
+
+</details>
+- [ ] How do you safely release a new Lambda version to 10% of users first and revert automatically on errors, using SAM?
+<details>
+<summary>Explanation</summary>
+
+Set `AutoPublishAlias` and `DeploymentPreference: Canary10Percent5Minutes` with `Alarms`. SAM uses CodeDeploy to shift traffic and roll back when the alarm fires.
+
+</details>
+- [ ] What is the difference between `!Ref` and `!GetAtt`?
+<details>
+<summary>Explanation</summary>
+
+`!Ref` returns a parameter's value or a resource's primary identifier (for example the bucket name). `!GetAtt` returns a specific attribute (for example the ARN or domain name).
+
+</details>
+- [ ] A CDK L2 `grantReadWriteData` call does what?
+<details>
+<summary>Explanation</summary>
+
+It adds a **least-privilege IAM policy** to the grantee's role, scoped to that table, so you avoid hand-writing policies.
+
+</details>
+- [ ] Your function needs a 4 GB machine-learning library. Which packaging method?
+<details>
+<summary>Explanation</summary>
+
+A **container image** (up to 10 GB). Zip and layers are limited to 250 MB unzipped.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/11-application-artifacts-config-and-testing" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 11: Application Artifacts, Configuration Management & Testing
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/13-ci-cd-and-deployment-strategies" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 13: CI/CD, Container Deployments & Deployment Strategies →
+  </a>
+</div>

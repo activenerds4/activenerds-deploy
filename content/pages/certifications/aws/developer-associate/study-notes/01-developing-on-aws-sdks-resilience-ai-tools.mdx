@@ -1,0 +1,250 @@
+---
+title: "Module 01: Developing on AWS: SDKs, Resilience Patterns & AI-Assisted Development"
+description: "SDK credential chain, retries with backoff, pagination, serialization, sync vs async patterns, Kiro spec-driven development, and calling Amazon Bedrock."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 1
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Development with AWS Services
+
+<Callout variant="info" title="Exam Focus: Development with AWS Services (Task 1.1)">
+This module covers Task 1.1 skills 1.1.1 to 1.1.10: decoupling, sync vs async, fault tolerance, SDK usage, serialization, streaming, event-driven patterns, **AI-assisted development tools (new in DVA-C03)**, and **integrating managed AI services (new in DVA-C03)**. Expect scenario questions that ask which retry, pagination, or invocation pattern fixes a described failure.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why Retries Need Backoff and Jitter">
+
+When many clients fail at once and retry on the same schedule, they hit the service in synchronized waves (a retry storm), which prolongs the outage. **Exponential backoff** spaces retries out (for example 100 ms, 200 ms, 400 ms), and **jitter** randomizes each delay so clients desynchronize.
+
+* **Primary Trade-off:** More retries improve success odds but increase latency and load on a struggling dependency.
+* **Failure Modes:** Retrying non-idempotent operations can duplicate side effects (double charge, duplicate order). Retrying client errors (400-level validation or authorization failures) never helps.
+* **Exam Trap:** If the question says requests are throttled, the fix is backoff with jitter (or a quota increase), not a larger instance and not a custom polling loop.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Coupling, Decoupling, and Choosing Sync vs Async
+
+A **tightly coupled** system has components that must be available at the same time and know each other's addresses and speeds. A **loosely coupled** system puts a managed intermediary between them so each side can scale, fail, and deploy independently.
+
+```
+Tight:   Client ──HTTP──> Order Service ──HTTP──> Inventory Service ──HTTP──> Email Service
+         (any slow or failed hop breaks the whole request)
+
+Loose:   Client ──> API Gateway ──> Lambda ──> SQS Queue ──> Worker Lambda ──> DynamoDB
+                                        └──> EventBridge ──> (Email, Analytics, Audit targets)
+```
+
+| Pattern | Typical AWS Services | Caller Waits? | Use When |
+|---|---|---|---|
+| Synchronous request/response | API Gateway + Lambda, ALB + ECS | Yes | The caller needs the answer now (read a profile, validate a login) |
+| Asynchronous queue-based | Amazon SQS + Lambda or workers | No | Work can be buffered, retried, and processed at the consumer's pace |
+| Asynchronous pub/sub fan-out | Amazon SNS to SQS or Lambda | No | One event must reach many independent subscribers |
+| Event-driven routing | Amazon EventBridge | No | Route events by content to many targets, including SaaS and cross-account |
+| Orchestrated workflow | AWS Step Functions | Either | Multi-step process with branching, retries, and human approval |
+
+**Decision shortcut:** if a question describes spikes overwhelming a database or downstream API, introduce **SQS** to buffer. If it describes one action triggering several independent reactions, use **SNS fan-out** or **EventBridge**. Details live in Module 04.
+
+---
+
+## 2. SDKs, the Credential Provider Chain, and Configuration
+
+The AWS SDKs and AWS CLI sign requests (Signature Version 4) for you. They find credentials by walking a **default credential provider chain**. The exact order differs slightly per SDK, but conceptually:
+
+1. Explicit credentials in code (avoid)
+2. Environment variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
+3. Shared config and credentials files (`~/.aws/config`, `~/.aws/credentials`), including named profiles and IAM Identity Center (SSO) profiles
+4. Web identity token (for example EKS service accounts, GitHub OIDC)
+5. Container credentials (ECS task role via the container credentials endpoint)
+6. EC2 instance profile through the instance metadata service (IMDSv2)
+
+On Lambda, the SDK picks up the function's **execution role** credentials from environment variables automatically. **Never embed access keys in code or AMIs;** use roles.
+
+Other settings you should know: `AWS_REGION` or `AWS_DEFAULT_REGION`, `AWS_PROFILE`, `AWS_MAX_ATTEMPTS`, and `AWS_RETRY_MODE`.
+
+```python
+import boto3
+from botocore.config import Config
+
+# Reuse clients across invocations (create OUTSIDE the Lambda handler)
+cfg = Config(
+    region_name="us-east-1",
+    retries={"max_attempts": 5, "mode": "standard"},   # modes: legacy, standard, adaptive
+    connect_timeout=3,
+    read_timeout=10,
+)
+dynamodb = boto3.client("dynamodb", config=cfg)
+```
+
+---
+
+## 3. Building Fault-Tolerant Clients
+
+| Technique | What It Does | Exam Signal |
+|---|---|---|
+| Retry with exponential backoff and jitter | Spreads retries over time | Throttling, `ThrottlingException`, HTTP 429, 5xx |
+| SDK retry modes | `standard` caps attempts and handles throttling; `adaptive` adds client-side rate limiting; `legacy` is the old default | "Reduce retry storms automatically" |
+| Timeouts | Prevents a hung dependency from consuming your whole invocation | Lambda hitting its timeout waiting on a call |
+| Idempotency keys | Makes retries safe (same request ID produces same result once) | "Duplicate records after a retry" |
+| Dead-letter queues | Parks messages that repeatedly fail | Poison messages blocking a queue |
+| Graceful degradation | Return cached or reduced results when a dependency is down | "Maintain availability when recommendations service fails" |
+| Circuit breaker | Stop calling a failing dependency for a cool-off period | Cascading failures |
+
+**What gets retried:** SDKs retry transient errors (throttling, 5xx, timeouts, connection errors). They do **not** retry authorization or validation errors (4xx other than throttling).
+
+### Pagination
+
+Many list and describe APIs return partial results with a continuation token (`NextToken`, `Marker`, `LastEvaluatedKey`, `ContinuationToken`). Use SDK **paginators** instead of hand-rolled loops.
+
+```bash
+# CLI pagination controls
+aws s3api list-objects-v2 --bucket my-bucket --page-size 100 --max-items 500
+# Server-side filtering happens in the service; client-side filtering uses --query (JMESPath)
+aws ec2 describe-instances --query "Reservations[].Instances[?State.Name=='running'].InstanceId"
+```
+
+**Trap:** `--query` filters after results are fetched (it saves output, not API calls). `--filters` and `--page-size` act on the service side.
+
+---
+
+## 4. Serializing and Deserializing Data
+
+Application objects must be converted to a wire format to travel between services.
+
+| Integration | Format Gotcha |
+|---|---|
+| Lambda event and response | JSON by default; binary payloads must be base64-encoded |
+| Kinesis record data | Delivered to Lambda **base64-encoded**; decode, then parse JSON |
+| SQS and SNS message bodies | Plain strings; you choose JSON, Avro, or Protobuf; SNS wraps your message in an envelope when delivering to SQS (unless raw message delivery is on) |
+| DynamoDB low-level API | Typed attribute values such as `{"S": "abc"}` and `{"N": "42"}`; numbers travel as strings |
+| DynamoDB high-level clients | Resource or Document clients marshal types for you (`boto3.resource`, `lib-dynamodb`) |
+| S3 object metadata | Keys are lowercased, values are strings |
+| API Gateway proxy integration | `body` must be a **string**; set `isBase64Encoded` for binary |
+
+```python
+import json, base64
+
+def handler(event, context):
+    for rec in event["Records"]:                       # Kinesis batch
+        payload = json.loads(base64.b64decode(rec["kinesis"]["data"]))
+        process(payload)
+    return {"statusCode": 200, "body": json.dumps({"ok": True})}   # body must be a string
+```
+
+---
+
+## 5. AI-Assisted Development Tools (Skill 1.1.9, New in DVA-C03)
+
+The exam validates that you can **use AI tools responsibly to generate, review, and optimize code**, not that you can pick models or engineer prompts (both are out of scope). The in-scope tool named in the guide is **Kiro**, AWS's agentic IDE.
+
+| Capability | How It Appears in Kiro | What the Exam Wants You to Know |
+|---|---|---|
+| Spec-driven code generation | A feature **spec** moves through requirements, design, and tasks; files live under `.kiro/specs/` (`requirements.md`, `design.md`, `tasks.md`) | Specs create reviewable intent before code; you approve each phase |
+| Persistent project context | **Steering files** under `.kiro/steering/` hold conventions and architecture decisions | Keeps generated code consistent with team standards |
+| Automation | **Agent hooks** run on events such as file save or tool use (configured under `.kiro/hooks/`) | Auto-update tests, run security scans, refresh docs |
+| Intelligent completion and refactoring | Inline suggestions and agentic multi-file edits | Treat as proposals, then review |
+| Automated code review and security scanning | AI review of diffs for bugs, insecure patterns, and dependency issues | Complements, never replaces, human review and SAST in CI |
+
+**Risks to recognize in scenario questions:** hallucinated API names or parameters, over-permissive IAM policies (`"Action": "*"`), hardcoded secrets, outdated SDK usage, missing input validation, and licensing concerns. The correct response is almost always: **review, test, scan, and keep a human approving production changes.**
+
+---
+
+## 6. Integrating Managed AI Services (Skill 1.1.10, New in DVA-C03)
+
+The in-scope managed AI services are **Amazon Bedrock**, **Amazon Bedrock AgentCore**, and **Amazon Quick** (the exam list is non-exhaustive). As a developer you call them through SDKs like any other AWS API.
+
+* Two Bedrock client types exist: **`bedrock`** (control plane: manage guardrails, custom models, logging) and **`bedrock-runtime`** (data plane: invoke models).
+* **`InvokeModel`** sends a model-specific request body. **`Converse`** / **`ConverseStream`** provide a **model-agnostic** message format, which makes switching models a one-line change.
+* Use **streaming** (`ConverseStream`, `InvokeModelWithResponseStream`) so users see tokens as they are generated.
+* Expect `ThrottlingException` and `ModelTimeoutException`: apply the same backoff and timeout rules as any API, and consider **cross-Region inference profiles** for higher throughput.
+* **Bedrock Agents and AgentCore** let a model call your tools (Lambda functions or APIs). Securing these is Module 10.
+
+```python
+import boto3
+brt = boto3.client("bedrock-runtime")
+
+resp = brt.converse(
+    modelId="MODEL_ID_OR_INFERENCE_PROFILE_ARN",      # supply the model your account can access
+    messages=[{"role": "user", "content": [{"text": "Summarize this support ticket in one sentence."}]}],
+    inferenceConfig={"maxTokens": 200, "temperature": 0.2},
+)
+print(resp["output"]["message"]["content"][0]["text"])
+```
+
+**Trap:** IAM permission for `Converse` is granted through `bedrock:InvokeModel` (and `bedrock:InvokeModelWithResponseStream` for streaming), scoped to model or inference-profile ARNs.
+
+---
+
+## 7. Common Exam Traps and Scenario Distractors
+
+* "Intermittent `ThrottlingException`" → backoff with jitter / SDK `standard` or `adaptive` retry mode, not a bigger instance.
+* "Duplicate orders after client retry" → idempotency key, not disabling retries.
+* "Process a long list of objects" → paginators, not a single call.
+* "Credentials hardcoded in the repo" → IAM role / credential provider chain / Secrets Manager.
+* "AI assistant generated code with `Resource: *`" → review and scope the policy (least privilege).
+* "Switch between Bedrock models with minimal code change" → `Converse` API.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A Lambda function calling DynamoDB sees sporadic `ProvisionedThroughputExceededException`. What is the best first fix in code?
+<details>
+<summary>Explanation</summary>
+
+Use SDK retries with exponential backoff and jitter (`standard` or `adaptive` retry mode, higher `max_attempts`) and consider batching or caching. The SDK already retries throttling by default, so tuning is the fix, not custom sleep loops. Long term, raise capacity or improve key distribution (Module 05).
+
+</details>
+- [ ] An order API retries failed POSTs and customers are charged twice. What pattern fixes this?
+<details>
+<summary>Explanation</summary>
+
+Make the operation **idempotent** with a client-supplied idempotency key stored with a conditional write (for example DynamoDB `attribute_not_exists`) so replays return the original result.
+
+</details>
+- [ ] Which credential source should a containerized app on Amazon ECS use?
+<details>
+<summary>Explanation</summary>
+
+The **ECS task role**. The SDK's container credential provider picks it up automatically. Do not bake access keys into the image, and do not confuse it with the task **execution** role, which is used by ECS itself to pull images and write logs.
+
+</details>
+- [ ] A Lambda function processes a Kinesis batch but `json.loads(record["kinesis"]["data"])` fails. Why?
+<details>
+<summary>Explanation</summary>
+
+Kinesis record data is **base64-encoded** in the Lambda event. Base64-decode first, then parse the JSON.
+
+</details>
+- [ ] A reviewer notices that an AI coding assistant generated an IAM policy with wildcard actions. What should the team do?
+<details>
+<summary>Explanation</summary>
+
+Treat generated code as untrusted input: scope the policy to the required actions and resources, run security scanning and tests in CI, and require human approval before deployment.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ↑ Back to AWS Certified Developer - Associate Study Guide
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/02-aws-lambda-development" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 02: AWS Lambda Development, Configuration & Event Handling →
+  </a>
+</div>

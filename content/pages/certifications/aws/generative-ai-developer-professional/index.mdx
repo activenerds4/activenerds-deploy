@@ -1,0 +1,242 @@
+---
+title: "AWS Certified Generative AI Developer - Professional Study Guide (18 Modules)"
+description: "Professional-level AIP-C01 study guide: Bedrock, RAG, agents, guardrails, governance, cost optimization, evaluation and GenAI troubleshooting on AWS."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+totalModules: 18
+layout: "hub"
+---
+
+<Callout variant="tip" title="Track Overview & Exam Code: AIP-C01">
+Professional-level AIP-C01 study guide: Bedrock, RAG, agents, guardrails, governance, cost optimization, evaluation and GenAI troubleshooting on AWS. Follow this structured curriculum to gain hands-on proficiency and master scenario-based exam questions.
+</Callout>
+
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-4 my-6 not-prose">
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Exam Code</span>
+    <span className="font-mono text-sm font-bold text-primary">AIP-C01</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Credential Level</span>
+    <span className="font-mono text-sm font-bold text-foreground">Professional</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Study Duration</span>
+    <span className="font-mono text-sm font-bold text-foreground">~55-70 Hours</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Curriculum</span>
+    <span className="font-mono text-sm font-bold text-foreground">18 Modules</span>
+  </div>
+</div>
+
+<TrackResourceTabs
+  notesCount="18 Modules"
+  mockTestsCount="3 Practice Exams"
+  flashCardsCount="100+ Cards"
+  cheatSheetsCount="5 Reference Cards"
+>
+  <div className="space-y-3 my-4 not-prose">
+  <ModuleCard
+    moduleNumber="1"
+    domain="Foundation Model Integration, Data Management & Compliance"
+    title="Module 01: GenAI Solution Design, Proofs of Concept & the Well-Architected GenAI Lens"
+    description="Requirements analysis, architecture selection, Bedrock-based PoCs, and reusable standardized components (Task 1.1)."
+    readTime="20m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/01-genai-solution-design-poc-well-architected"
+  />
+  <ModuleCard
+    moduleNumber="2"
+    domain="Foundation Model Integration, Data Management & Compliance"
+    title="Module 02: FM Selection, Dynamic Model Switching, Resilience & Customization Lifecycle"
+    description="Benchmark-driven FM choice, AppConfig/Lambda provider switching, cross-Region inference, circuit breakers, SageMaker LoRA deployment (Task 1.2)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/02-fm-selection-dynamic-routing-resilience-customization"
+  />
+  <ModuleCard
+    moduleNumber="3"
+    domain="Foundation Model Integration, Data Management & Compliance"
+    title="Module 03: Data Validation & Processing Pipelines for FM Consumption"
+    description="Glue Data Quality, multimodal processing, Converse/InvokeModel request formatting, and input quality enhancement (Task 1.3)."
+    readTime="20m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/03-data-validation-processing-pipelines-fm-input"
+  />
+  <ModuleCard
+    moduleNumber="4"
+    domain="Foundation Model Integration, Data Management & Compliance"
+    title="Module 04: Vector Store Architecture, Metadata Frameworks & Data Maintenance"
+    description="Bedrock Knowledge Bases, OpenSearch k-NN, Aurora pgvector, DynamoDB metadata, sharding, and sync pipelines (Task 1.4)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/04-vector-stores-metadata-maintenance"
+  />
+  <ModuleCard
+    moduleNumber="5"
+    domain="Foundation Model Integration, Data Management & Compliance"
+    title="Module 05: Retrieval Mechanisms: Chunking, Embeddings, Hybrid Search & Query Handling"
+    description="Chunking strategies, Titan embeddings, hybrid search, rerankers, query decomposition, and MCP/function-calling retrieval (Task 1.5)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/05-retrieval-chunking-embeddings-hybrid-search"
+  />
+  <ModuleCard
+    moduleNumber="6"
+    domain="Foundation Model Integration, Data Management & Compliance"
+    title="Module 06: Prompt Engineering, Prompt Management, Governance & Prompt Flows"
+    description="Prompt Management variants and versions, Bedrock Guardrails, conversation memory, regression testing, and Prompt Flows (Task 1.6)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/06-prompt-engineering-management-governance-flows"
+  />
+  <ModuleCard
+    moduleNumber="7"
+    domain="Implementation & Integration"
+    title="Module 07: Agentic AI: Strands Agents, Bedrock AgentCore, MCP & Safeguarded Workflows"
+    description="Agent memory/state, ReAct with Step Functions, stopping conditions, multi-agent coordination, human-in-the-loop, and MCP servers (Task 2.1)."
+    readTime="30m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/07-agentic-ai-strands-agentcore-mcp"
+  />
+  <ModuleCard
+    moduleNumber="8"
+    domain="Implementation & Integration"
+    title="Module 08: FM Deployment Strategies: On-Demand, Provisioned Throughput & SageMaker AI"
+    description="Lambda invocation, provisioned throughput, SageMaker endpoints, LLM container optimization, and model cascading (Task 2.2)."
+    readTime="20m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/08-fm-deployment-strategies"
+  />
+  <ModuleCard
+    moduleNumber="9"
+    domain="Implementation & Integration"
+    title="Module 09: Enterprise Integration: Event-Driven Patterns, Secure Access, Hybrid & GenAI Gateways"
+    description="Legacy integration, EventBridge, federation, Outposts/Wavelength, CI/CD for GenAI, and gateway architectures (Task 2.3)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/09-enterprise-integration-gateways-cicd"
+  />
+  <ModuleCard
+    moduleNumber="10"
+    domain="Implementation & Integration"
+    title="Module 10: FM API Integration: Sync/Async, Streaming, Resilience & Intelligent Routing"
+    description="Bedrock Runtime APIs, SQS async, SSE/WebSocket streaming, backoff, rate limiting, X-Ray, and routing patterns (Tasks 2.4, 2.5.1)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/10-fm-api-integration-streaming-resilience-routing"
+  />
+  <ModuleCard
+    moduleNumber="11"
+    domain="Implementation & Integration"
+    title="Module 11: Application Integration Patterns & Developer Tooling"
+    description="Amplify, OpenAPI, Prompt Flows no-code, Bedrock Data Automation, Amazon Q Developer, and GenAI troubleshooting aids (Tasks 2.5.2-2.5.6)."
+    readTime="20m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/11-application-integration-dev-tools-amplify-q"
+  />
+  <ModuleCard
+    moduleNumber="12"
+    domain="AI Safety, Security & Governance"
+    title="Module 12: Input & Output Safety: Guardrails, Hallucination Control & Threat Detection"
+    description="Content filters, denied topics, contextual grounding, defense in depth, prompt injection and jailbreak defense (Task 3.1)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/12-input-output-safety-guardrails-threat-detection"
+  />
+  <ModuleCard
+    moduleNumber="13"
+    domain="AI Safety, Security & Governance"
+    title="Module 13: Data Security & Privacy: VPC Isolation, PII Handling & Retention"
+    description="VPC endpoints, IAM/Lake Formation, KMS, Comprehend and Macie PII detection, masking, and S3 lifecycle retention (Task 3.2)."
+    readTime="20m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/13-data-security-privacy-controls"
+  />
+  <ModuleCard
+    moduleNumber="14"
+    domain="AI Safety, Security & Governance"
+    title="Module 14: Governance, Compliance & Responsible AI"
+    description="Model cards, data lineage, CloudTrail audit, drift and bias monitoring, transparency, fairness evaluation (Tasks 3.3, 3.4)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/14-governance-compliance-responsible-ai"
+  />
+  <ModuleCard
+    moduleNumber="15"
+    domain="Operational Efficiency & Optimization"
+    title="Module 15: Cost & Performance Optimization: Tokens, Caching, Throughput & Retrieval Tuning"
+    description="Token efficiency, tiered model selection, prompt and semantic caching, batching, latency tuning, and inference parameters (Tasks 4.1, 4.2)."
+    readTime="30m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/15-cost-performance-optimization-caching"
+  />
+  <ModuleCard
+    moduleNumber="16"
+    domain="Operational Efficiency & Optimization"
+    title="Module 16: Monitoring & Observability for GenAI Applications"
+    description="CloudWatch metrics, model invocation logging, tracing, tool and vector store monitoring, and GenAI failure-mode frameworks (Task 4.3)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/16-monitoring-observability-genai"
+  />
+  <ModuleCard
+    moduleNumber="17"
+    domain="Testing, Validation & Troubleshooting"
+    title="Module 17: Evaluation Systems: Model, RAG, Agent & Deployment Validation"
+    description="Bedrock Model Evaluations, LLM-as-a-judge, A/B and canary testing, retrieval quality, agent metrics, and quality gates (Task 5.1)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/17-evaluation-systems-llm-as-judge-rag-agents"
+  />
+  <ModuleCard
+    moduleNumber="18"
+    domain="Testing, Validation & Troubleshooting"
+    title="Module 18: Troubleshooting GenAI Applications"
+    description="Context overflow, integration errors, prompt regressions, retrieval failures, and prompt maintenance issues (Task 5.2)."
+    readTime="25m read"
+    href="/certifications/aws/generative-ai-developer-professional/study-notes/18-troubleshooting-genai-applications"
+  />
+  </div>
+</TrackResourceTabs>
+
+---
+
+## Official Exam Blueprint & Domain Breakdown
+
+| Domain | Title | Weight |
+|---|---|---|
+| 1 | Foundation Model Integration, Data Management & Compliance | 31% |
+| 2 | Implementation & Integration | 26% |
+| 3 | AI Safety, Security & Governance | 20% |
+| 4 | Operational Efficiency & Optimization | 12% |
+| 5 | Testing, Validation & Troubleshooting | 11% |
+
+---
+
+## Blueprint Coverage Map
+
+| Task | Topic | Module |
+|---|---|---|
+| 1.1 | Analyze requirements and design GenAI solutions | 01 |
+| 1.2 | Select and configure FMs | 02 |
+| 1.3 | Data validation and processing pipelines | 03 |
+| 1.4 | Vector store solutions | 04 |
+| 1.5 | Retrieval mechanisms for FM augmentation | 05 |
+| 1.6 | Prompt engineering and governance | 06 |
+| 2.1 | Agentic AI and tool integrations | 07 |
+| 2.2 | Model deployment strategies | 08 |
+| 2.3 | Enterprise integration architectures | 09 |
+| 2.4 | FM API integrations (plus Skill 2.5.1) | 10 |
+| 2.5 | Application integration patterns and development tools (Skills 2.5.2 - 2.5.6) | 11 |
+| 3.1 | Input and output safety controls | 12 |
+| 3.2 | Data security and privacy controls | 13 |
+| 3.3 and 3.4 | AI governance, compliance, and responsible AI | 14 |
+| 4.1 and 4.2 | Cost optimization and application performance | 15 |
+| 4.3 | Monitoring systems for GenAI applications | 16 |
+| 5.1 | Evaluation systems for GenAI | 17 |
+| 5.2 | Troubleshoot GenAI applications | 18 |
+
+---
+
+## Exam Format at a Glance
+
+| Item | Detail |
+|---|---|
+| Scored questions | 65 |
+| Unscored questions | 10 (not identified) |
+| Question types | Multiple choice and multiple response (all correct options required) |
+| Scoring | Scaled 100 - 1,000; passing score 750; compensatory (no per-section minimum) |
+| Guessing | No penalty; unanswered questions are scored incorrect |
+| Out of scope for candidates | Model development and training, advanced ML techniques, data and feature engineering |
+
+<Callout variant="tip" title="Recommended Study Path">
+Work Domain 1 first (31%), because retrieval, prompts, and FM selection reappear in every later domain. Then complete Domain 2 (26%) and Domain 3 (20%). Use Modules 15 - 18 to practice diagnosing symptoms across layers. After each module, answer its self-assessment checklist without opening the explanations.
+</Callout>

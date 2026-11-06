@@ -1,0 +1,173 @@
+---
+title: "Module 19: Modernization: Containers, Serverless & Event-Driven Architectures"
+description: "ECS vs EKS vs Fargate vs App Runner vs Lambda selection, task and pod identity, decoupling monoliths and purpose-built database moves."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 19
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** ECS vs EKS vs Fargate vs App Runner vs Lambda selection, task and pod identity, decoupling monoliths and purpose-built database moves.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 4.3 and 4.4 New Architectures and Modernization">
+Select the right compute and container platform, identify where to decouple and go serverless, and adopt purpose-built databases and integration services. The winning answer usually trades control for lower operational overhead only as far as the stated constraints permit.
+</Callout>
+
+---
+
+## 1. Compute Platform Selection
+
+| Platform | Control | Ops overhead | Best for |
+|---|---|---|---|
+| EC2 | Full OS | Highest | Legacy lift-and-shift, special hardware, licensing, custom kernels |
+| Elastic Beanstalk | App platform managed | Low | Standard web apps (Java, .NET, Node, Python, containers) needing quick PaaS |
+| App Runner | Fully managed web/API from source or image | Lowest for containers | Simple containerized web services, auto scaling, no cluster knowledge |
+| ECS on Fargate | Containers, no servers | Low | Containers without managing hosts |
+| ECS on EC2 | Containers on your fleet | Medium | GPUs, daemon sets, cost tuning with Spot/Savings Plans, special instances |
+| EKS (Fargate or managed node groups) | Kubernetes | Medium | Kubernetes standardization, portability, ecosystem tooling |
+| Lambda | Functions | Lowest | Event-driven, spiky, short tasks (up to 15 minutes) |
+| AWS Batch | Managed batch scheduling on EC2/Spot/Fargate | Low | Large-scale batch jobs |
+| Outposts / Wavelength / Local Zones / ECS Anywhere / EKS Anywhere | Hybrid and edge | Varies | On-premises or ultra-low-latency edge requirements |
+
+## 2. Containers on AWS
+
+**Amazon ECS**
+- Task definition (containers, CPU/memory, port mappings, logging), service (desired count, ALB integration, deployment type rolling or CodeDeploy blue/green), capacity providers (Fargate, Fargate Spot, EC2 ASG).
+- **IAM roles:** *task execution role* (used by the agent to pull images from ECR and write logs/read secrets) vs *task role* (permissions the application code uses). Distractors swap them.
+- **Networking:** `awsvpc` mode gives each task its own ENI and security group; Service Connect/Cloud Map for service discovery.
+- **Secrets:** inject from Secrets Manager/Parameter Store at runtime.
+
+**Amazon EKS**
+- Managed control plane across multiple AZs; data plane on managed node groups, self-managed nodes, Fargate profiles, or Karpenter-driven nodes.
+- **Pod-level AWS permissions:** IAM Roles for Service Accounts (IRSA) or EKS Pod Identity; never give node-wide broad roles.
+- Networking: VPC CNI (pods get VPC IPs; plan CIDR capacity, consider custom networking or IPv6), AWS Load Balancer Controller for ALB/NLB, cluster autoscaler or Karpenter, Horizontal/Vertical Pod Autoscalers.
+- EKS Anywhere/Distro for on-premises consistency.
+
+**Amazon ECR:** private registry, image scanning (basic and Inspector enhanced), lifecycle policies, cross-Region and cross-account replication, pull-through cache.
+
+| Decision | ECS | EKS |
+|---|---|---|
+| Learning curve | Lower, AWS-native | Higher, Kubernetes standard |
+| Portability | AWS-specific | Portable manifests, hybrid |
+| Ecosystem | AWS integrations | Large open-source ecosystem |
+| Choose when | Simplicity and deep AWS integration | Existing Kubernetes skills/tools or multi-cloud strategy |
+
+<Callout variant="warning" title="Exam Trap: Fargate vs EC2 Launch Type">
+Fargate removes host management but does not support every need (for example GPUs, privileged host-level access, or some daemon patterns). If the stem requires GPUs or specific instance families for cost tuning with Reserved capacity, EC2 launch type is the answer. If it stresses no infrastructure management, Fargate.
+</Callout>
+
+## 3. Lambda and Serverless Design
+
+| Topic | Key facts |
+|---|---|
+| Limits | Timeout up to 15 minutes; memory 128 MB to 10 GB (CPU scales with memory); ephemeral storage 512 MB to 10 GB; deployment package 50 MB zipped (250 MB unzipped), container images up to 10 GB; synchronous payload 6 MB |
+| Concurrency | Account default 1,000 per Region (raise via quota); **reserved concurrency** guarantees and caps; **provisioned concurrency** pre-initializes to eliminate cold starts; SnapStart cuts Java (and other supported runtimes) startup |
+| Networking | Default has internet access, not VPC resources; VPC-attached functions need NAT/endpoints for internet or AWS APIs |
+| Invocation | Synchronous (API Gateway, ALB), asynchronous (S3, SNS, EventBridge; retries and DLQ/destinations), poll-based event source mappings (SQS, Kinesis, DynamoDB Streams; batching, bisect on error, partial batch response) |
+| Integration | Function URLs, Layers, Extensions, response streaming, Lambda@Edge |
+| Data access | RDS Proxy for relational DBs; DynamoDB/S3 are natural fits |
+
+**API layer:** API Gateway (REST: caching, usage plans, WAF, request validation; HTTP API: cheaper, lower latency, JWT authorizers; WebSocket for real-time) with 29-second default integration timeout; ALB can target Lambda; AppSync for GraphQL.
+
+```
+ Client -> CloudFront -> API Gateway -> Lambda -> DynamoDB
+                                   \-> SQS -> Lambda workers
+ S3 event -> EventBridge -> Step Functions -> Lambda/Rekognition/Textract
+```
+
+## 4. Identifying Modernization Opportunities
+
+| Signal in the stem | Modernization move |
+|---|---|
+| Monolith with scaling limits or deployment risk | Strangler fig pattern: peel capabilities into microservices/containers/Lambda behind an ALB or API Gateway |
+| Tightly coupled synchronous calls failing under load | Insert SQS/SNS/EventBridge, event-driven design |
+| Cron servers and batch scripts | EventBridge Scheduler + Lambda/Step Functions/Batch |
+| Self-managed relational DB with admin burden | Aurora/RDS; or purpose-built DB for the pattern (DynamoDB, ElastiCache, Neptune, Timestream) |
+| File processing on EC2 polling a share | S3 event-driven pipelines |
+| Session state on servers | ElastiCache or DynamoDB; stateless tiers |
+| Low, spiky utilization | Serverless to scale to zero |
+| Container sprawl on self-managed Docker | ECS/EKS/Fargate or App Runner |
+| ML wanted without building models | Rekognition, Textract, Comprehend, Transcribe, Translate, Polly, Lex, Personalize, Kendra, Fraud Detector, SageMaker AI for custom models |
+| IoT device fleets | IoT Core, Device Management, Greengrass, SiteWise |
+
+**Strangler fig:**
+
+```
+ Phase 1: Users -> ALB -> [Monolith]
+ Phase 2: Users -> ALB -> /orders -> [New order service]   /* -> [Monolith]
+ Phase 3: Monolith retired as paths move
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Choosing Between Lambda and Containers">
+
+Lambda wins for event-driven, intermittent, short (under 15 minutes), horizontally parallel tasks with minimal ops. Containers win for long-running processes, steady high utilization where per-request pricing exceeds container cost, large dependencies or custom runtimes, strict portability, or predictable latency without cold starts. Provisioned concurrency narrows the gap but adds a fixed cost.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: EKS Networking and IP Exhaustion">
+
+The VPC CNI assigns VPC IP addresses to pods, so large clusters can exhaust subnet IPs. Mitigations: larger subnets, secondary CIDR ranges with custom networking, prefix delegation, or IPv6 clusters. Security groups for pods give fine-grained control. Plan the VPC CIDR for pod counts before migration.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 5. Common Traps & Distractors
+
+- "Run containers with the least operational overhead": Fargate (or App Runner for simple web services).
+- "Event-driven, process uploaded images": S3 -> Lambda/EventBridge, not an EC2 polling fleet.
+- "Existing Kubernetes manifests, on-premises and AWS": EKS (and EKS Anywhere).
+- "Lambda needs to reach RDS safely at scale": VPC attachment plus RDS Proxy.
+- "Permissions for containers' application code": ECS task role or EKS IRSA/Pod Identity, not the instance role.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose among EC2, Beanstalk, ECS, EKS, Fargate, App Runner and Lambda for a scenario.
+<details>
+<summary>Explanation</summary>
+
+Choose by control needs versus operational overhead: Lambda for event-driven short tasks, App Runner/Fargate for hands-off containers, ECS for AWS-native orchestration, EKS for Kubernetes standardization, Beanstalk for simple PaaS, EC2 when OS control, special hardware or lift-and-shift is required.
+
+</details>
+
+- [ ] I can explain the ECS task role vs task execution role.
+<details>
+<summary>Explanation</summary>
+
+The task execution role is used by ECS/Fargate agents to pull images from ECR, send logs to CloudWatch and fetch secrets. The task role is assumed by the application code in the container to call AWS APIs (for example S3, DynamoDB).
+
+</details>
+
+- [ ] I can describe a strangler fig modernization.
+<details>
+<summary>Explanation</summary>
+
+Place a routing layer (ALB or API Gateway) in front of the monolith, build new capabilities as independent services, route specific paths to them progressively, and retire monolith functionality piece by piece, limiting risk compared with a big-bang rewrite.
+
+</details>
+
+- [ ] I can identify when to decouple a component.
+<details>
+<summary>Explanation</summary>
+
+Decouple when components have different scaling profiles, failure isolation is needed, workloads are bursty, or synchronous coupling creates cascading failures. Use SQS for buffering, SNS/EventBridge for fan-out and routing, Step Functions for orchestration.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/18-data-database-migration-datasync-snow-dms" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 18: Data & Database Migration: DataSync, Snow Family, Transfer Family, DMS & SCT
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/20-emerging-genai-controls-exam-mastery" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 20: Emerging Topics (GenAI Security) & Exam Mastery Playbook →
+  </a>
+</div>

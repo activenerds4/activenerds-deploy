@@ -1,0 +1,161 @@
+---
+title: "Module 17: Migration Strategy: Discovery, 7 Rs, TCO & Wave Planning"
+description: "Application Discovery Service, Migration Hub, portfolio assessment, the seven migration strategies, Application Migration Service and landing zone readiness."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 17
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Application Discovery Service, Migration Hub, portfolio assessment, the seven migration strategies, Application Migration Service and landing zone readiness.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 4.1 and 4.2 Selecting and Planning Migration">
+Know the discovery tools, how a portfolio is assessed against the 7 Rs, how TCO is evaluated, how waves are planned, and which application migration tool fits a given source. Domain 4 is 20% of scored content.
+</Callout>
+
+---
+
+## 1. The Migration Journey
+
+```
+ Assess (discover, portfolio, TCO, readiness)
+   -> Mobilize (landing zone, security, people, wave plan)
+     -> Migrate & Modernize (waves, cutover, optimize)
+```
+
+| Phase | Tools and outputs |
+|---|---|
+| Discovery | AWS Application Discovery Service (agentless Discovery Connector for VMware vCenter; Discovery Agent for servers, collects processes, network connections, performance), Migration Evaluator (right-sized TCO from inventory/utilization), third-party CMDB data |
+| Planning and tracking | AWS Migration Hub (central tracking across tools, application grouping, import), Migration Hub Strategy Recommendations (suggests strategy per application), Migration Hub Orchestrator (workflow automation) |
+| Cost modeling | Migration Evaluator, Pricing Calculator, TCO analysis (include compute, storage, licensing, staff, facilities, avoided hardware refresh, migration effort) |
+| Landing zone | Control Tower, Organizations, networking, identity (Modules 02-05) |
+| Execution | Application Migration Service (MGN), DMS/SCT, DataSync, Snow Family, Transfer Family |
+
+## 2. The 7 Rs
+
+| Strategy | Meaning | Example | Effort | Benefit |
+|---|---|---|---|---|
+| Retire | Decommission | Unused app found during discovery | Low | Immediate savings |
+| Retain | Keep on premises for now | Mainframe, recent hardware refresh, compliance | None | Defer |
+| Rehost | Lift and shift | Servers to EC2 via MGN | Low | Speed, quick data center exit |
+| Relocate | Move at hypervisor level with no changes | VMware to VMware Cloud on AWS / Amazon Elastic VMware Service, containers between platforms | Low | Minimal disruption |
+| Repurchase | Move to SaaS | CRM to a SaaS product | Medium | Reduced operations |
+| Replatform | Lift, tinker and shift | Self-managed DB to RDS/Aurora, app server to Beanstalk | Medium | Managed-service benefits with limited code change |
+| Refactor / re-architect | Rewrite cloud-native | Monolith to microservices/serverless | High | Agility, scale, long-term cost |
+
+<Callout variant="warning" title="Exam Trap: Matching the R to the Constraint">
+"Migrate quickly with no code changes" is Rehost (or Relocate for VMware). "Reduce database administration without redesigning the app" is Replatform (RDS/Aurora). "Needs auto scaling and modular deployments and time is available" is Refactor. "Hardware is end-of-life, no application changes allowed, minimum risk" is Rehost. "Application no longer needed" is Retire.
+</Callout>
+
+## 3. Portfolio Assessment and Wave Planning
+
+- **Assess** business criticality, dependencies (network flow maps from discovery data), compliance, licensing (BYOL vs License Included, Dedicated Hosts), data volume and gravity, performance profile, support/EOL status, and team skills.
+- **Group applications** by dependency into migration units so tightly coupled systems move together; avoid long-term hybrid chatter across slow links.
+- **Wave planning:** start with low-risk pilot applications to build skills and validate the landing zone; then waves of increasing complexity; schedule around business cycles; define cutover windows, rollback plans and success criteria; track in Migration Hub.
+- **TCO evaluation:** compare on-premises fully loaded costs with AWS projected costs, include migration cost, parallel-run period, training, and optimization potential (rightsizing after migration can cut costs significantly).
+- **Dependencies on identity and DNS:** plan AD extension or Managed AD trust, DNS forwarding (Module 03), and connectivity (Module 02) before wave 1.
+
+## 4. AWS Application Migration Service (MGN)
+
+```
+ Source servers (physical, VMware, Hyper-V, other cloud) + replication agent
+        |  continuous block-level replication (TCP 1500 to staging)
+        v
+ Staging area subnet: lightweight replication servers + EBS volumes
+        |  test launch -> cutover launch
+        v
+ Converted, launched EC2 instances (target subnet)
+```
+
+- Continuous, block-level replication with near-zero downtime cutover (minutes); automatic conversion of boot processes and drivers.
+- **Test launch** before **cutover**; post-launch actions via Systems Manager; launch templates control target instance configuration.
+- Supports agentless replication for vCenter environments (snapshot-based) in addition to the agent.
+- Succeeds the older CloudEndure Migration and Server Migration Service for server rehosting.
+- Network: DX or VPN recommended for stable replication; use private connectivity to the staging subnet where possible.
+
+```bash
+aws mgn initialize-service
+aws mgn describe-source-servers --query 'items[].{id:sourceServerID,state:lifeCycle.state}'
+aws mgn start-test --source-server-ids s-1234567890abcdef0
+aws mgn start-cutover --source-server-ids s-1234567890abcdef0
+```
+
+## 5. Governance and Security During Migration
+
+- Apply the landing zone first: accounts per environment, SCP guardrails, centralized logging, KMS, Identity Center.
+- Secure migration tools: use least-privilege roles, encrypt replication (TLS in transit, EBS/KMS at rest), private connectivity, restrict staging subnets with security groups, rotate agent credentials, and decommission staging resources after cutover.
+- Tag migrated resources (Migration Hub, wave, owner) for cost allocation and tracking.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Licensing and Dedicated Hosts in Migration">
+
+Per-socket/per-core or per-VM licensing rules (for example some Windows Server and SQL Server, Oracle) may require Dedicated Hosts or License Manager tracking. Options: License Included instances, BYOL on Dedicated Hosts, replatform to open-source engines (Aurora PostgreSQL) using SCT/DMS to remove license costs, or RDS Custom for apps needing OS access. License Manager helps enforce and report license usage across accounts.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Hybrid Interim State Design">
+
+During waves, applications span on-premises and AWS. Design for latency and bandwidth (DX with sufficient capacity), DNS split-horizon, shared identity (AD trust or Managed AD), consistent security controls, and data synchronization (DMS CDC, DataSync schedules, Storage Gateway). Keep the interim period short.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 6. Common Traps & Distractors
+
+- "Discover server dependencies and utilization before planning": Application Discovery Service.
+- "Track migration status across multiple tools": Migration Hub.
+- "Migrate physical/VM servers with minimal downtime and no re-architecture": Application Migration Service.
+- "Estimate cost savings for a business case": Migration Evaluator / Pricing Calculator TCO.
+- "VMware environment, keep vSphere tooling and operations": Relocate (VMware Cloud on AWS / Amazon Elastic VMware Service).
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can map a described situation to the correct migration strategy among the 7 Rs.
+<details>
+<summary>Explanation</summary>
+
+Rehost for fast lift-and-shift with no code change; Replatform for modest optimizations such as moving to managed databases; Refactor for cloud-native redesign; Repurchase for SaaS replacement; Relocate for hypervisor-level moves; Retain for apps that cannot move yet; Retire for unneeded applications.
+
+</details>
+
+- [ ] I can explain how MGN achieves minimal downtime cutover.
+<details>
+<summary>Explanation</summary>
+
+MGN continuously replicates source disks at block level to low-cost staging resources. Testing is done by launching test instances without interrupting replication. At cutover, it launches converted EC2 instances from the latest replicated state, so downtime is limited to the cutover window.
+
+</details>
+
+- [ ] I can design wave plans and mobilization prerequisites.
+<details>
+<summary>Explanation</summary>
+
+Establish the landing zone, connectivity, identity and DNS, group applications by dependency, pilot a simple wave, then proceed in increasing complexity with defined rollback plans, tracking in Migration Hub and post-migration optimization.
+
+</details>
+
+- [ ] I can list inputs to a defensible TCO comparison.
+<details>
+<summary>Explanation</summary>
+
+Hardware and refresh cycles, data center space/power/cooling, software licensing, operations staffing, AWS compute/storage/network/support costs, migration and training costs, parallel run, and optimization (rightsizing, purchasing options) after migration.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/16-continuous-improvement-security-performance-reliability" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 16: Continuous Improvement Playbook: Hardening, Secrets, Patching & Bottleneck Analysis
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/18-data-database-migration-datasync-snow-dms" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 18: Data & Database Migration: DataSync, Snow Family, Transfer Family, DMS & SCT →
+  </a>
+</div>

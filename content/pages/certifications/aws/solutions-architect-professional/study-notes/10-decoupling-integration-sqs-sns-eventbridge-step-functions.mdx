@@ -1,0 +1,185 @@
+---
+title: "Module 10: Decoupling & Integration: SQS, SNS, EventBridge, Step Functions & Streaming"
+description: "Queue, topic, bus and workflow semantics, FIFO vs Standard, Kinesis vs MSK vs Firehose, and loose-coupling design patterns."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 10
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Queue, topic, bus and workflow semantics, FIFO vs Standard, Kinesis vs MSK vs Firehose, and loose-coupling design patterns.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 2.4 and 4.4 Application Integration">
+Choosing between SQS, SNS, EventBridge, Step Functions, Kinesis, MSK and Amazon MQ is one of the highest-yield skills. The exam rewards loosely coupled designs that tolerate component failure and scale independently.
+</Callout>
+
+---
+
+## 1. Service Selection Matrix
+
+| Service | Model | Ordering | Delivery | Retention / replay | Best for |
+|---|---|---|---|---|---|
+| SQS Standard | Queue (pull) | Best effort | At least once | Up to 14 days (default 4), no replay after delete | Buffering, work distribution, virtually unlimited throughput |
+| SQS FIFO | Queue (pull) | Strict per message group | Exactly once processing (dedup 5 min) | Same | Ordered transactions; 300 msg/s per API action (3,000 with batching), higher in high-throughput mode |
+| SNS | Pub/sub (push) | Standard none; FIFO topics ordered | At least once | None | Fan-out to SQS, Lambda, HTTP, email, SMS, mobile push; message filtering |
+| EventBridge | Event bus (push, rules) | None | At least once | Archive and replay | SaaS and AWS service events, cross-account/Region routing, schedules (Scheduler), Pipes for point-to-point with enrichment |
+| Step Functions | Workflow orchestration | Defined by state machine | Standard: exactly-once workflow execution; Express: at-least-once (async) | Execution history | Multi-step orchestration, retries, human approval, parallel/map states |
+| Kinesis Data Streams | Stream (pull) | Per shard | At least once | 24 hours to 365 days, replay | Real-time analytics, multiple consumers, ordered per partition key |
+| Amazon Data Firehose | Delivery pipeline | n/a | Near real time (buffer) | None | Load streaming data to S3, Redshift, OpenSearch, Splunk, HTTP endpoints with optional Lambda transform |
+| Amazon MSK | Managed Kafka | Per partition | Configurable | Configurable | Existing Kafka workloads and ecosystem |
+| Amazon MQ | Managed ActiveMQ / RabbitMQ | Broker semantics | Per protocol | Broker | Migrating apps using JMS, AMQP, MQTT, STOMP, OpenWire without rewriting |
+| AppFlow | SaaS data transfer | n/a | n/a | n/a | No-code integration between SaaS apps and AWS |
+| AppSync | Managed GraphQL / pub-sub | n/a | n/a | n/a | GraphQL APIs, real-time subscriptions |
+
+<Callout variant="warning" title="Exam Trap: Message Size and Limits">
+SQS/SNS messages historically cap at 256 KB (SQS has since raised its maximum to 1 MiB); for larger payloads use the Extended Client Library (payload in S3, pointer in message) or send an S3 reference. EventBridge events are limited to 256 KB. Kinesis records are up to 1 MB. Verify current numbers on the quotas pages before the exam.
+</Callout>
+
+## 2. SQS Mechanics
+
+- **Visibility timeout:** default 30 seconds (max 12 hours). Set it longer than processing time to avoid duplicate processing; with Lambda, set at least six times the function timeout.
+- **Long polling** (`WaitTimeSeconds` up to 20): reduces empty receives and cost.
+- **Dead-letter queue (DLQ):** receives messages after `maxReceiveCount` failures; configure redrive. A FIFO queue's DLQ must be FIFO.
+- **Delay queues and message timers** for deferred processing.
+- **Scaling consumers:** Auto Scaling driven by `ApproximateNumberOfMessagesVisible` per instance (backlog per instance metric).
+- **Access:** queue policy for cross-account and for SNS/S3/EventBridge to send.
+
+```bash
+aws sqs create-queue --queue-name orders.fifo --attributes FifoQueue=true,ContentBasedDeduplication=true,VisibilityTimeout=120,\
+RedrivePolicy='{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:111122223333:orders-dlq.fifo","maxReceiveCount":"5"}'
+aws sns subscribe --topic-arn arn:aws:sns:us-east-1:111122223333:orders --protocol sqs \
+  --notification-endpoint arn:aws:sqs:us-east-1:111122223333:billing \
+  --attributes FilterPolicy='{"eventType":["order_placed"]}'
+```
+
+## 3. Fan-Out and Choreography Patterns
+
+```
+ Order service -> SNS topic -> SQS (billing)  -> workers
+                           \-> SQS (shipping) -> workers
+                           \-> Lambda (analytics)
+ S3 upload -> EventBridge rule -> Step Functions -> (Textract -> Lambda -> DynamoDB)
+ IoT/clickstream -> Kinesis Data Streams -> Lambda/KCL consumers + Firehose -> S3
+```
+
+| Pattern | Use |
+|---|---|
+| Queue-based load leveling | Absorb spikes in front of a database or slow service |
+| Fan-out (SNS + SQS) | One event, many independent durable consumers |
+| Saga with Step Functions | Distributed transaction with compensating actions |
+| Event-carried state / CQRS with DynamoDB Streams | Propagate changes and keep read models |
+| Claim check | Put big payloads in S3, send reference |
+| Competing consumers | Many workers read from one queue |
+
+## 4. Step Functions
+
+| Aspect | Standard | Express |
+|---|---|---|
+| Max duration | 1 year | 5 minutes |
+| Execution semantics | Exactly-once workflow execution | At-least-once (async) / at-most-once (sync) |
+| Throughput | Thousands per second | Over 100,000 per second |
+| Pricing | Per state transition | Per request and duration |
+| History | Full execution history in console/API | CloudWatch Logs |
+| Use | Long-running, auditable, human approval | High-volume streaming, IoT, short ETL |
+
+Key features: error handling (`Retry`, `Catch`), `Parallel`, `Map` and **Distributed Map** (large-scale parallel processing over S3 objects), **callback pattern** (`.waitForTaskToken`) for human approval or external systems, direct SDK integrations to 200+ services (no Lambda glue code), and **Activities**.
+
+```json
+{
+  "StartAt": "Approve",
+  "States": {
+    "Approve": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+      "Parameters": {"QueueUrl": "https://sqs.us-east-1.amazonaws.com/111122223333/approvals",
+                     "MessageBody": {"token.$": "$$.Task.Token", "request.$": "$.request"}},
+      "TimeoutSeconds": 86400,
+      "Next": "Provision"
+    },
+    "Provision": {"Type": "Task", "Resource": "arn:aws:states:::lambda:invoke", "End": true}
+  }
+}
+```
+
+## 5. Kinesis Data Streams Capacity and Consumers
+
+- **Provisioned shard:** 1 MB/s or 1,000 records/s write; 2 MB/s read shared among consumers. **On-demand mode** scales automatically.
+- **Enhanced fan-out:** each registered consumer gets dedicated 2 MB/s per shard via HTTP/2 push.
+- **Hot shard** from poor partition key: add shards or improve key distribution; `ProvisionedThroughputExceededException` indicates exceeded limits.
+- **Retention:** 24 hours default, up to 365 days.
+- **KDS vs SQS:** use Kinesis when ordering per key, multiple independent consumers re-reading the same data, or replay are required; SQS when a single work queue with per-message acknowledgement and no capacity planning is needed.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: SQS Standard vs FIFO Under Failure">
+
+Standard queues may deliver duplicates and out-of-order messages, so consumers must be idempotent. FIFO queues prevent duplicates within the five-minute deduplication window and guarantee order within a message group; a failed message blocks later messages in the same group until it succeeds or moves to the DLQ. Choose message group IDs with enough cardinality to preserve parallelism.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: EventBridge Features that Replace Custom Glue">
+
+Archive and replay (recover from consumer bugs), schema registry and discovery, API destinations (call external HTTP endpoints with auth and rate limits), cross-account and cross-Region event buses, input transformers, EventBridge Pipes (source such as SQS/Kinesis/DynamoDB Streams, optional filter and enrichment, target), and EventBridge Scheduler for one-time and recurring schedules at scale, replacing cron-on-EC2.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 6. Common Traps & Distractors
+
+- "Preserve order for each customer, high throughput": FIFO with customer ID as message group, or Kinesis with partition key.
+- "Decouple monolith components so a failure in one does not drop messages": SQS between tiers.
+- "Reprocess historical events after a bug": EventBridge archive/replay or Kinesis retention; not SQS.
+- "Migrate an on-premises JMS/AMQP broker with no code changes": Amazon MQ.
+- "Orchestrate multi-step workflow with human approval lasting days": Step Functions Standard with callback token.
+- "Cron job on EC2": replace with EventBridge Scheduler plus Lambda/Step Functions.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between SQS, SNS, EventBridge and Kinesis for a described integration.
+<details>
+<summary>Explanation</summary>
+
+SQS buffers and distributes work to consumers; SNS fans out push notifications to many subscribers; EventBridge routes events by content-based rules from many sources including SaaS; Kinesis handles ordered, replayable streams with multiple consumers. Match on delivery model, replay needs and ordering.
+
+</details>
+
+- [ ] I can design fan-out with independent retry per consumer.
+<details>
+<summary>Explanation</summary>
+
+Publish to an SNS topic and subscribe one SQS queue per consumer (with DLQs). Each consumer retries and scales independently; the topic's filter policies can route subsets of events to specific queues.
+
+</details>
+
+- [ ] I can explain when to use Step Functions Standard vs Express.
+<details>
+<summary>Explanation</summary>
+
+Standard for long-running (up to a year), auditable, exactly-once workflows and human approval. Express for high-volume, short (up to five minutes) workloads such as event processing, where cost per execution matters and at-least-once semantics are acceptable.
+
+</details>
+
+- [ ] I can diagnose and fix a hot Kinesis shard.
+<details>
+<summary>Explanation</summary>
+
+Hot shards result from skewed partition keys. Improve key distribution (add salt/randomization), split shards or switch to on-demand mode, and use enhanced fan-out for multiple consumers to avoid read contention.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/09-security-services-edge-protection" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 09: Security Services & Edge Protection: GuardDuty, Security Hub, WAF, Shield & Network Firewall
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/11-storage-s3-ebs-efs-fsx-storage-gateway" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 11: Storage Architecture: S3, EBS, EFS, FSx & Storage Gateway →
+  </a>
+</div>

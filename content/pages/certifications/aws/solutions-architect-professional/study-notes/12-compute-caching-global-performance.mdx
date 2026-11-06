@@ -1,0 +1,176 @@
+---
+title: "Module 12: Compute, Caching & Global Performance: EC2, CloudFront & Global Accelerator"
+description: "Instance families, placement groups, caching layers, CloudFront behaviors and edge compute, Global Accelerator and bottleneck analysis."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 12
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Instance families, placement groups, caching layers, CloudFront behaviors and edge compute, Global Accelerator and bottleneck analysis.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 2.5 and 3.3 Performance">
+You must translate business requirements into measurable metrics, find bottlenecks, and apply caching, buffering, replicas, edge services and rightsized instances. Know the typical bottleneck for each tier and the managed fix.
+</Callout>
+
+---
+
+## 1. EC2 Instance Families and Purchasing for Performance
+
+| Family | Focus | Examples of use |
+|---|---|---|
+| M | General purpose | Web/app servers |
+| T | Burstable (CPU credits; unlimited mode available) | Low-average CPU workloads |
+| C | Compute optimized | Batch, gaming, media encoding, HPC |
+| R / X / z | Memory optimized | In-memory databases, SAP HANA (high memory), caching |
+| I / D / H | Storage optimized (local NVMe or HDD) | NoSQL, data warehousing, high IOPS |
+| P / G / Trn / Inf | GPU and ML accelerators | ML training and inference |
+| Hpc | High performance computing | Tightly coupled simulations |
+| "g" suffix (for example m7g) | AWS Graviton (Arm) | Better price/performance and energy efficiency when software supports Arm |
+| "n" / "d" / "a" suffixes | Enhanced networking / local NVMe / AMD | Match specific needs |
+
+**Enhanced networking (ENA)**, **Elastic Fabric Adapter (EFA)** for HPC and ML (OS-bypass, MPI), **Nitro** hypervisor for near bare-metal performance, **EBS-optimized** instances, and **Compute Optimizer** for rightsizing recommendations from CloudWatch metrics (needs memory metrics via the CloudWatch agent for memory-based decisions).
+
+**Placement groups:**
+
+| Type | Behavior | Use |
+|---|---|---|
+| Cluster | Packs instances close in one AZ for lowest latency and highest network throughput | HPC, tightly coupled |
+| Spread | Each instance on distinct hardware; up to 7 running instances per AZ per group | Small number of critical instances |
+| Partition | Groups of instances on separate racks (up to 7 partitions per AZ) | Hadoop, Cassandra, Kafka |
+
+## 2. Caching and Buffering Layers
+
+```
+ Client -> CloudFront (edge cache) -> ALB -> App -> ElastiCache / DAX -> Database
+                                         \-> SQS (buffer writes) -> workers
+```
+
+| Layer | Service | Purpose |
+|---|---|---|
+| Edge | CloudFront | Cache static and dynamic content, reduce origin load and latency |
+| API | API Gateway caching | Cache responses per stage (REST APIs) |
+| Application | ElastiCache for Redis / Memcached | Session store, query results, leaderboards (Redis: persistence, replication, data structures, Multi-AZ; Memcached: simple multithreaded cache) |
+| DynamoDB | DAX | Microsecond read cache for DynamoDB, API-compatible, write-through |
+| Database | Read replicas, Aurora replicas | Offload reads |
+| Buffering | SQS, Kinesis, Firehose | Smooth bursts and decouple write rate |
+| Content/lookup | S3 + CloudFront, Route 53 latency routing | Global distribution |
+
+**Caching strategies:** lazy loading (cache-aside; may serve stale data, cache miss penalty), write-through (always fresh, extra writes, larger cache), TTLs to bound staleness, and eviction policies.
+
+## 3. CloudFront in Depth
+
+- **Origins:** S3, ALB/EC2, API Gateway, custom HTTP, MediaPackage. **Origin groups** provide automatic failover between a primary and secondary origin on specified status codes.
+- **Origin Access Control (OAC)** for S3 (replaces legacy OAI) so the bucket is not public; **VPC origins** for private ALB/EC2.
+- **Cache behaviors** by path pattern, **cache policies** (TTL, cache key: headers, cookies, query strings) and **origin request policies**. Minimize the cache key to raise hit ratio.
+- **Security:** signed URLs and signed cookies (restrict access to premium content), geo restriction, field-level encryption, WAF and Shield integration, HTTPS viewer/origin protocol policies. Custom certificates from ACM must be in us-east-1.
+- **Edge compute:** **CloudFront Functions** (JavaScript, sub-millisecond, viewer request/response only, lightweight header/URL rewriting) vs **Lambda@Edge** (Node.js/Python, viewer and origin events, longer execution, network access, heavier logic).
+- **Price classes** reduce cost by limiting edge locations used; **Origin Shield** adds a centralized caching layer to reduce origin load; **continuous deployment** supports staged rollouts of distribution config.
+- Data transfer from AWS origins to CloudFront is free, and CloudFront egress is cheaper than direct egress, so it is often a cost AND performance answer.
+
+## 4. Global Accelerator vs CloudFront vs Route 53
+
+| Service | Layer | Best for |
+|---|---|---|
+| CloudFront | HTTP/HTTPS content delivery with caching | Websites, APIs, video, static and dynamic acceleration |
+| Global Accelerator | TCP/UDP, 2 static anycast IPs, AWS backbone, health-based fast failover, traffic dials and endpoint weights | Non-HTTP (gaming, IoT, VoIP), static IP requirement, instant regional failover with no DNS caching, multi-Region active/active |
+| Route 53 latency/geo routing | DNS | Regional steering without static IPs; subject to DNS caching |
+| S3 Transfer Acceleration | Uploads to S3 via edge | Long-distance uploads to one bucket |
+
+<Callout variant="warning" title="Exam Trap">
+"Static IP addresses and fast regional failover for a TCP application": Global Accelerator. "Cache images and speed up a website": CloudFront. Global Accelerator does not cache content.
+</Callout>
+
+## 5. Identifying and Fixing Bottlenecks
+
+| Symptom | Likely bottleneck | Fix |
+|---|---|---|
+| High CPU on web tier | Under-provisioned compute | Auto Scaling target tracking, larger/compute-optimized or Graviton instances |
+| Low CPU, high latency, many DB connections | Database connections | RDS Proxy, connection pooling, read replicas |
+| DynamoDB throttling (ProvisionedThroughputExceeded) | Hot partition or low capacity | Better key design, on-demand mode, adaptive capacity, DAX for reads |
+| High origin load, repeated identical requests | No caching | CloudFront, ElastiCache, API caching |
+| EBS queue depth high, IOPS at limit | Volume or instance EBS limit | Provision gp3/io2 IOPS, EBS-optimized larger instance, striping |
+| S3 503 Slow Down | Request rate on a prefix | Spread across prefixes, retry with backoff, CloudFront |
+| Slow cross-Region users | Distance | CloudFront, Global Accelerator, multi-Region read replicas |
+| Lambda cold starts | Initialization latency | Provisioned concurrency, SnapStart, smaller packages |
+| Network throughput limit | Instance network bandwidth | Larger instance, ENA/EFA, cluster placement group |
+
+```bash
+aws compute-optimizer get-ec2-instance-recommendations --query 'instanceRecommendations[].{id:instanceArn,finding:finding}'
+aws cloudwatch put-metric-alarm --alarm-name high-latency --namespace AWS/ApplicationELB \
+  --metric-name TargetResponseTime --statistic p99 --period 60 --evaluation-periods 5 --threshold 1 \
+  --comparison-operator GreaterThanThreshold --dimensions Name=LoadBalancer,Value=app/web/abc
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Turning Business Requirements into KPIs">
+
+"Pages must feel instant" becomes p95 time-to-first-byte under 200 ms and p99 API latency under 500 ms; "must stay up" becomes an availability SLO and error-budget policy; "handle sales events" becomes sustained requests per second with scaling time to capacity. Instrument with CloudWatch, X-Ray, CloudFront and ALB metrics; validate with load tests before and after changes and compare against the baseline.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Burstable (T) Instance Pitfalls">
+
+T-family instances earn CPU credits below baseline and spend them when bursting. Sustained load exhausts credits and throttles to baseline (standard mode) or incurs surplus charges (unlimited mode). If CPU credit balance alarms fire or average CPU is persistently high, move to M or C families.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 6. Common Traps & Distractors
+
+- "Reduce latency for users globally on a dynamic API": CloudFront or Global Accelerator, not larger instances.
+- "Reads dominate and data tolerates seconds of staleness": replicas and caching.
+- "Tightly coupled HPC needing microsecond latency": cluster placement group with EFA.
+- "Rightsize based on utilization": Compute Optimizer (needs CloudWatch data; memory requires the agent).
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose the correct placement group for a given workload.
+<details>
+<summary>Explanation</summary>
+
+Cluster for lowest latency/highest throughput in one AZ; spread for a few critical instances isolated from each other's hardware failure; partition for large distributed systems that need rack-level fault isolation and topology awareness.
+
+</details>
+
+- [ ] I can explain when to use CloudFront Functions vs Lambda@Edge.
+<details>
+<summary>Explanation</summary>
+
+CloudFront Functions suit lightweight, high-scale viewer request/response manipulations (URL rewrites, header changes, simple auth tokens) with sub-millisecond runtime. Lambda@Edge suits more complex logic, origin request/response triggers, network calls and longer execution.
+
+</details>
+
+- [ ] I can differentiate Global Accelerator and CloudFront.
+<details>
+<summary>Explanation</summary>
+
+CloudFront is a caching CDN for HTTP(S). Global Accelerator is a network-layer service that provides static anycast IPs, routes TCP/UDP over the AWS backbone to the closest healthy endpoint and fails over in seconds, without caching.
+
+</details>
+
+- [ ] I can pick a caching strategy for DynamoDB-backed read-heavy workloads.
+<details>
+<summary>Explanation</summary>
+
+Use DAX, a write-through, API-compatible in-memory cache that delivers microsecond reads without application re-architecture. For arbitrary application data or non-DynamoDB sources, use ElastiCache with lazy loading plus TTLs.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/11-storage-s3-ebs-efs-fsx-storage-gateway" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 11: Storage Architecture: S3, EBS, EFS, FSx & Storage Gateway
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/13-purpose-built-databases-analytics" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 13: Purpose-Built Databases & Analytics Services →
+  </a>
+</div>

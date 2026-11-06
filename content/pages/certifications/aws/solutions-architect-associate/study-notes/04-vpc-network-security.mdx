@@ -1,0 +1,181 @@
+---
+title: "Module 04: VPC Architecture & Network Security Controls"
+description: "Subnet tiers, security groups vs NACLs, NAT, VPC endpoints, Network Firewall, Flow Logs, VPN, and Direct Connect security."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 4
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 1.2 — VPC design with security components, network segmentation, security groups, NACLs, NAT, VPC endpoints, Network Firewall, Flow Logs, and secure external connections (VPN, Direct Connect)
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1, Task 1.2 — Design secure workloads and applications">
+The blueprint lists security groups, route tables, network ACLs, NAT gateways, public and private subnets, VPN, and AWS Direct Connect. Expect questions that ask which control is stateful, how to keep traffic off the internet, and how to give private instances outbound access.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Subnets, routing, and what makes a subnet public">
+
+A subnet is **public** only if its route table has a route to an **internet gateway** (0.0.0.0/0 to igw-xxxx) and instances have a public or Elastic IP. A **private** subnet has no such route; outbound internet access goes through a **NAT gateway** that lives in a public subnet.
+
+* VPC CIDR blocks range from /16 (largest) to /28 (smallest). AWS reserves **5 IP addresses** in every subnet (network, VPC router, DNS, future use, broadcast).
+* A subnet lives in exactly one AZ. High availability requires subnets in multiple AZs.
+* The main route table is the default for subnets without an explicit association. Prefer explicit associations.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Stateful versus stateless filtering">
+
+**Security groups** track connections: if inbound traffic is allowed, the response is automatically allowed regardless of outbound rules. **NACLs** do not track state, so you must allow return traffic explicitly, including **ephemeral ports (1024-65535)** for client responses. NACL rules are evaluated in ascending rule-number order and the first match wins.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Control | Level | State | Rule types | Default | Exam nuance |
+|---|---|---|---|---|---|
+| Security group | ENI / instance | Stateful | Allow only | Deny all inbound, allow all outbound | Can reference other security groups; evaluated as a union of all rules |
+| Network ACL | Subnet | Stateless | Allow and deny | Default NACL allows all; custom NACL denies all | Use to block specific IPs (SGs cannot deny) |
+| Route table | Subnet | N/A | Routes | Local route for VPC CIDR | Controls where traffic can go |
+| AWS Network Firewall | VPC (firewall endpoints) | Stateful and stateless | Domain filtering, IPS, Suricata-compatible rules | None | Deep inspection, egress domain allow-lists |
+| VPC Flow Logs | ENI, subnet, or VPC | N/A | Metadata logging | Disabled | Troubleshooting and forensics; does not capture packet payloads |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+                          Internet
+                             |
+                     +-------+-------+
+                     | Internet GW   |
+                     +-------+-------+
+                             |
+   VPC 10.0.0.0/16           |
+  +--------------------------+-------------------------------+
+  | Public subnets (AZ-a, AZ-b)                              |
+  |   ALB  |  NAT gateway (one per AZ for HA)                |
+  +--------------------------+-------------------------------+
+                             | SG: allow 443 from ALB SG only
+  +--------------------------+-------------------------------+
+  | Private app subnets (AZ-a, AZ-b)                         |
+  |   EC2 / ECS tasks   --> outbound via NAT                 |
+  +--------------------------+-------------------------------+
+                             | SG: allow 3306 from app SG only
+  +--------------------------+-------------------------------+
+  | Private data subnets (AZ-a, AZ-b)                        |
+  |   RDS / ElastiCache   (no route to internet at all)      |
+  +----------------------------------------------------------+
+```
+
+### Private connectivity to AWS services
+
+| Option | Targets | How it works | Cost model |
+|---|---|---|---|
+| Gateway endpoint | Amazon S3, Amazon DynamoDB only | Route table entry to a prefix list | No charge |
+| Interface endpoint (AWS PrivateLink) | Most AWS services, partner and your own services | ENI with private IP in your subnet | Hourly plus per-GB |
+| NAT gateway | Any internet destination | Source NAT to Elastic IP | Hourly plus per-GB processed |
+| Egress-only internet gateway | IPv6 outbound only | Stateful, blocks inbound IPv6 | No charge for the gateway |
+
+### Securing hybrid connections
+
+| Option | Encrypted by default | Bandwidth | Provisioning | Notes |
+|---|---|---|---|---|
+| Site-to-Site VPN | Yes (IPsec) | Up to 1.25 Gbps per tunnel; two tunnels per connection | Minutes | Quick, internet-based, use for backup or modest bandwidth |
+| AWS Direct Connect | No | 1, 10, or 100 Gbps dedicated; hosted options start lower | Weeks | Private, consistent latency; add VPN over Direct Connect or MACsec for encryption |
+| AWS Client VPN | Yes (TLS) | Per user | Minutes | Remote user access to VPC and on-premises |
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```bash
+# Security group rule that references another security group (no CIDR needed)
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-0appserver \
+  --protocol tcp --port 3306 \
+  --source-group sg-0webtier
+
+# Create a gateway endpoint for S3 and attach to a private route table
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-0abc --service-name com.amazonaws.us-east-1.s3 \
+  --route-table-ids rtb-0private
+
+# Enable VPC Flow Logs to CloudWatch Logs
+aws ec2 create-flow-logs --resource-type VPC --resource-ids vpc-0abc \
+  --traffic-type ALL --log-destination-type cloud-watch-logs \
+  --log-group-name /vpc/flow --deliver-logs-permission-arn <role-arn>
+```
+
+**Endpoint policy example:** restrict a gateway endpoint so instances can reach only your company buckets, and pair it with a bucket policy using `aws:SourceVpce` so the bucket is reachable only through that endpoint.
+
+**Administrative access without bastions:** use **AWS Systems Manager Session Manager** (no inbound ports, IAM-controlled, audited) instead of opening SSH or RDP to the internet.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Using a security group to block a specific malicious IP. Security groups only allow; use a NACL deny rule or AWS WAF.
+- **Trap 2:** Forgetting ephemeral ports in a custom NACL, which breaks return traffic.
+- **Trap 3:** Placing a NAT gateway in a private subnet. A public NAT gateway must sit in a public subnet with a route to the internet gateway.
+- **Trap 4:** Assuming Direct Connect is encrypted. It is not; add an IPsec VPN or MACsec if encryption is required.
+- **Trap 5:** Using a NAT gateway to reach S3 from private subnets when a free gateway endpoint exists.
+- **Trap 6:** Opening port 22 to 0.0.0.0/0 when Session Manager removes the need for inbound access.
+- **Trap 7:** Thinking VPC peering is transitive. It is not.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can compare security groups and NACLs on state, scope, and rule types.
+<details>
+<summary>Explanation</summary>
+
+Security groups are stateful, attach to ENIs, and support only allow rules. NACLs are stateless, attach to subnets, support allow and deny, and evaluate rules in numeric order. Use security groups for primary instance-level control and NACLs for subnet-wide deny rules or an extra layer.
+
+</details>
+
+- [ ] I can design a three-tier VPC with public, private app, and private data subnets.
+<details>
+<summary>Explanation</summary>
+
+Place load balancers and NAT gateways in public subnets, application servers in private subnets, and databases in isolated private subnets with no internet route. Chain security groups so each tier accepts traffic only from the previous tier's security group, and spread subnets across at least two AZs.
+
+</details>
+
+- [ ] I can give private instances access to S3 without internet exposure.
+<details>
+<summary>Explanation</summary>
+
+Create a gateway VPC endpoint for S3 and add it to the private route tables. Traffic stays on the AWS network and there is no hourly or data processing charge. Add an endpoint policy and a bucket policy condition on aws:SourceVpce for tighter control.
+
+</details>
+
+- [ ] I can choose between Site-to-Site VPN and Direct Connect and secure each.
+<details>
+<summary>Explanation</summary>
+
+VPN is fast to provision and encrypted but limited per tunnel and internet-dependent. Direct Connect provides dedicated, consistent bandwidth but takes weeks and is not encrypted by default, so layer a VPN over it or use MACsec when compliance requires encryption in transit. Many designs use Direct Connect primary with VPN backup.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/03-multi-account-governance" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 03: Multi-Account Governance with Organizations, SCPs & Control Tower
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/05-application-edge-security" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 05: Securing Applications: WAF, Shield, Cognito, GuardDuty & Secrets →
+  </a>
+</div>

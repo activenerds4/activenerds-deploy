@@ -1,0 +1,165 @@
+---
+title: "Module 14: VPC Design, Gateways & Private Connectivity"
+description: "Subnets, route tables, NACLs vs security groups, NAT/egress-only gateways, VPC endpoints, PrivateLink, peering, Transit Gateway, VPN, and network cost."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 14
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 5.1 (Skills 5.1.1–5.1.4): VPC configuration, private connectivity, auditing network protection services, and optimizing network cost.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 5.1 (Domain 5, 18%)">
+In SOA-C03, **VPNs moved from Task 4.2 to Task 5.1**. Designing hybrid and multi-VPC networks is out of scope; **configuring and operating** them is in. Note that **Direct Connect is not on the published in-scope service list**, whereas Site-to-Site VPN, Client VPN, and Transit Gateway are.
+</Callout>
+
+---
+
+## 1. VPC Fundamentals
+
+* **CIDR:** IPv4 /16 to /28 per VPC or subnet; plan non-overlapping ranges (peering, TGW and VPN require it). **AWS reserves 5 addresses per subnet** (first four and last).
+* **Public subnet** = route table has `0.0.0.0/0` to an **internet gateway**; instances also need a public/Elastic IP. **Private subnet** = no direct IGW route.
+* **Route tables:** most specific prefix wins; the implicit `local` route covers the VPC CIDR.
+
+| Control | Level | Stateful? | Rules | Notes |
+|---|---|---|---|---|
+| **Security group** | ENI/instance | **Stateful** | Allow only; all rules evaluated; can reference other SGs | Default: deny inbound, allow outbound |
+| **Network ACL** | Subnet | **Stateless** | Allow and deny; evaluated by **rule number ascending**, first match wins | Must allow **ephemeral ports 1024-65535** for return traffic; default NACL allows all |
+
+| Gateway | Direction | Notes |
+|---|---|---|
+| **Internet gateway** | Two-way internet for public IPs | Horizontally scaled, no cost itself |
+| **NAT gateway (public)** | Outbound from private subnets | Lives in a **public subnet**, needs an EIP; AZ-scoped, so deploy **one per AZ** for resilience; scales to 100 Gbps; hourly + per GB charge |
+| NAT gateway (private) | Private-to-private (for example to on-premises/TGW) | No EIP |
+| **Egress-only IGW** | **IPv6 outbound only** | IPv6 equivalent of NAT behavior |
+| Elastic IP | Static public IPv4 | Charged for all public IPv4 addresses |
+
+```
+ Internet
+    |
+  [IGW]
+    |
+ Public subnet A: ALB, NAT-GW (EIP)           Public subnet B: ALB, NAT-GW (EIP)
+    |  route 0.0.0.0/0 -> NAT-A                  |  route 0.0.0.0/0 -> NAT-B
+ Private subnet A: app tier                    Private subnet B: app tier
+    |                                              |
+ DB subnet A (no internet route)               DB subnet B
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: DNS settings and IPAM">
+
+* `enableDnsSupport` (Amazon DNS resolver at base address +2) and `enableDnsHostnames` must both be on for **private hosted zones** and **interface endpoint private DNS**.
+* **Amazon VPC IP Address Manager (IPAM)** plans, tracks and audits CIDR usage across accounts and Regions, preventing overlaps and helping find unused addresses.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Private Connectivity
+
+| Option | Use | Key facts |
+|---|---|---|
+| **Gateway endpoint** | S3 and DynamoDB | **Free**, route table entry (prefix list), endpoint policy, only reachable from within the VPC (not from on-premises) |
+| **Interface endpoint (PrivateLink)** | 100+ AWS services and your own services | ENIs in subnets, security group, private DNS, **hourly + per GB charge**, reachable from on-premises over VPN/DX |
+| **PrivateLink service** | Expose your service to other VPCs/accounts | Provider uses an **NLB** (or GWLB); consumers create interface endpoints; no CIDR overlap concerns |
+| **VPC peering** | Connect two VPCs | **Non-transitive**, no overlapping CIDRs, update route tables on both sides, cross-account/Region possible, SG referencing across peers (same Region) |
+| **Transit Gateway** | Hub for many VPCs and VPNs | Transitive routing, route tables with association/propagation, inter-Region peering, shareable with RAM |
+| **Site-to-Site VPN** | IPsec to on-premises | Two tunnels per connection for HA, BGP or static routes, up to about 1.25 Gbps per tunnel |
+| **Client VPN** | Remote user access | OpenVPN-based managed service |
+
+```bash
+aws ec2 create-vpc-endpoint --vpc-id vpc-0abc --service-name com.amazonaws.us-east-1.s3 \
+  --vpc-endpoint-type Gateway --route-table-ids rtb-0abc
+aws ec2 create-vpc-endpoint --vpc-id vpc-0abc --service-name com.amazonaws.us-east-1.ssm \
+  --vpc-endpoint-type Interface --subnet-ids subnet-0a subnet-0b --security-group-ids sg-0abc --private-dns-enabled
+```
+
+---
+
+## 3. Auditing Network Protection Services (single account)
+
+| Service | Purpose | What to audit |
+|---|---|---|
+| **AWS WAF** | Layer 7 filtering (SQLi, XSS, rate limiting, bot control) on CloudFront, ALB, API Gateway, AppSync, Cognito | Web ACL association, rule order and actions, **Count vs Block**, logging enabled, sampled requests |
+| **AWS Shield** | DDoS: **Standard** automatic and free; **Advanced** paid with detection, response team, cost protection | Protected resources, health-based detection, alarms |
+| **AWS Network Firewall** | Managed stateful/stateless VPC firewall (Suricata-compatible rules, domain lists) | Firewall subnets and route tables send traffic through it, rule groups, logging to S3/CloudWatch/Firehose |
+| **Route 53 Resolver DNS Firewall** | Block or alert on DNS queries to malicious domains | Rule group associations to VPCs, domain lists, fail-open or fail-closed setting |
+| Security groups/NACLs | Network filtering | Overly permissive 0.0.0.0/0, unused groups (Config, Trusted Advisor) |
+
+---
+
+## 4. Optimizing Network Cost
+
+* Use **gateway endpoints** for S3 and DynamoDB to remove NAT gateway data processing charges for that traffic.
+* NAT gateway per AZ costs more but avoids **cross-AZ data transfer** and single-AZ failure; for dev/test one shared NAT can be acceptable.
+* Keep chatty tiers in the same AZ where resilience allows; cross-AZ and cross-Region transfer cost money, intra-AZ private traffic is free.
+* Replace multiple peering meshes with **Transit Gateway** when operational complexity outweighs per-attachment cost; avoid unnecessary Elastic IPs (public IPv4 addresses are charged).
+* Use **IPv6** with an egress-only IGW to avoid NAT costs where supported.
+* Front content with CloudFront to reduce origin egress; interface endpoints are billed hourly per AZ, so consolidate with shared-services VPCs where it makes sense.
+
+---
+
+## 5. Exam Traps & Common Distractors
+
+- **Trap 1:** Expecting VPC peering to route through a third VPC (non-transitive, edge-to-edge).
+- **Trap 2:** NAT gateway placed in a **private** subnet (public NAT must be in a public subnet).
+- **Trap 3:** NACL allowing inbound 443 but not the **ephemeral return ports** outbound.
+- **Trap 4:** Using a NAT gateway for IPv6 (use an **egress-only IGW**).
+- **Trap 5:** Reaching an S3 gateway endpoint from on-premises (use an interface endpoint for S3 or a proxy).
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can give private subnets internet access with high availability.
+<details>
+<summary>Explanation</summary>
+
+Create a NAT gateway with an Elastic IP in a public subnet in **each AZ** and route each private subnet's `0.0.0.0/0` to its own AZ's NAT gateway. Cut cost by adding gateway endpoints for S3 and DynamoDB.
+
+</details>
+
+- [ ] I can pick between gateway and interface endpoints.
+<details>
+<summary>Explanation</summary>
+
+Gateway endpoints exist only for S3 and DynamoDB and are free, route-table based. Interface endpoints use ENIs with security groups and private DNS, cost money, work for most services and from on-premises.
+
+</details>
+
+- [ ] I can troubleshoot connectivity between VPCs.
+<details>
+<summary>Explanation</summary>
+
+For peering: routes on both route tables, security groups and NACLs, non-overlapping CIDRs, DNS resolution settings. For many VPCs, use Transit Gateway with attachment route table association and propagation.
+
+</details>
+
+- [ ] I can audit whether WAF actually protects an application.
+<details>
+<summary>Explanation</summary>
+
+Confirm the web ACL is associated with the correct resource (CloudFront distribution or ALB), rules are in Block (not Count) where intended, managed rule groups are current, logging is enabled, and sampled requests show matches.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/13-compliance-and-security-findings" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 13: Compliance Enforcement & Security Findings Remediation
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/15-dns-cloudfront-and-network-protection" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 15: Route 53, CloudFront, Global Accelerator & Network Protection →
+  </a>
+</div>

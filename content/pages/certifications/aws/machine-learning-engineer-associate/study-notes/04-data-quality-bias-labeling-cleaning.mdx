@@ -1,0 +1,476 @@
+---
+title: "Module 04: Data Quality, Labeling, Bias Detection & Data Cleaning"
+description: "Task 1.3: Glue Data Quality, DataBrew validation, Ground Truth labeling, bias sources and metrics (Clarify), class imbalance, AI training data integrity and cleaning (outliers, imputation, dedup)."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 4
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Domain 1, Task 1.3 (Validate data quality and manage bias) - skills 1.3.1 (validate data quality with DataBrew and AWS Glue Data Quality), 1.3.2 (label and annotate data), 1.3.3 (identify and mitigate sources of bias with dataset splitting, shuffling and augmentation), 1.3.4 (multimodal bias metrics across numeric, text and image assets), 1.3.5 (class imbalance in numeric, text and image datasets), 1.3.6 (AI training data integrity such as prompt-response pair validation and content safety screening) and 1.3.7 (data cleaning: outliers, imputation, deduplication).
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 1.3 (Skills 1.3.1 - 1.3.7)">
+Domain 1 carries 28% of scored content, the largest single weighting, and Task 1.3 is where "is this data fit to train on?" is tested. Skills 1.3.4 (multimodal bias metrics), 1.3.6 (AI training data integrity) and 1.3.7 (data cleaning) are listed as new in MLA-C02. Skills 1.3.1, 1.3.2, 1.3.3 and 1.3.5 carry over from MLA-C01 with a GenAI flavor added. The exam guide also shows that the old Task 1.3 item about loading data into training resources (Amazon EFS, Amazon FSx) was removed, so do not over-invest there. Know which tool answers which question: Glue Data Quality for rule-based checks in pipelines, DataBrew for no-code profiling and cleaning, Ground Truth for human labels, Clarify for bias metrics, Guardrails and Comprehend for safety screening.
+</Callout>
+
+---
+
+## 1. The Data Validation Pipeline at a Glance
+
+Everything in Task 1.3 is a gate between raw data and a training job. A model trained on data that failed a gate inherits the defect, and no hyperparameter tuning removes it.
+
+| Question | Skill | Primary AWS answer |
+|---|---|---|
+| Is the data complete, unique, in range and fresh? | 1.3.1 | AWS Glue Data Quality (DQDL rules), DataBrew data quality rules and profile jobs |
+| Does it have labels, and are they trustworthy? | 1.3.2 | SageMaker Ground Truth, Ground Truth Plus |
+| Is it skewed against a group or source? | 1.3.3, 1.3.4 | SageMaker Clarify pre-training bias metrics, Data Wrangler bias report |
+| Are classes balanced enough to learn from? | 1.3.5 | Resampling, SMOTE, class weights, augmentation |
+| Is generative training data safe and well formed? | 1.3.6 | Schema validation, Bedrock Guardrails ApplyGuardrail, Comprehend, Rekognition moderation |
+| Is it clean? | 1.3.7 | DataBrew, Glue (Spark), Data Wrangler, pandas in a Processing job |
+
+```
+ Raw data (S3, RDS, streams)
+        |
+        v
+ [Gate 1] Schema + quality rules ......... Glue Data Quality / DataBrew       (1.3.1)
+        |  fail -> quarantine prefix + alarm
+        v
+ [Gate 2] Cleaning ....................... dedup, outliers, imputation        (1.3.7)
+        |
+        v
+ [Gate 3] Labels ......................... Ground Truth, consensus, audit     (1.3.2)
+        |
+        v
+ [Gate 4] Bias + imbalance ............... Clarify CI/DPL, resampling         (1.3.3-1.3.5)
+        |
+        v
+ [Gate 5] GenAI integrity ................ prompt-response checks, safety     (1.3.6)
+        |
+        v
+ Split (train/validation/test) -> Training job
+```
+
+<Callout variant="tip" title="Order matters">
+Split the data into train, validation and test sets before any step that learns from the data (imputation statistics, oversampling, scaling). Otherwise information from the test set leaks into training and your evaluation is optimistic. Deduplicate before splitting so the same record cannot land on both sides.
+</Callout>
+
+---
+
+## 2. Skill 1.3.1: Validating Data Quality with Glue Data Quality and DataBrew
+
+### AWS Glue Data Quality
+
+Glue Data Quality evaluates data against a **ruleset** written in **Data Quality Definition Language (DQDL)**. You can run it against Data Catalog tables, inside Glue ETL jobs through the Evaluate Data Quality transform, and from the API. Results include per-rule pass or fail and an overall score, can be written to S3, and can be published as CloudWatch metrics and EventBridge events so a failed check can stop a pipeline or page someone. Glue can also recommend a starting ruleset from your data, and supports dynamic rules that compare the current run against recent history, plus anomaly detection on collected statistics.
+
+```
+Rules = [
+    RowCount > 1000,
+    IsComplete "customer_id",
+    IsUnique "customer_id",
+    Completeness "income" > 0.95,
+    ColumnValues "age" between 18 and 100,
+    ColumnValues "status" in ["ACTIVE", "CLOSED", "SUSPENDED"],
+    ColumnLength "country_code" = 2
+]
+```
+
+```python
+import boto3
+glue = boto3.client("glue")
+
+glue.create_data_quality_ruleset(
+    Name="loans-training-rules",
+    Ruleset=open("loans_rules.dqdl").read(),
+    TargetTable={"DatabaseName": "ml_raw", "TableName": "loans"},
+)
+
+run = glue.start_data_quality_ruleset_evaluation_run(
+    DataSource={"GlueTable": {"DatabaseName": "ml_raw", "TableName": "loans"}},
+    Role=GLUE_ROLE_ARN,
+    RulesetNames=["loans-training-rules"],
+)
+print(run["RunId"])
+```
+
+### AWS Glue DataBrew
+
+DataBrew is the visual, no-code option. A **profile job** computes statistics (missing counts, distinct counts, distributions, correlations, outlier counts) and writes them to S3. A **ruleset** holds data quality rules that you attach to a dataset and validate as part of a profile job. A **recipe** is an ordered list of cleaning steps (fill missing values, remove duplicates, filter outliers, mask PII) that a recipe job applies at scale and can be rerun on new data.
+
+| Aspect | Glue Data Quality | Glue DataBrew |
+|---|---|---|
+| Authoring | Code or console, DQDL text | Visual, point and click |
+| Typical user | Data engineer inside ETL pipelines | Analyst or data scientist without Spark skills |
+| Strength | Rule evaluation as a pipeline gate, CloudWatch and EventBridge integration, scales with Glue | Profiling, interactive exploration, reusable cleaning recipes |
+| Output | Pass or fail per rule, data quality score | Profile report, validation report, cleaned dataset |
+| Choose when the question says | "automatically fail the ETL job if completeness drops" | "no code", "visually profile", "business analyst cleans data" |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Where to place quality checks and what to do on failure">
+
+A rule failure is only useful if it triggers an action. The common production pattern is to validate on ingestion and again just before training.
+
+* **Gate at ingestion:** Run Glue Data Quality in the ETL job that lands data in the curated S3 prefix. On failure, write the bad batch to a quarantine prefix and stop the downstream trigger.
+* **Gate before training:** A SageMaker Pipelines step (a Processing step or a Lambda step) calls the Glue evaluation run and fails the pipeline execution if the score is below the agreed threshold.
+* **Alerting:** Publish metrics to CloudWatch and route a failed evaluation through EventBridge to SNS or a Lambda function.
+* **Static versus dynamic rules:** Fixed thresholds catch known invariants (a key must be unique). Dynamic rules and anomaly detection catch unknown shifts such as a sudden drop in row count, but need history to compare against.
+* **Not a substitute for drift monitoring:** Glue Data Quality checks data at rest in the pipeline. Live inference traffic is monitored by SageMaker Model Monitor (Module 12).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Skill 1.3.2: Labeling and Annotating Data with SageMaker Ground Truth
+
+Supervised learning needs labels, and label quality caps model quality. **SageMaker Ground Truth** manages the human labeling workflow: you supply an input manifest, choose a task type and a workforce, and Ground Truth produces an output manifest with labels. Built-in task types cover image classification, object detection, semantic segmentation, text classification, named entity recognition, video and 3D point cloud, and you can define custom task templates. **Ground Truth Plus** is the turnkey managed option where AWS handles the workforce and workflow for you.
+
+| Workforce | Who labels | Use when |
+|---|---|---|
+| Amazon Mechanical Turk (public) | Anonymous crowd | Non-sensitive data, simple tasks, lowest cost |
+| Private workforce | Your employees or contractors, authenticated through Cognito or an identity provider | Confidential or regulated data, domain experts |
+| Vendor workforce | Vetted third-party companies from AWS Marketplace | Scale with some confidentiality and managed quality |
+
+```
+ S3 input manifest (one JSON line per object)
+        |
+        v
+ Labeling job --> Workers see task UI (Pre-task Lambda builds each task)
+        |                    |
+        |             N workers per object
+        |                    |
+        |          Annotation consolidation Lambda merges answers
+        |                    |
+        +-- automated data labeling (supported task types): model labels easy items,
+        |   sends low-confidence items to humans, learns from human labels
+        v
+ S3 output manifest (labels + confidence) --> training job
+```
+
+```python
+import boto3
+sm = boto3.client("sagemaker")
+
+sm.create_labeling_job(
+    LabelingJobName="defects-batch-01",
+    LabelAttributeName="defect-class",
+    InputConfig={"DataSource": {"S3DataSource": {"ManifestS3Uri": "s3://ml-label/in/manifest.jsonl"}}},
+    OutputConfig={"S3OutputPath": "s3://ml-label/out/"},
+    RoleArn=GT_ROLE_ARN,
+    HumanTaskConfig={
+        "WorkteamArn": WORKTEAM_ARN,
+        "UiConfig": {"UiTemplateS3Uri": "s3://ml-label/ui/template.liquid.html"},
+        "PreHumanTaskLambdaArn": PRE_TASK_LAMBDA_ARN,
+        "TaskTitle": "Classify defect type",
+        "TaskDescription": "Pick the best defect category for the image",
+        "NumberOfHumanWorkersPerDataObject": 3,
+        "TaskTimeLimitInSeconds": 300,
+        "AnnotationConsolidationConfig": {"AnnotationConsolidationLambdaArn": CONSOLIDATION_LAMBDA_ARN},
+    },
+    LabelCategoryConfigS3Uri="s3://ml-label/in/categories.json",
+)
+```
+
+The input manifest is JSON Lines, one object per line, such as `{"source-ref": "s3://ml-label/images/img-0001.jpg"}`.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Label quality, consensus and automated labeling">
+
+Cheap labels are expensive if they are wrong. Ground Truth gives you several levers to protect quality.
+
+* **Multiple workers per object:** Several workers label the same item and the consolidation step combines their answers, which reduces individual annotator error and personal bias. Disagreement itself is a signal that the instructions are ambiguous.
+* **Clear instructions and examples:** Most label noise comes from vague category definitions. Give good and bad examples in the task UI.
+* **Audit and adjustment jobs:** A verification or adjustment job lets a second group review labels from an earlier job, which is cheaper than relabeling from scratch.
+* **Automated data labeling:** For supported built-in task types, Ground Truth trains a model on human labels, auto-labels items it is confident about and routes the rest to humans. It reduces cost and time on large datasets, but you should still audit a sample, and it is not available for fully custom task types.
+* **Bias angle:** If all annotators share a background, the labels encode that perspective. A diverse workforce and consensus rules are part of bias mitigation under skill 1.3.3.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Labeling for generative AI data">
+
+Fine-tuning data is also labeled data: pairs of a prompt and a desired response. Humans write or rate the responses, and the quality bar is the same. Use a private workforce of domain experts for sensitive content, define a rubric (accuracy, tone, completeness, safety) and measure agreement between raters before trusting the set. Human review of model outputs also feeds evaluation and human-in-the-loop skills covered with Domain 2.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Skills 1.3.3 and 1.3.4: Identifying and Measuring Bias
+
+### Sources of bias in data
+
+| Source | What it looks like | Mitigation |
+|---|---|---|
+| Sampling or selection bias | Training sample over-represents one group, region or channel | Collect more data for under-represented groups, stratified sampling |
+| Historical bias | Past decisions (for example hiring) encode unfair outcomes in the labels | Review label definitions, reweigh, exclude or audit proxy features |
+| Measurement bias | A sensor or process records one group less accurately | Calibrate collection, validate per group |
+| Label or annotator bias | Human labelers apply subjective judgments inconsistently | Diverse workforce, consensus, clear guidelines |
+| Proxy features | A neutral column (postal code) correlates with a protected attribute | Detect with correlation analysis, drop or constrain |
+| Split bias | Validation or test set does not reflect the groups present in production | Stratified splits that preserve facet and class proportions |
+
+**Dataset splitting, shuffling and augmentation (skill 1.3.3):**
+
+* **Stratified splitting** keeps class and facet proportions equal across train, validation and test, so you can measure per-group performance honestly. A random split of a small minority group can leave the test set with almost none of it.
+* **Group-aware splitting** keeps all rows from one entity (a patient, a customer) in the same split, which prevents leakage that makes results look better than they are.
+* **Shuffling** removes ordering artifacts, such as data sorted by date or class, before batching or splitting. Do not shuffle time-series data across the time boundary when the task is forecasting.
+* **Augmentation** adds variation to under-represented cases: flips, crops and rotations for images, back-translation or synonym replacement for text, and synthetic interpolation for tabular rows.
+
+### SageMaker Clarify pre-training bias metrics
+
+Clarify measures bias in the dataset before any model exists. You name a **facet** (the sensitive attribute, such as gender), say which facet value is the potentially disadvantaged group, and give the **label** that counts as the positive outcome.
+
+| Metric | Abbreviation | Meaning | Reading it |
+|---|---|---|---|
+| Class Imbalance | CI | Imbalance in the number of members between facet values | Range -1 to +1. Positive means the advantaged facet has more rows, near zero is balanced |
+| Difference in Proportions of Labels | DPL | Difference in the share of positive labels between facets | Range -1 to +1 for binary labels. Near zero means similar positive rates |
+| Kullback-Leibler and Jensen-Shannon divergence | KL, JS | Divergence between the outcome distributions of facets | Zero means identical distributions |
+| Total variation distance | TVD | Half the L1 distance between outcome distributions | Larger means more different |
+| Kolmogorov-Smirnov | KS | Maximum divergence between outcome distributions | Larger means more different |
+| Conditional Demographic Disparity | CDD | Disparity of outcomes overall and within subgroups | Helps detect Simpson-style effects hidden by aggregation |
+
+Worked example: a loan dataset has 800 rows for facet a and 200 for facet d. CI is (800 minus 200) divided by 1,000, which is 0.6, so the data is heavily skewed. If 60% of facet a rows are approved but only 30% of facet d rows, DPL is 0.6 minus 0.3, which is 0.3. CI says "not enough facet d rows", DPL says "facet d is approved less often in the labels". They are different problems with different fixes.
+
+```python
+from sagemaker import clarify
+
+processor = clarify.SageMakerClarifyProcessor(
+    role=ROLE_ARN, instance_count=1, instance_type="ml.m5.xlarge", sagemaker_session=session)
+
+data_config = clarify.DataConfig(
+    s3_data_input_path="s3://ml-data/loans/train.csv",
+    s3_output_path="s3://ml-data/clarify/pre-training/",
+    label="approved",
+    headers=["approved", "gender", "income", "age", "region"],
+    dataset_type="text/csv",
+)
+bias_config = clarify.BiasConfig(
+    label_values_or_threshold=[1],       # the positive outcome
+    facet_name="gender",
+    facet_values_or_threshold=[0],       # the group to protect
+)
+processor.run_pre_training_bias(
+    data_config=data_config, data_bias_config=bias_config, methods=["CI", "DPL"])
+```
+
+### Skill 1.3.4: Bias metrics across numeric, text and image assets
+
+Clarify's pre-training metrics operate on tabular records with a facet column and a label. To apply them to text and image assets, you first attach **metadata** to each asset (the facet value, the language, the source region, the label) and then compute the metrics on that metadata table. The distribution questions for each modality are different.
+
+| Modality | What to measure | Typical tooling |
+|---|---|---|
+| Numeric and tabular | CI, DPL and divergence metrics per facet; correlation of features with the facet | Clarify, Data Wrangler bias report |
+| Text | Balance of languages, dialects, topics and sources; label share per group; toxic or stereotyped content rates | Comprehend language detection, metadata columns, Clarify on the metadata table, evaluation of model outputs for stereotyping and toxicity |
+| Image | Balance of capture conditions, regions, demographics (from reliable metadata or human annotation) and classes | Ground Truth annotations or metadata, Clarify on the metadata table |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: What CI and DPL cannot tell you">
+
+A balanced dataset can still produce a biased model, and an imbalanced dataset is not automatically biased. CI only counts rows. DPL only compares label rates and cannot tell you whether the difference is justified (for example, a real difference in qualifications) or caused by historical unfairness. Metrics are signals that trigger human judgment. Pre-training metrics also say nothing about model behavior, which is measured after training with post-training metrics and monitored over time with bias drift in Model Monitor (Module 12). Finally, you can only measure bias along facets you recorded, so dropping the sensitive column to "be fair" removes your ability to detect bias while proxy features keep encoding it.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 5. Skill 1.3.5: Resolving Class Imbalance
+
+Class imbalance means a rare class (fraud, defect, churn) is far smaller than the majority. A model can reach high accuracy by always predicting the majority, so accuracy is the wrong metric here. Use precision, recall, F1, PR-AUC or per-class metrics.
+
+| Technique | Applies to | How it works | Trade-off |
+|---|---|---|---|
+| Random undersampling | Any | Drop majority rows | Fast, but discards information |
+| Random oversampling | Any | Duplicate minority rows | Easy, but risks overfitting to repeated rows |
+| SMOTE | Numeric and tabular | Synthesize minority rows by interpolating between neighbors | Do not apply to raw text or pixels, can create unrealistic points |
+| Class weights or cost-sensitive loss | Any (for example the XGBoost `scale_pos_weight` hyperparameter) | Penalize minority mistakes more | No data change, needs a model that supports it |
+| Image augmentation | Image | Flip, crop, rotate, color-jitter minority images | Must preserve the label |
+| Text augmentation | Text | Back-translation (Amazon Translate), synonym replacement, paraphrasing with an FM | Check that meaning and label survive |
+| Collect or label more minority data | Any | Targeted collection and labeling | Best quality, highest cost |
+| Threshold tuning | Any | Move the decision threshold after training | Does not fix representation |
+
+SageMaker Data Wrangler offers a transform for balancing data (random oversample, random undersample, SMOTE), and you can run imbalanced-learn inside a Processing job.
+
+```python
+from imblearn.over_sampling import SMOTE
+from sklearn.model_selection import train_test_split
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+X_res, y_res = SMOTE(random_state=42).fit_resample(X_tr, y_tr)   # resample ONLY the training split
+```
+
+<Callout variant="warning" title="Exam Trap: Resample after splitting">
+If an answer applies SMOTE or oversampling to the full dataset and then splits, the same (or near-identical synthetic) rows appear in training and test, which inflates test scores. Split first, resample the training portion only, and keep the validation and test sets at the real-world class ratio.
+</Callout>
+
+---
+
+## 6. Skill 1.3.6: Validating AI Training Data Integrity
+
+Generative AI customization data (fine-tuning, continued pre-training, distillation) fails in ways tabular data does not. Bad pairs teach the model wrong behavior, and unsafe or private content in the set can reappear in outputs.
+
+| Check | What it catches | How |
+|---|---|---|
+| Schema validation | Missing fields, wrong types, malformed JSON Lines | A validation script in a Processing job, Glue Data Quality on the manifest |
+| Prompt-response pair validation | Empty or truncated responses, response that does not answer the prompt, duplicated prompts with conflicting answers, wrong language, length outside limits | Rules plus sampling, and an LLM-as-judge or human review for relevance and correctness |
+| Content safety screening | Toxic, hateful or unsafe text in prompts or responses | Bedrock Guardrails `ApplyGuardrail`, Comprehend toxicity detection |
+| Sensitive data screening | PII and secrets that the model could memorize | Comprehend PII detection, redaction or masking before training (skill 1.2.8, Module 03) |
+| Image safety screening | Unsafe or inappropriate images in multimodal sets | Rekognition moderation labels |
+| Provenance and licensing | Data you are not allowed to train on | Source tracking, catalog metadata |
+| Contamination | Evaluation items leaking into training data | Deduplicate against the evaluation set |
+
+```python
+import json, boto3
+br = boto3.client("bedrock-runtime")
+
+def pair_is_valid(rec):
+    p, r = rec.get("prompt", "").strip(), rec.get("completion", "").strip()
+    return 0 < len(p) <= 4000 and 0 < len(r) <= 4000
+
+def pair_is_safe(rec):
+    for text, source in ((rec["prompt"], "INPUT"), (rec["completion"], "OUTPUT")):
+        out = br.apply_guardrail(
+            guardrailIdentifier=GUARDRAIL_ID, guardrailVersion="1",
+            source=source, content=[{"text": {"text": text}}])
+        if out["action"] == "GUARDRAIL_INTERVENED":
+            return False
+    return True
+
+with open("train.jsonl") as src, open("clean.jsonl", "w") as ok, open("rejected.jsonl", "w") as bad:
+    for line in src:
+        rec = json.loads(line)
+        (ok if pair_is_valid(rec) and pair_is_safe(rec) else bad).write(line)
+```
+
+The prompt and completion field names above match the common text-model JSON Lines layout; the exact record format differs by model family, so always follow the format documented for the base model you customize. Keep rejected records, because the rejection reasons tell you where your data sources are weak.
+
+<Callout variant="tip" title="Safety screening is not Guardrails-only">
+Guardrails is a runtime safeguard (skill 4.3.9) but the `ApplyGuardrail` API works on arbitrary text without invoking a model, which makes it usable as a batch screening step on training data. Comprehend (toxicity, PII) and Rekognition (image moderation) are the other managed screens.
+</Callout>
+
+---
+
+## 7. Skill 1.3.7: Cleaning Data - Outliers, Imputation, Deduplication
+
+| Problem | Detect | Treat | AWS tooling |
+|---|---|---|---|
+| Outliers | IQR rule (below Q1 minus 1.5 IQR or above Q3 plus 1.5 IQR), z-score, isolation forest, Random Cut Forest | Investigate first. Remove errors, cap (winsorize) or log-transform genuine extremes, keep real rare events (fraud) | DataBrew, Data Wrangler handle-outliers transform, Glue Spark, SageMaker Random Cut Forest |
+| Missing values | Completeness metrics, profile job | Drop rows or columns when few or uninformative. Impute with mean or median (numeric), mode or an explicit "Unknown" (categorical), kNN or model-based imputation. Add a missing-indicator column when missingness is informative | DataBrew fill-missing, Data Wrangler handle-missing, Glue |
+| Exact duplicates | Uniqueness rules, group by key | Drop duplicates, keeping the latest or most complete | DataBrew remove-duplicates, Spark `dropDuplicates`, Glue Data Quality `IsUnique` |
+| Near duplicates | Fuzzy matching, MinHash for text, embedding similarity | Cluster and keep one representative | Glue FindMatches ML transform, custom Processing job |
+| Inconsistent formats | Profile value patterns | Normalize case, dates, units, categories | DataBrew recipe steps, Glue |
+
+```python
+import pandas as pd
+
+df = pd.read_parquet("s3://ml-data/raw/loans/")
+
+df = df.drop_duplicates(subset=["application_id"], keep="last")
+
+q1, q3 = df["income"].quantile([0.25, 0.75])
+iqr = q3 - q1
+df["income"] = df["income"].clip(lower=q1 - 1.5 * iqr, upper=q3 + 1.5 * iqr)   # winsorize
+
+df["age_missing"] = df["age"].isna().astype(int)                                # informative missingness
+df["age"] = df["age"].fillna(df["age"].median())                                # compute on TRAIN only in practice
+```
+
+Deduplication matters more for generative AI. Repeated documents bias the model toward memorizing them, repeated prompts with different answers teach inconsistency, and duplicates between training and evaluation sets inflate scores. Near-duplicate removal (clustering by text similarity) is the standard approach for large text corpora.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Imputation choices and the leakage rule">
+
+Mean imputation is fast but shrinks variance and is distorted by outliers, so median is safer for skewed numeric columns. Model-based imputation preserves relationships between features but costs more and can overfit. Whatever you choose, compute the imputation statistic (mean, median, kNN model) on the **training split only** and apply it to validation, test and production data. A statistic computed on the full dataset leaks test information. In a pipeline, persist the fitted imputer (or Data Wrangler flow) with the model so inference applies exactly the same transformation. Also decide whether missingness itself is a signal: a blank income field on a loan application may be predictive, which is why the missing-indicator column is often worth keeping.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 8. Common Traps and Scenario Reasoning
+
+<Callout variant="warning" title="Exam Trap: Pick the tool that matches the verb">
+Read the verb in the scenario. "Validate", "fail the job", "rule" points to Glue Data Quality. "Profile visually", "no code" points to DataBrew. "Label", "annotate" points to Ground Truth. "Detect bias in the training data before training" points to Clarify pre-training metrics. "Screen prompts and responses for harmful content" points to Guardrails ApplyGuardrail or Comprehend. Answers that propose custom Lambda code or a hand-built labeling app where a managed capability exists are almost always distractors.
+</Callout>
+
+**Scenario 1.** A fraud dataset has 0.5% positive rows. The team reports 99.5% accuracy and wants to deploy.
+*Wrong answer:* Approve, because accuracy is above target. *Right answer:* Accuracy is meaningless here because predicting "not fraud" always scores 99.5%. Evaluate recall, precision and PR-AUC on a stratified test set, and address imbalance with class weights or resampling of the training split.
+
+**Scenario 2.** A hiring model's training data has 90% rows from one gender and a much lower approval rate for the other. The proposal is to delete the gender column and move on.
+*Wrong answer:* Remove the facet to eliminate bias. *Right answer:* Removing the column hides the problem (proxy features remain) and prevents measurement. Keep the facet for analysis, measure CI and DPL with Clarify, then rebalance, collect more data and review the labels.
+
+**Scenario 3.** A medical image dataset was labeled by a public crowd, and the images contain patient information.
+*Wrong answer:* Use the Mechanical Turk workforce for lowest cost. *Right answer:* Use a private workforce (or a vetted vendor under agreement) for confidential data and domain-expert labeling.
+
+**Scenario 4.** A fine-tuning set of 200,000 prompt-response pairs is scraped from support chats and contains names, phone numbers and some abusive messages.
+*Wrong answer:* Fine-tune and rely on the model's guardrails at inference. *Right answer:* Validate pairs, mask or redact PII, screen for toxic content with ApplyGuardrail or Comprehend, deduplicate, and only then fine-tune. Runtime guardrails do not remove memorized training content.
+
+**Scenario 5.** Test accuracy is 99% but production accuracy is 80%. SMOTE was applied before the train-test split.
+*Wrong answer:* Add more layers to the model. *Right answer:* This is leakage. Split first, resample only the training portion.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Glue Data Quality and DataBrew for a validation requirement (skill 1.3.1).
+<details>
+<summary>Explanation</summary>
+
+Glue Data Quality evaluates DQDL rulesets (completeness, uniqueness, value ranges, row counts, dynamic rules) inside Glue jobs or against catalog tables, and emits scores, CloudWatch metrics and EventBridge events so a pipeline can fail automatically. DataBrew is visual and no-code: profile jobs, data quality rules and reusable recipes aimed at analysts. Choose Glue Data Quality for automated gates in engineering pipelines and DataBrew when the scenario stresses no-code exploration and cleaning.
+
+</details>
+
+- [ ] I can explain how Ground Truth produces trustworthy labels and when to use each workforce type (skill 1.3.2).
+<details>
+<summary>Explanation</summary>
+
+Ground Truth takes an input manifest, presents tasks to a workforce, has multiple workers label each object, consolidates their answers and writes an output manifest. Automated data labeling can label confident items with a model and send the rest to humans for supported task types. Use a private workforce for confidential or expert-labeled data, a vendor workforce for managed scale, and Mechanical Turk only for non-sensitive simple tasks. Ground Truth Plus is the turnkey managed alternative.
+
+</details>
+
+- [ ] I can compute and interpret Clarify CI and DPL, and say what pre-training metrics cannot prove (skills 1.3.3 and 1.3.4).
+<details>
+<summary>Explanation</summary>
+
+CI is (na minus nd) divided by (na plus nd), measuring row-count imbalance between the advantaged and disadvantaged facet. DPL is the difference in positive-label proportions between the facets. Both range from -1 to +1 for binary labels, with zero meaning balance. They are computed on the dataset before training with `run_pre_training_bias`, and for text or image assets you compute them on a metadata table carrying the facet and label. They do not prove a model is fair or unfair, they do not explain why a gap exists, and they cannot see attributes you did not record.
+
+</details>
+
+- [ ] I can pick an imbalance technique for numeric, text and image data and apply it in the right order (skill 1.3.5).
+<details>
+<summary>Explanation</summary>
+
+Numeric: class weights, SMOTE or random resampling on the training split. Text: back-translation, synonym replacement or FM paraphrasing, then verify labels still hold. Image: label-preserving flips, crops and rotations of minority images. Always split first, stratify the splits, resample only the training data and judge with precision, recall, F1 or PR-AUC instead of accuracy.
+
+</details>
+
+- [ ] I can list the integrity checks for generative AI training data (skill 1.3.6).
+<details>
+<summary>Explanation</summary>
+
+Validate schema and field presence, validate prompt-response pairs (non-empty, within length limits, response actually answers the prompt, no conflicting duplicates, correct language), screen content for safety with Bedrock Guardrails ApplyGuardrail or Comprehend toxicity detection, find and mask PII, moderate images with Rekognition, check provenance and licensing, and deduplicate against the evaluation set to avoid contamination. Keep rejected records for root-cause analysis.
+
+</details>
+
+- [ ] I can treat outliers, missing values and duplicates without introducing leakage (skill 1.3.7).
+<details>
+<summary>Explanation</summary>
+
+Investigate outliers before removing them, since genuine rare events such as fraud are the signal. Cap or transform extreme but valid values, remove clear errors. Impute with median or mode (or a model) and add a missing indicator when missingness is informative. Remove exact and near duplicates before splitting. Fit imputation statistics on the training split only, and reuse the same fitted transformation at inference. DataBrew, Data Wrangler, Glue and Processing jobs all support these steps.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/03-genai-data-preparation-embeddings-rag" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 03: GenAI Data Preparation: Embeddings, Text Pre-processing, RAG Chunking & FM Tuning Datasets
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/05-model-selection-bedrock-fms-rag-patterns" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 05: Choosing Modeling Approaches: Bedrock FMs, RAG Patterns & AWS AI Services →
+  </a>
+</div>

@@ -2,8 +2,13 @@ import { lazy, Suspense } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ErrorBoundary } from "react-error-boundary";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import SiteShell from "@/components/layout/SiteShell";
+
+const ArticleSlugRedirect = () => {
+  const { slug } = useParams<{ slug: string }>();
+  return <Navigate to={slug ? `/blog/${slug}` : "/articles"} replace />;
+};
 import RouteError from "@/app/error";
 import Seo from "@/components/layout/Seo";
 import { I18nProvider } from "@/lib/i18n/context";
@@ -118,7 +123,7 @@ const App = () => (
                   </ErrorBoundary>
                 }
               />
-              <Route path="/articles/:slug" element={<Navigate to="/blog/:slug" replace />} />
+              <Route path="/articles/:slug" element={<ArticleSlugRedirect />} />
               <Route
                 path="/blog/:slug"
                 element={
@@ -397,17 +402,21 @@ const App = () => (
                 }
               />
 
-              {/* Certs Central Routes */}
+              {/* Technical Certifications Routes */}
               <Route
-                path="/learning/certs-central"
-                element={<Navigate to="/learning/certs-central/vmware/study-notes" replace />}
+                path="/certifications"
+                element={
+                  <ErrorBoundary FallbackComponent={RouteError}>
+                    <SiteShell>
+                      <Suspense fallback={<RouteFallback />}>
+                        <MdxSubPage />
+                      </Suspense>
+                    </SiteShell>
+                  </ErrorBoundary>
+                }
               />
               <Route
-                path="/learning/certs-central/vmware"
-                element={<Navigate to="/learning/certs-central/vmware/study-notes" replace />}
-              />
-              <Route
-                path="/learning/certs-central/*"
+                path="/certifications/*"
                 element={
                   <ErrorBoundary FallbackComponent={RouteError}>
                     <SiteShell>

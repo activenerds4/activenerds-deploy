@@ -1,0 +1,376 @@
+---
+title: "Module 14: Securing ML and AI Workloads: IAM, VPC Isolation, Encryption, Guardrails & Compliance"
+description: "Task 4.3: CodeGuru/Inspector for pipelines, least privilege, IAM roles, CloudTrail/Config, VPC/subnets/security groups, Bedrock API keys vs IAM credentials, Bedrock Guardrails, Macie and sensitive data protection."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 14
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Domain 4, Task 4.3 — securing CI/CD pipelines, least-privilege access to ML/AI artifacts, IAM policies and roles, auditing and logging, network isolation with VPCs, troubleshooting and mitigating security issues, selecting credentials for FM access, and implementing Bedrock Guardrails and sensitive data protection.
+
+<Callout variant="info" title="Exam Blueprint Focus: Skills 4.3.1 – 4.3.9">
+Skills covered: **4.3.1** secure CI/CD by scanning code and images (Amazon CodeGuru, Amazon Inspector), **4.3.2** least privilege on ML/AI artifacts, **4.3.3** IAM policies and roles for users and applications, **4.3.4** monitoring, auditing, compliance and logging (CloudTrail, AWS Config), **4.3.5** troubleshooting security issues, **4.3.6** VPCs, subnets and security groups for isolation, **4.3.7** identifying and mitigating risks and vulnerabilities, **4.3.8** credential types for FMs (Bedrock API keys vs IAM credentials), **4.3.9** safeguards and sensitive data protection (Bedrock Guardrails). Skills 4.3.1, 4.3.8 and 4.3.9 are new in MLA-C02.
+</Callout>
+
+---
+
+## 1. Identity: IAM Roles and Least Privilege (Skills 4.3.2, 4.3.3)
+
+SageMaker and Bedrock use **roles** so no long-lived keys sit in notebooks or containers.
+
+| Role / Principal | Who assumes it | Typical permissions |
+|---|---|---|
+| SageMaker **execution role** | Training, processing, endpoint containers, notebooks | Read S3 data, write S3 artifacts, pull from ECR, write CloudWatch Logs |
+| Pipeline role | SageMaker Pipelines / Step Functions | `sagemaker:CreateTrainingJob`, `iam:PassRole` on the execution role |
+| Bedrock **service role** | Knowledge bases, model customization jobs, agents | Read S3 source data, access vector store, invoke embedding model |
+| Application role | Lambda/ECS app calling the endpoint or model | `sagemaker:InvokeEndpoint` or `bedrock:InvokeModel` only |
+| Data scientist role | Humans via IAM Identity Center / federation | Scoped to project resources; no `iam:*` |
+
+**Least-privilege principles for ML artifacts**
+
+* Scope S3 to the exact bucket and prefix; separate buckets (or prefixes) for raw data, training data, and model artifacts.
+* Scope Bedrock to specific model ARNs rather than `bedrock:*` on `*`.
+* Restrict `iam:PassRole` to the specific roles and, with `iam:PassedToService`, to the intended service.
+* Use **resource-based policies** (S3 bucket policies, KMS key policies, ECR repository policies) in addition to identity policies; both must allow cross-account access.
+* Use **SageMaker Role Manager** persona-based templates to generate starting least-privilege roles, and **IAM Access Analyzer** policy generation from CloudTrail activity to tighten them.
+* Use **permission boundaries** to cap what delegated admins can grant, and **SCPs** for organization-wide guardrails.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeOnlyApprovedModel",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+    },
+    {
+      "Sid": "ReadTrainingPrefixOnly",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::ml-data-prod/fraud/train/*"
+    },
+    {
+      "Sid": "PassOnlyExecutionRoleToSageMaker",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::111122223333:role/FraudSageMakerExecutionRole",
+      "Condition": {"StringEquals": {"iam:PassedToService": "sagemaker.amazonaws.com"}}
+    }
+  ]
+}
+```
+
+A **trust policy** controls who can assume the role:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"Service": "sagemaker.amazonaws.com"},
+    "Action": "sts:AssumeRole"
+  }]
+}
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Policy Evaluation Logic">
+
+1. By default everything is implicitly denied.
+2. An explicit **Deny** in any applicable policy (identity, resource, SCP, permission boundary, session policy) always wins.
+3. Otherwise an **Allow** is required in the identity policy (or resource policy for same-account access), and SCPs / permission boundaries / session policies must **also** allow it (they only restrict; they never grant).
+4. For cross-account access, both the caller's identity policy and the target's resource policy (or an assumed role in the target account) must allow.
+
+Exam implication: if a SageMaker job fails with `AccessDenied` reading S3 even though the role policy allows it, check the bucket policy, a KMS key policy, an SCP, or a VPC endpoint policy for an explicit deny or missing allow.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Who Can Do What in SageMaker Domains">
+
+SageMaker Studio domains support per-user **user profiles** and **spaces**, each with its own execution role. Granting every user the same broad role defeats least privilege. Use per-profile roles, tag-based access control (ABAC) with condition keys like `aws:ResourceTag/project` matching `aws:PrincipalTag/project`, and the `sagemaker:ResourceTag` condition keys to restrict who can open or delete specific resources.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Network Isolation: VPCs, Subnets, Security Groups (Skill 4.3.6)
+
+```
+                        VPC (10.0.0.0/16)
+ ┌─────────────────────────────────────────────────────────────────┐
+ │  Private subnet A (AZ-a)            Private subnet B (AZ-b)     │
+ │  ┌─────────────────────┐            ┌─────────────────────┐     │
+ │  │ SageMaker training  │            │ SageMaker endpoint  │     │
+ │  │ / endpoint ENIs     │            │ ENIs                │     │
+ │  └──────────┬──────────┘            └──────────┬──────────┘     │
+ │       Security group: allow only needed ports/sources           │
+ │             │                                   │               │
+ │   ┌─────────▼───────────────────────────────────▼──────────┐    │
+ │   │ VPC endpoints (PrivateLink): S3 (gateway), ECR api/dkr,│    │
+ │   │ CloudWatch Logs, SageMaker API/Runtime, Bedrock Runtime│    │
+ │   └─────────────────────────────────────────────────────────┘   │
+ └──────────────────────────── no route to Internet Gateway ───────┘
+```
+
+| Control | What it does | ML-specific usage |
+|---|---|---|
+| Private subnets (no IGW route) | No direct inbound internet path | Host training jobs, endpoints, notebooks |
+| **Security groups** | Stateful instance-level firewall (allow rules only) | Restrict endpoint/DB/vector store access to known sources |
+| **Network ACLs** | Stateless subnet-level allow/deny | Coarse subnet boundaries |
+| **Gateway endpoint (S3, DynamoDB)** | Route-table based private path | Read training data without NAT/internet |
+| **Interface endpoints (PrivateLink)** | ENI-based private path to services | SageMaker API & Runtime, ECR, CloudWatch Logs, STS, Bedrock |
+| **Network isolation mode** (`EnableNetworkIsolation`) | Container has **no outbound network** at all | Untrusted/third-party model containers; data and artifacts still delivered by SageMaker |
+| **Endpoint policies** | Restrict what a VPC endpoint can be used for | Allow only approved buckets / actions |
+| Studio `AppNetworkAccessType=VpcOnly` | Studio traffic goes through your VPC | Prevents direct internet from notebooks |
+
+```bash
+aws sagemaker create-training-job --training-job-name iso-train \
+  --role-arn arn:aws:iam::111122223333:role/FraudSageMakerExecutionRole \
+  --algorithm-specification TrainingImage=111122223333.dkr.ecr.us-east-1.amazonaws.com/train:1,TrainingInputMode=File \
+  --vpc-config SecurityGroupIds=sg-0abc,Subnets=subnet-0a1,subnet-0b2 \
+  --enable-network-isolation \
+  --enable-inter-container-traffic-encryption \
+  --resource-config InstanceType=ml.m5.xlarge,InstanceCount=2,VolumeSizeInGB=50 \
+  --output-data-config S3OutputPath=s3://ml-artifacts-prod/out/ \
+  --stopping-condition MaxRuntimeInSeconds=3600
+```
+
+Notes: when using VPC mode, jobs need routes to S3 (use a gateway endpoint) and ECR (interface endpoints) or a NAT gateway; otherwise jobs fail to start. With network isolation, distributed training needs **inter-container traffic encryption** for node-to-node traffic. Access Bedrock privately with an interface endpoint for `bedrock-runtime` and keep traffic off the internet.
+
+---
+
+## 3. Encryption and Sensitive Data (Skills 4.3.7, 4.3.9)
+
+| Layer | Mechanism |
+|---|---|
+| Data at rest in S3 | SSE-KMS with a customer managed key; bucket policy to deny unencrypted puts |
+| Training volumes and output | `VolumeKmsKeyId` and `OutputDataConfig.KmsKeyId` |
+| Endpoint storage | `KmsKeyId` on the endpoint config |
+| In transit | TLS everywhere; inter-container encryption for distributed training |
+| Secrets (API keys, DB passwords) | **AWS Secrets Manager** (with rotation) rather than environment variables or code |
+| Bedrock custom models and knowledge bases | Customer managed KMS keys for model customization jobs, vector stores and agent data |
+| Discovering sensitive data | **Amazon Macie** scans S3 for PII and credentials |
+| Redaction before training | Amazon Comprehend PII detection/redaction, AWS Glue sensitive data detection, DataBrew PII transforms |
+
+KMS key policies must grant the SageMaker/Bedrock role `kms:Decrypt`, `kms:GenerateDataKey` (and `kms:CreateGrant` where the service creates grants). A missing key-policy statement is a classic cause of `AccessDenied` on encrypted data.
+
+---
+
+## 4. Securing CI/CD Pipelines (Skill 4.3.1)
+
+Pipelines are an attack path: a compromised build can ship a poisoned model or image.
+
+* **Amazon CodeGuru Security** scans source code (and notebooks/IaC) for vulnerabilities such as hardcoded credentials and injection flaws, and offers fix suggestions; wire it into CodeBuild as a pipeline stage.
+* **Amazon Inspector** scans container images in **Amazon ECR** (enhanced scanning, continuous) and Lambda/EC2 for known CVEs; block deployment when critical findings appear.
+* Use **AWS CodeConnections** (formerly CodeStar Connections) for source integration instead of storing tokens.
+* Give CodeBuild/CodePipeline roles least privilege; separate build, test and deploy roles; require **manual approval** actions before production.
+* Encrypt the pipeline **artifact bucket** with KMS; enable ECR image tag immutability and signing controls; pull base images only from trusted repositories.
+* Store model artifacts in versioned S3 and register approved versions only in the **Model Registry** with approval status gates.
+
+```yaml
+# buildspec.yml (security stage)
+version: 0.2
+phases:
+  build:
+    commands:
+      - docker build -t $REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION .
+      - docker push $REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION
+      - |
+        aws inspector2 list-findings --filter-criteria \
+          '{"ecrImageRepositoryName":[{"comparison":"EQUALS","value":"train"}],"severity":[{"comparison":"EQUALS","value":"CRITICAL"}]}' \
+          --query 'length(findings)' --output text | grep -q '^0$'
+```
+
+---
+
+## 5. Monitoring, Auditing, Compliance and Logging (Skills 4.3.4, 4.3.5)
+
+| Service | Answers | ML/AI example |
+|---|---|---|
+| **AWS CloudTrail** | Who called which API, when, from where | `CreateTrainingJob`, `InvokeModel` (management events by default; enable **data events** for S3 object access) |
+| **AWS Config** | Is a resource configured compliantly, and what changed | Rule: SageMaker endpoints encrypted / notebooks not internet-direct |
+| **Amazon CloudWatch Logs** | Application and container logs | Training/endpoint logs; Bedrock **model invocation logging** to CloudWatch Logs or S3 |
+| **Amazon Macie** | Sensitive data in S3 | Scan training buckets for PII |
+| **Amazon GuardDuty** | Threat detection | Unusual API behavior, compromised credentials |
+| **AWS Security Hub** | Aggregated findings and compliance standards | Central view across Inspector, Macie, GuardDuty |
+| **IAM Access Analyzer** | External/unused access, policy validation | Find public or cross-account bucket and KMS access |
+| **SageMaker Model Cards / Governance** | Document intended use, risk, approvals | Compliance evidence |
+
+```bash
+# Enable Bedrock model invocation logging for audit (prompts/responses to S3 + CloudWatch)
+aws bedrock put-model-invocation-logging-configuration --logging-config '{
+  "cloudWatchConfig":{"logGroupName":"/bedrock/invocations","roleArn":"arn:aws:iam::111122223333:role/BedrockLoggingRole"},
+  "s3Config":{"bucketName":"bedrock-audit-logs","keyPrefix":"invocations"},
+  "textDataDeliveryEnabled":true}'
+```
+
+**Troubleshooting security issues (4.3.5) — checklist**
+
+1. `AccessDeniedException`: read the error to find the denied action and principal; check identity policy, resource policy, SCP, permission boundary, KMS key policy, and VPC endpoint policy. Use the **IAM policy simulator** or CloudTrail event to confirm.
+2. Job cannot start or hangs in VPC: missing S3/ECR/CloudWatch Logs endpoints or NAT, security group blocking, subnet out of IPs.
+3. `iam:PassRole` denied when creating a job: caller lacks PassRole on the execution role, or trust policy does not list `sagemaker.amazonaws.com`.
+4. Bedrock `AccessDenied`: model access not enabled in the account/region (or end-user license for the model not accepted), or the policy ARN does not match the model/inference profile.
+5. `ThrottlingException` is a quota issue, not a permissions issue.
+
+---
+
+## 6. Credentials for Accessing FMs (Skill 4.3.8)
+
+| Credential type | How it works | Use when | Caveats |
+|---|---|---|---|
+| **IAM role / temporary credentials (SigV4)** | Principal obtains STS temporary credentials; requests signed with SigV4 | Production workloads on Lambda/ECS/EC2/SageMaker; any workload needing fine-grained, auditable access | Recommended default; supports least privilege, conditions, and CloudTrail attribution |
+| **IAM user long-term access keys** | Static access key + secret | Avoid; only legacy/outside-AWS cases | Long-lived, leak risk; rotate or replace with roles |
+| **Amazon Bedrock API keys** | Bearer-token style key generated for Bedrock access (short-term keys tied to the creating principal's session, or long-term keys backed by an IAM user with Bedrock permissions) | Quick exploration, prototyping, simple client integrations | Less granular than roles; treat long-term keys as secrets, set expiry, prefer short-term keys; **not recommended for production** |
+
+Selection rule for the exam: **production → IAM roles with temporary credentials; prototype or developer testing → Bedrock API keys, preferably short-term**. Never embed any key in code; store secrets in Secrets Manager, and revoke/rotate exposed keys immediately. Use IAM policies and SCPs to restrict who may create Bedrock API keys.
+
+---
+
+## 7. Amazon Bedrock Guardrails and Responsible AI (Skill 4.3.9)
+
+Guardrails evaluate **inputs and outputs** independent of the model and can be applied to any FM (via `guardrailConfig` on `Converse`/`InvokeModel`), to knowledge bases and agents, or standalone with the **`ApplyGuardrail`** API (including for non-Bedrock models).
+
+| Guardrail policy | Purpose |
+|---|---|
+| Content filters | Block harmful categories (hate, insults, sexual, violence, misconduct) and prompt attacks at configurable strengths |
+| Denied topics | Block subjects defined in natural language (for example, investment advice) |
+| Word filters | Block custom words/phrases and profanity |
+| **Sensitive information filters** | Detect PII types and custom regex; **block** or **mask/anonymize** them |
+| **Contextual grounding check** | Detect hallucination by checking grounding and relevance against source text (useful for RAG) |
+| Automated Reasoning checks | Validate responses against formal logic rules for factual policy compliance |
+
+```python
+import boto3
+bedrock = boto3.client("bedrock")
+g = bedrock.create_guardrail(
+    name="support-bot-guardrail",
+    blockedInputMessaging="Sorry, I can't help with that.",
+    blockedOutputsMessaging="Sorry, I can't provide that response.",
+    contentPolicyConfig={"filtersConfig": [
+        {"type": "HATE", "inputStrength": "HIGH", "outputStrength": "HIGH"},
+        {"type": "PROMPT_ATTACK", "inputStrength": "HIGH", "outputStrength": "NONE"}]},
+    topicPolicyConfig={"topicsConfig": [{
+        "name": "InvestmentAdvice", "type": "DENY",
+        "definition": "Recommendations on specific investments.",
+        "examples": ["Which stock should I buy?"]}]},
+    sensitiveInformationPolicyConfig={"piiEntitiesConfig": [
+        {"type": "EMAIL", "action": "ANONYMIZE"}, {"type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK"}]})
+
+runtime = boto3.client("bedrock-runtime")
+runtime.converse(modelId="anthropic.claude-3-haiku-20240307-v1:0",
+    messages=[{"role": "user", "content": [{"text": "..."}]}],
+    guardrailConfig={"guardrailIdentifier": g["guardrailId"], "guardrailVersion": "DRAFT"})
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Guardrails vs Other Protection Layers">
+
+* **Guardrails** protect at the application/model I/O layer (harmful content, PII in prompts/responses, hallucination checks).
+* **Macie / Comprehend PII redaction** protect the **data pipeline** (training data and stored documents) before data reaches the model.
+* **IAM and VPC** protect **who and what can reach** the model.
+* **Model invocation logging and CloudTrail** provide the **audit trail**.
+
+A complete answer to "prevent the chatbot from leaking customer PII" usually combines redacting source data, a Guardrail sensitive-information filter on outputs, least-privilege roles on the retrieval store, and logging.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Threats Specific to ML and AI Systems">
+
+* **Prompt injection / jailbreaks:** mitigate with Guardrails prompt-attack filters, input validation, constrained tool permissions for agents, and treating retrieved content as untrusted.
+* **Data poisoning:** validate training data integrity, restrict write access to training buckets, version datasets, and monitor data drift.
+* **Model theft / artifact tampering:** private endpoints, S3 versioning and KMS, signed/approved model registry entries.
+* **Excessive agency:** give agents least-privilege action groups, require human approval for destructive actions.
+* **Sensitive data leakage:** redaction, Macie, guardrail PII filters, no secrets in prompts.
+* **Supply chain:** scan dependencies and images (Inspector, CodeGuru), pin versions, trusted registries.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 8. Exam Traps & Distractors
+
+<Callout variant="warning" title="Common Distractors in Task 4.3">
+* "Attach `AmazonSageMakerFullAccess` / `AdministratorAccess`" — violates least privilege; scope to resources.
+* "Put the API key in an environment variable" — use Secrets Manager or, better, IAM roles.
+* "Security groups can deny traffic" — security groups only have allow rules; NACLs can deny.
+* "Use a NAT gateway to reach S3 privately" — a **gateway VPC endpoint** is the private, cost-free path to S3.
+* "Network isolation means no VPC needed" — isolation blocks container egress; VPC config controls where it runs. They are complementary.
+* "CloudTrail records prompt content" — CloudTrail logs API calls; use **Bedrock model invocation logging** for prompts/responses.
+* "Config stores audit of API callers" — Config tracks resource configuration state; CloudTrail tracks callers.
+* "Guardrails only work with Bedrock models" — `ApplyGuardrail` works with any model's text.
+* "Bedrock API keys for production" — roles with temporary credentials are the recommended production choice.
+</Callout>
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can write a least-privilege policy for a SageMaker job or Bedrock application.
+<details>
+<summary>Explanation</summary>
+
+Grant only the specific actions on specific resources: S3 `GetObject` on the data prefix, `PutObject` on the output prefix, `bedrock:InvokeModel` on the approved model ARN, and `iam:PassRole` on the exact execution role with `iam:PassedToService`. Avoid wildcards on actions and resources, add conditions such as tags or source VPC endpoint where useful, and refine the policy using IAM Access Analyzer policy generation from CloudTrail history.
+
+</details>
+
+- [ ] I can design network isolation for training and inference.
+<details>
+<summary>Explanation</summary>
+
+Place jobs and endpoints in private subnets across two AZs, restrict traffic with security groups, add a gateway endpoint for S3 and interface endpoints for ECR, CloudWatch Logs, SageMaker and Bedrock runtime, enable network isolation for untrusted containers, and encrypt inter-container traffic for distributed training. Disable direct internet access for Studio with VPC-only mode.
+
+</details>
+
+- [ ] I can pick between IAM credentials and Bedrock API keys.
+<details>
+<summary>Explanation</summary>
+
+Use IAM roles with temporary credentials and SigV4 for production workloads because they are short-lived, least-privilege scoped, auditable and need no stored secret. Bedrock API keys suit prototyping and quick tests; prefer short-term keys, avoid long-term keys in production, and never hardcode them.
+
+</details>
+
+- [ ] I know which service secures the pipeline and which audits the account.
+<details>
+<summary>Explanation</summary>
+
+CodeGuru Security scans source code for vulnerabilities and hardcoded secrets; Inspector scans container images in ECR and compute for CVEs. CloudTrail audits API activity (who did what), Config evaluates and records resource configuration compliance, GuardDuty detects threats, Security Hub aggregates findings, and Macie finds sensitive data in S3.
+
+</details>
+
+- [ ] I can explain what Bedrock Guardrails can and cannot do.
+<details>
+<summary>Explanation</summary>
+
+Guardrails apply content filters, denied topics, word filters, sensitive-information detection (block or mask), contextual grounding checks and Automated Reasoning checks to inputs and outputs, usable with Bedrock models, agents, knowledge bases, or any model through `ApplyGuardrail`. They do not replace IAM, network controls, or data redaction in the training pipeline, and they do not provide an audit log by themselves.
+
+</details>
+
+- [ ] I can troubleshoot an AccessDenied or failing VPC job systematically.
+<details>
+<summary>Explanation</summary>
+
+Identify the denied action and principal, then check identity policy, resource policy (S3, KMS, ECR), SCPs, permission boundaries and VPC endpoint policies for explicit denies or missing allows; confirm the trust policy and `iam:PassRole`. For VPC jobs verify routes or endpoints to S3, ECR and CloudWatch Logs, security group rules and subnet IP capacity. Use CloudTrail and the IAM policy simulator to confirm the cause.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/13-cost-performance-optimization" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 13: Optimizing ML and AI Infrastructure Cost & Performance
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    ✓ Complete: Back to Study Guide Hub →
+  </a>
+</div>

@@ -1,0 +1,227 @@
+---
+title: "Module 07: IAM Policies, STS, Programmatic Access & Presigned URLs"
+description: "Policy evaluation logic, roles and trust policies, STS AssumeRole, credential providers, S3 presigned URLs, and CloudFront signed URLs."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 7
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Security
+
+<Callout variant="info" title="Exam Focus: Security (Task 2.1, Skills 2.1.2 to 2.1.7)">
+Fine-grained permissions, security tokens, MFA, programmatic access, **presigned URLs for S3 and CloudFront (new explicit skill in DVA-C03)**, authenticated calls, defining permissions for principals and resources, and assuming roles. Administering IAM users and groups is **out of scope**, but writing and debugging policies as a developer is in scope.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Policy Evaluation Logic">
+
+When a principal makes a request, AWS evaluates all applicable policies:
+
+1. **Default deny.** Everything is denied unless allowed.
+2. **Explicit deny anywhere always wins** (identity policy, resource policy, permissions boundary, SCP, session policy).
+3. An **allow** is required from the applicable policies. Within a **single account**, an allow in either the identity-based policy **or** the resource-based policy is enough (unless a boundary, SCP, or session policy restricts it). For **cross-account** access, **both** the caller's identity policy and the resource's policy must allow.
+4. **Permissions boundaries, SCPs, and session policies only restrict;** they never grant by themselves.
+
+* **Exam Trap:** "The policy attached to the role allows the action but the call is still denied" → look for an explicit deny, an SCP, a permissions boundary, a resource policy or KMS key policy that does not allow the principal, or a VPC endpoint policy.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Policy Types and Structure
+
+| Policy Type | Attached To | Purpose |
+|---|---|---|
+| **Identity-based** | User, group, role | What the identity may do |
+| **Resource-based** | S3 bucket, SQS queue, KMS key, Lambda function, etc. | Who may access this resource (has a `Principal`) |
+| **Trust policy** | IAM role | **Who may assume** the role (a resource-based policy for roles) |
+| **Permissions boundary** | User or role | Maximum permissions ceiling |
+| **SCP** (AWS Organizations) | Account or OU | Guardrail ceiling for an account |
+| **Session policy** | `AssumeRole` call | Further limits a session |
+| **VPC endpoint policy** | Interface or gateway endpoint | Limits what can go through the endpoint |
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "ReadOwnPrefix",
+    "Effect": "Allow",
+    "Action": ["s3:GetObject", "s3:PutObject"],
+    "Resource": "arn:aws:s3:::app-data/${aws:userid}/*",
+    "Condition": { "Bool": { "aws:SecureTransport": "true" } }
+  }]
+}
+```
+
+**Frequently tested condition keys:** `aws:SourceIp`, `aws:MultiFactorAuthPresent`, `aws:RequestedRegion`, `aws:PrincipalOrgID`, `aws:SecureTransport`, `aws:SourceArn` and `aws:SourceAccount` (prevent the **confused deputy** problem when a service acts on your behalf), `s3:prefix`, `dynamodb:LeadingKeys`, `kms:ViaService`.
+
+**Least privilege workflow:** start with narrow actions and resources, use **IAM Access Analyzer** policy generation from CloudTrail activity, test with the **IAM Policy Simulator**, and decode authorization failures with `aws sts decode-authorization-message`.
+
+---
+
+## 2. Roles and the Two Policies Behind Every Role
+
+* **Trust policy** answers: *who can assume this role?* (a service like `lambda.amazonaws.com`, an account, a SAML or OIDC provider.)
+* **Permissions policy** answers: *what can the role do once assumed?*
+
+| Role | Used By | Common Confusion |
+|---|---|---|
+| **Lambda execution role** | The function, to call AWS services and write logs | Separate from the function's **resource policy** (who can invoke it) |
+| **EC2 instance profile** | Apps on EC2 | The profile is the container that passes a role to the instance |
+| **ECS task role** | Your containers | Distinct from the **task execution role** used by ECS to pull images and ship logs |
+| **Service role** | An AWS service acting for you (CodeBuild, CodePipeline, CloudFormation) | Needs trust for that service principal |
+| **Cross-account role** | Another account's principals | Needs trust policy **and** the caller's `sts:AssumeRole` permission |
+
+**`iam:PassRole`** is required to hand a role to a service (for example creating a Lambda function or ECS task with a role). Restrict it to specific role ARNs.
+
+---
+
+## 3. AWS STS and Temporary Credentials
+
+| API | Used For | Notes |
+|---|---|---|
+| **AssumeRole** | Same or cross-account roles, role chaining | Default session **1 hour**; configurable 15 minutes to the role's max session duration (up to 12 hours); chained roles are limited to 1 hour |
+| **AssumeRoleWithWebIdentity** | OIDC identities (Cognito, Google, EKS service accounts, GitHub Actions) | No AWS credentials needed to call |
+| **AssumeRoleWithSAML** | Enterprise SAML federation | |
+| **GetSessionToken** | IAM users with **MFA** | Temporary credentials that satisfy MFA conditions |
+| **GetFederationToken** | Federated proxies | Legacy |
+| **GetCallerIdentity** | "Who am I?" | **Needs no permissions**, great for debugging |
+
+Temporary credentials have three parts: **AccessKeyId, SecretAccessKey, SessionToken** (all required). Third-party cross-account access should use an **ExternalId** in the trust policy to prevent confused-deputy abuse.
+
+```ini
+# ~/.aws/config: assume a role using a source profile and MFA
+[profile prod-admin]
+role_arn       = arn:aws:iam::111122223333:role/DeveloperProd
+source_profile = default
+mfa_serial     = arn:aws:iam::444455556666:mfa/alice
+region         = us-east-1
+```
+
+```bash
+aws sts assume-role --role-arn arn:aws:iam::111122223333:role/DeveloperProd \
+  --role-session-name alice-debug --duration-seconds 3600
+aws sts get-caller-identity
+```
+
+---
+
+## 4. Programmatic Access Best Practices (Skills 2.1.3 and 2.1.5)
+
+| Preference | Method |
+|---|---|
+| Best | **Roles** on compute (Lambda, ECS, EC2, EKS Pod Identity or IRSA), no stored secrets |
+| Good for humans | **IAM Identity Center** (`aws configure sso`, `aws sso login`) with short-lived credentials |
+| For on-premises workloads | **IAM Roles Anywhere** (certificate-based) |
+| Browser CLI | **AWS CloudShell** (inherits your console identity) |
+| Last resort | **IAM user access keys** (rotate, never commit to source control, never embed in code) |
+
+Requests are authenticated with **Signature Version 4**: the SDK signs the request using your credentials; the signature includes the date, region, and service, so **clock skew** (`RequestTimeTooSkewed`) or wrong region causes failures. Use SDKs rather than signing by hand.
+
+---
+
+## 5. Presigned URLs and Signed URLs (Skill 2.1.4)
+
+A **presigned URL** grants time-limited access to a specific S3 operation using the **permissions of the credentials that created it**. Anyone holding the URL can use it until it expires, with no AWS credentials.
+
+| Detail | Behavior |
+|---|---|
+| Operations | GET (download), PUT (upload), and others; **presigned POST** supports form uploads with policy conditions such as `content-length-range` |
+| Max expiry | Up to **7 days** with IAM user credentials; with temporary (role) credentials the URL stops working when the **session credentials expire**, whichever is earlier |
+| Revocation | Cannot revoke an individual URL; remove permissions from the signer, delete or change the object, or let it expire |
+| Bucket stays | **Private**; no public access needed |
+
+```python
+url = s3.generate_presigned_url(
+    "put_object",
+    Params={"Bucket": "uploads", "Key": "user42/photo.jpg", "ContentType": "image/jpeg"},
+    ExpiresIn=900)          # 15 minutes
+```
+
+```bash
+aws s3 presign s3://my-bucket/report.pdf --expires-in 600
+```
+
+**Common failure:** a presigned URL generated inside **Lambda with its execution role** expires when the role's temporary credentials expire, even if you asked for longer.
+
+### CloudFront Signed URLs and Signed Cookies
+
+* Restrict premium content on CloudFront with **signed URLs** (one file) or **signed cookies** (many files, keep URLs unchanged).
+* Signing uses a **trusted key group** (public key uploaded to CloudFront; you keep the private key). Use a **canned policy** (expiry only) or **custom policy** (IP range, start time, wildcard resources).
+* Keep the S3 origin private with **Origin Access Control (OAC)** so that content is reachable only through CloudFront.
+* Choose **signed URLs** for individual files or clients that do not support cookies, and **signed cookies** for multiple restricted files such as a whole video stream.
+
+---
+
+## 6. Common Exam Traps and Scenario Distractors
+
+* "Grant a mobile user temporary upload access to one S3 key without making the bucket public" → **presigned PUT URL** generated by your backend.
+* "A role can be assumed by anyone in my org by mistake" → trust policy too broad; scope `Principal` and add conditions.
+* "Third-party SaaS needs access to our account" → cross-account **role with ExternalId**, never IAM user keys.
+* "Cross-account S3 access is denied even though the bucket policy allows it" → the caller's **identity policy** must also allow.
+* "Function can invoke DynamoDB but S3 cannot invoke the function" → add a **Lambda resource-based policy** (`aws lambda add-permission`).
+* "Developers must not escalate privileges when creating roles" → **permissions boundary**.
+* "Access keys leaked on GitHub" → deactivate and rotate the keys, review CloudTrail, then move to roles.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] A Lambda function generates 12-hour presigned URLs using its execution role, but they stop working after about an hour or less. Why?
+<details>
+<summary>Explanation</summary>
+
+URLs signed with temporary credentials cannot outlive those credentials. Use credentials with longer validity (for example an IAM user with strict permissions, reconsidering the design), or shorten the expiry and re-issue URLs on demand.
+
+</details>
+- [ ] What is the difference between a role's trust policy and permissions policy?
+<details>
+<summary>Explanation</summary>
+
+The **trust policy** defines **who can assume** the role. The **permissions policy** defines **what the role can do** after being assumed. Both must be correct.
+
+</details>
+- [ ] A user in account A needs to read an S3 bucket in account B using their own identity. What must be in place?
+<details>
+<summary>Explanation</summary>
+
+Account B's **bucket policy** must allow the principal, **and** account A's identity policy must allow the S3 actions (or the user assumes a role in B whose permissions allow it).
+
+</details>
+- [ ] An API call works in the console but fails from CLI with `ExpiredToken`. What is wrong?
+<details>
+<summary>Explanation</summary>
+
+The CLI is using **expired temporary credentials** (STS or SSO session). Refresh them with `aws sso login` or by assuming the role again.
+
+</details>
+- [ ] How do you serve paid video segments through CloudFront so that one login unlocks many files?
+<details>
+<summary>Explanation</summary>
+
+Use **CloudFront signed cookies** with a trusted key group and keep the S3 origin private via OAC. Signed URLs would require signing every segment URL.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/06-data-stores-caching-and-lifecycle" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 06: Choosing Data Stores: S3, RDS, Aurora, ElastiCache & Data Lifecycles
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/08-amazon-cognito-and-identity-federation" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 08: Amazon Cognito & Identity Federation →
+  </a>
+</div>

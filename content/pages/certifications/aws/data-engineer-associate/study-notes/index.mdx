@@ -1,0 +1,177 @@
+---
+title: "AWS Certified Data Engineer - Associate Study Guide (15 Modules)"
+description: "15-module study guide for DEA-C01: ingestion, transformation, orchestration, data stores, catalogs, operations, data quality, security, and governance on AWS."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+totalModules: 15
+layout: "hub"
+---
+
+<Callout variant="tip" title="Track Overview & Exam Code: DEA-C01">
+15-module study guide for DEA-C01: ingestion, transformation, orchestration, data stores, catalogs, operations, data quality, security, and governance on AWS. Follow this structured curriculum to gain hands-on proficiency and master scenario-based exam questions.
+</Callout>
+
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-4 my-6 not-prose">
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Exam Code</span>
+    <span className="font-mono text-sm font-bold text-primary">DEA-C01</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Credential Level</span>
+    <span className="font-mono text-sm font-bold text-foreground">Associate</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Study Duration</span>
+    <span className="font-mono text-sm font-bold text-foreground">~40 Hours</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Curriculum</span>
+    <span className="font-mono text-sm font-bold text-foreground">15 Modules</span>
+  </div>
+</div>
+
+<TrackResourceTabs
+  notesCount="15 Modules"
+  mockTestsCount="3 Practice Exams"
+  flashCardsCount="100+ Cards"
+  cheatSheetsCount="5 Reference Cards"
+>
+  <div className="space-y-3 my-4 not-prose">
+  <ModuleCard
+    moduleNumber="1"
+    domain="Data Ingestion & Transformation"
+    title="Module 01: Streaming Ingestion: Kinesis, MSK, DynamoDB Streams & DMS"
+    description="Kinesis Data Streams vs Firehose, MSK, DynamoDB Streams, DMS CDC, fan-in/fan-out, replayability, throttling, and stateful vs stateless processing."
+    readTime="25m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/01-streaming-ingestion-kinesis-msk-dms"
+  />
+  <ModuleCard
+    moduleNumber="2"
+    domain="Data Ingestion & Transformation"
+    title="Module 02: Batch Ingestion, Data APIs, Schedulers & Event Triggers"
+    description="S3, Glue, EMR, AppFlow, Lambda and Redshift batch reads, EventBridge and Airflow schedulers, S3 event triggers, IP allowlists, and rate-limit handling."
+    readTime="20m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/02-batch-ingestion-apis-schedulers-triggers"
+  />
+  <ModuleCard
+    moduleNumber="3"
+    domain="Data Ingestion & Transformation"
+    title="Module 03: Data Transformation with Glue, EMR, Lambda, Flink & Redshift"
+    description="Choosing a transformation engine, CSV to Parquet, JDBC/ODBC, containers on ECS/EKS, cost optimization, troubleshooting, data APIs, 3 Vs, and LLM integration."
+    readTime="30m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/03-transform-glue-emr-lambda-redshift"
+  />
+  <ModuleCard
+    moduleNumber="4"
+    domain="Data Ingestion & Transformation"
+    title="Module 04: Pipeline Orchestration: Step Functions, MWAA, Glue Workflows & Eventing"
+    description="Step Functions, MWAA, Glue workflows, EventBridge, SNS/SQS alerting, fault tolerance, and serverless workflow design."
+    readTime="25m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/04-pipeline-orchestration-step-functions-mwaa"
+  />
+  <ModuleCard
+    moduleNumber="5"
+    domain="Data Ingestion & Transformation"
+    title="Module 05: Programming Concepts: Lambda, IaC (SAM, CDK, CloudFormation) & CI/CD"
+    description="Lambda concurrency and storage, SAM/CDK/CloudFormation, CodePipeline CI/CD, Git, testing, distributed computing, and data structures."
+    readTime="25m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/05-programming-concepts-iac-cicd-lambda"
+  />
+  <ModuleCard
+    moduleNumber="6"
+    domain="Data Store Management"
+    title="Module 06: Choosing the Right Data Store & Migration Tools"
+    description="S3, Redshift, DynamoDB, RDS/Aurora, MemoryDB, Keyspaces, Neptune, DocumentDB, OpenSearch; Redshift federated queries, Spectrum, materialized views, locks, and Transfer Family/DMS/DataSync."
+    readTime="30m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/06-choosing-a-data-store"
+  />
+  <ModuleCard
+    moduleNumber="7"
+    domain="Data Store Management"
+    title="Module 07: Data Catalogs: Glue Data Catalog, Crawlers & SageMaker Catalog"
+    description="Glue Data Catalog and Hive metastore, crawlers, schema discovery, partition sync, connections, and business catalogs with Amazon SageMaker Catalog."
+    readTime="20m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/07-data-catalogs-glue-lake-formation-sagemaker"
+  />
+  <ModuleCard
+    moduleNumber="8"
+    domain="Data Store Management"
+    title="Module 08: Data Lifecycle: S3 Tiering, Retention, TTL, COPY/UNLOAD & Resiliency"
+    description="S3 storage classes and Lifecycle rules, versioning, DynamoDB TTL, Redshift COPY/UNLOAD, legal-compliant deletion, AWS Backup, and replication."
+    readTime="20m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/08-data-lifecycle-retention-resiliency"
+  />
+  <ModuleCard
+    moduleNumber="9"
+    domain="Data Store Management"
+    title="Module 09: Data Modeling, Schema Evolution, Open Table Formats & Vector Indexes"
+    description="Redshift and DynamoDB schema design, partitioning and compression, schema conversion with DMS, Apache Iceberg and S3 Tables, lineage, HNSW/IVF, and Bedrock knowledge bases."
+    readTime="30m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/09-data-modeling-schema-evolution-vectors"
+  />
+  <ModuleCard
+    moduleNumber="10"
+    domain="Data Operations & Support"
+    title="Module 10: Automating & Analyzing Data: Athena, Redshift SQL, DataBrew & Quick"
+    description="Athena SQL and Spark notebooks, views, Redshift SQL, DataBrew, Quick visualizations, provisioned vs serverless trade-offs, and aggregation concepts."
+    readTime="25m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/10-automating-and-analyzing-data-athena-quicksight"
+  />
+  <ModuleCard
+    moduleNumber="11"
+    domain="Data Operations & Support"
+    title="Module 11: Monitoring, Logging & Troubleshooting Data Pipelines"
+    description="CloudWatch metrics, alarms and Logs, Logs Insights, CloudTrail, SNS alerting, Glue and EMR troubleshooting, and log analytics with Athena and OpenSearch."
+    readTime="25m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/11-monitoring-logging-troubleshooting-pipelines"
+  />
+  <ModuleCard
+    moduleNumber="12"
+    domain="Data Operations & Support"
+    title="Module 12: Data Quality: Glue Data Quality, DataBrew Rules, Sampling & Skew"
+    description="DQDL rules, DataBrew profile jobs, completeness and consistency checks, sampling techniques, and data skew mitigation in Spark and Redshift."
+    readTime="20m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/12-data-quality-sampling-skew"
+  />
+  <ModuleCard
+    moduleNumber="13"
+    domain="Data Security & Governance"
+    title="Module 13: Authentication & Authorization: IAM, Secrets Manager & Lake Formation"
+    description="IAM roles and custom policies, least privilege, Secrets Manager vs Parameter Store, VPC security groups, PrivateLink, S3 Access Points, Redshift grants, Lake Formation, and ABAC/TBAC."
+    readTime="30m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/13-authentication-authorization-iam-lake-formation"
+  />
+  <ModuleCard
+    moduleNumber="14"
+    domain="Data Security & Governance"
+    title="Module 14: Encryption, KMS, Data Masking & PII Discovery"
+    description="SSE-S3/KMS/DSSE, key policies and grants, cross-account encryption, in-transit TLS, client-side encryption, masking, anonymization, and Macie."
+    readTime="25m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/14-encryption-kms-masking-macie"
+  />
+  <ModuleCard
+    moduleNumber="15"
+    domain="Data Security & Governance"
+    title="Module 15: Audit Logs, Data Privacy, Sovereignty & Governance"
+    description="CloudTrail and CloudTrail Lake, Config, data sharing in Redshift and Data Exchange, Region restrictions, sovereignty, and SageMaker Catalog projects."
+    readTime="25m read"
+    href="/certifications/aws/data-engineer-associate/study-notes/15-audit-logging-privacy-governance"
+  />
+  </div>
+</TrackResourceTabs>
+
+---
+
+## Official Exam Blueprint & Domain Breakdown
+
+| Domain | Title | Weight |
+|---|---|---|
+| 1 | Data Ingestion and Transformation | 34% |
+| 2 | Data Store Management | 26% |
+| 3 | Data Operations and Support | 22% |
+| 4 | Data Security and Governance | 18% |
+
+---

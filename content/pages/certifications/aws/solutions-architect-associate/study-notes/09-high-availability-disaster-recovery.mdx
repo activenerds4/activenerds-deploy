@@ -1,0 +1,176 @@
+---
+title: "Module 09: High Availability, Fault Tolerance & Disaster Recovery"
+description: "Multi-AZ designs, ELB, Route 53 failover, RDS Proxy, DR strategies, RPO and RTO, quotas, and immutable infrastructure."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 9
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 2.2 — Multi-AZ and multi-Region designs, Elastic Load Balancing, Route 53, RDS Proxy, failover, disaster recovery strategies, RPO and RTO, quotas, immutable infrastructure, workload visibility
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 2, Task 2.2 — Design highly available and/or fault-tolerant architectures">
+Match the DR strategy to stated RPO and RTO and to budget. If the stem has tight RTO and RPO measured in seconds or minutes, expect warm standby or active-active. If it emphasizes lowest cost and tolerates hours, expect backup and restore or pilot light.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Multi-AZ versus read replicas">
+
+* **Multi-AZ (RDS):** synchronous standby in another AZ for **availability**; automatic failover by flipping the DNS endpoint. The classic standby serves no reads. A Multi-AZ DB cluster has two readable standbys.
+* **Read replicas:** asynchronous copies for **read scaling** (and cross-Region DR with manual promotion). They are not an automatic failover target for non-Aurora RDS.
+* **Amazon Aurora:** storage is replicated six ways across three AZs; up to 15 Aurora replicas serve as readers and failover targets; failover typically completes in well under a minute. **Aurora Global Database** replicates across Regions with typical lag of about a second, giving low RPO and fast cross-Region recovery.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Eliminating single points of failure">
+
+* One NAT gateway per AZ (a NAT gateway is zonal).
+* Subnets and Auto Scaling groups spanning at least two AZs.
+* Redundant connectivity: two VPN tunnels, or Direct Connect plus VPN backup.
+* Stateless compute with state in multi-AZ managed stores (S3, DynamoDB, Aurora, EFS).
+* **Immutable infrastructure:** replace instances from a golden AMI or new container image instead of patching in place; use CloudFormation and blue/green or rolling deployments so any environment can be rebuilt consistently.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Component | HA mechanism | Exam nuance |
+|---|---|---|
+| ALB | Multi-AZ by design; health checks; cross-zone on by default | Layer 7, path and host routing |
+| NLB | Multi-AZ; static IP per AZ; cross-zone off by default | Layer 4, extreme performance, TLS passthrough |
+| Gateway Load Balancer | Distributes to virtual appliances (firewalls) via GENEVE | Layer 3 inspection fleets |
+| Auto Scaling group | Replaces unhealthy instances; spans AZs | Enable ELB health checks |
+| Route 53 | Health checks plus failover, latency, weighted routing | Alias records are free for AWS targets and work at the zone apex |
+| RDS Proxy | Pools connections; shortens failover; IAM auth and Secrets Manager | Helps Lambda and spiky connection loads |
+| S3 | Data across at least three AZs; 11 nines durability | Cross-Region replication for regional DR |
+| DynamoDB global tables | Multi-Region, multi-active replication | Active-active data tier |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+### Route 53 routing policies
+
+| Policy | Behavior | Typical use |
+|---|---|---|
+| Simple | One record, possibly several values | Single resource |
+| Weighted | Proportional split | Blue/green, canary, A/B |
+| Latency | Lowest-latency Region | Multi-Region performance |
+| Failover | Primary and secondary driven by health checks | Active-passive DR |
+| Geolocation | By user location | Compliance, localization |
+| Geoproximity | By distance with bias | Shift traffic between Regions |
+| Multivalue answer | Up to 8 healthy records | Simple client-side load distribution |
+
+```
+Active-passive failover with Route 53
+
+ Users --> Route 53 (health check on primary)
+              |  primary healthy                  |  primary unhealthy
+              v                                   v
+     Region A: ALB -> ASG -> Aurora writer   Region B: ALB -> small ASG -> Aurora replica
+                         (cross-Region replication)   (promoted on failover)
+```
+
+### Disaster recovery strategies
+
+| Strategy | RPO / RTO (typical) | What runs in DR Region | Relative cost |
+|---|---|---|---|
+| Backup and restore | Hours / 24 hours or more | Nothing; backups copied (AWS Backup, S3 CRR, snapshots) | Lowest |
+| Pilot light | Minutes to hours / tens of minutes to hours | Core data replicated; minimal critical components, compute off | Low |
+| Warm standby | Seconds to minutes / minutes | Scaled-down full environment, running | Medium |
+| Multi-site active-active | Near zero / near zero | Full capacity in both Regions serving traffic | Highest |
+
+**RPO** is the maximum tolerable data loss measured in time. **RTO** is the maximum tolerable downtime. Lower values cost more.
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```bash
+# Route 53 health check for a primary endpoint
+aws route53 create-health-check --caller-reference hc-$(date +%s) --health-check-config \
+  '{"Type":"HTTPS","FullyQualifiedDomainName":"app.example.com","Port":443,"ResourcePath":"/health","RequestInterval":30,"FailureThreshold":3}'
+
+# Create an Aurora cross-Region read replica cluster (DR)
+aws rds create-db-cluster --db-cluster-identifier dr-cluster --engine aurora-mysql \
+  --replication-source-identifier arn:aws:rds:us-east-1:111111111111:cluster:prod-cluster \
+  --region us-west-2
+
+# Copy snapshots to the DR Region
+aws ec2 copy-snapshot --source-region us-east-1 --source-snapshot-id snap-0abc --region us-west-2
+```
+
+**Service quotas in standby Regions:** quotas are per Region. Request increases (instances, vCPUs, Elastic IPs, Lambda concurrency) in the DR Region ahead of time or failover capacity will be throttled. Pre-provision capacity or use On-Demand Capacity Reservations when RTO is strict.
+
+**Visibility:** use CloudWatch alarms and dashboards, AWS X-Ray for tracing request paths across microservices, and AWS Health Dashboard for service events.
+
+**Improving legacy and non-cloud-native apps:** put a Network Load Balancer or ALB in front, use EC2 Auto Recovery or Auto Scaling groups of size 1 to 1, move shared files to EFS or FSx, use Storage Gateway for hybrid access, and use RDS Multi-AZ so the application needs no code change.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Using read replicas as the answer to "automatic failover" for standard RDS. Multi-AZ provides that.
+- **Trap 2:** Selecting active-active when the stem tolerates hours of downtime and emphasizes cost.
+- **Trap 3:** Forgetting that AZ failure is handled by multiple AZs, while a Region failure requires multiple Regions.
+- **Trap 4:** Putting all NAT traffic through one NAT gateway in a multi-AZ design that claims high availability.
+- **Trap 5:** Overlooking quotas and throttling in the standby Region.
+- **Trap 6:** Confusing RPO (data loss) with RTO (time to recover).
+- **Trap 7:** Using Route 53 simple routing for failover. Failover needs health checks and a failover or weighted policy.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can match a DR strategy to given RPO and RTO values.
+<details>
+<summary>Explanation</summary>
+
+RPO and RTO of many hours suggest backup and restore. Tens of minutes suggest pilot light. Minutes suggest warm standby. Seconds or zero suggest multi-site active-active. Each step increases cost because more infrastructure runs continuously in the second Region.
+
+</details>
+
+- [ ] I can explain Multi-AZ, read replicas, and Aurora replication for HA and scaling.
+<details>
+<summary>Explanation</summary>
+
+Multi-AZ gives synchronous replication and automatic failover for availability. Read replicas are asynchronous and scale reads or support cross-Region recovery. Aurora combines a shared six-copy storage layer with replicas that act as both readers and failover targets, and Global Database extends this across Regions.
+
+</details>
+
+- [ ] I can design a highly available, load-balanced web tier across AZs.
+<details>
+<summary>Explanation</summary>
+
+Use an ALB across at least two AZ subnets, an Auto Scaling group spanning those AZs with ELB health checks, instances in private subnets, a NAT gateway per AZ, and a Multi-AZ database. Add Route 53 health checks for Region-level failover.
+
+</details>
+
+- [ ] I can explain how to make legacy applications more reliable without code changes.
+<details>
+<summary>Explanation</summary>
+
+Use load balancers and Auto Scaling or EC2 auto recovery for compute resilience, RDS Multi-AZ for databases, EFS or FSx for shared storage, Storage Gateway for hybrid access, and AWS Backup for protection. These add resilience at the infrastructure layer.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/08-containers-serverless-compute-scaling" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 08: Containers, Serverless & Elastic Compute
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/10-high-performing-storage" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 10: High-Performing & Scalable Storage →
+  </a>
+</div>

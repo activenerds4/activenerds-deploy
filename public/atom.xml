@@ -4,9 +4,164 @@
   <link href="https://www.activenerds.com" />
   <link href="https://www.activenerds.com/atom.xml" rel="self" type="application/atom+xml" />
   <id>https://www.activenerds.com</id>
-  <updated>2026-08-13T00:00:00.000Z</updated>
+  <updated>2026-11-04T00:00:00.000Z</updated>
   <subtitle>ActiveNerds is the go-to destination for AI/ML, Kubernetes, and DevSecOps professionals — sharp technical coverage woven with genuinely useful, non-preachy fitness and wellness content for desk-bound tech pros.</subtitle>
   <generator>Inkwell Blog Starter Kit</generator>
+  <entry>
+    <title>EKS Auto Mode Meets Gateway API: A Practical Setup and Migration Guide</title>
+    <link href="https://www.activenerds.com/blog/eks-auto-mode-gateway-api-setup-migration" />
+    <id>https://www.activenerds.com/blog/eks-auto-mode-gateway-api-setup-migration</id>
+    <updated>2026-11-04T00:00:00.000Z</updated>
+    <published>2026-11-04T00:00:00.000Z</published>
+    <author>
+      <name>ActiveNerds Team</name>
+    </author>
+    <summary>Amazon EKS Auto Mode now natively supports the Kubernetes Gateway API. Learn how to configure managed Gateways, deploy HTTPRoutes, and migrate legacy Ingress resources with zero downtime.</summary>
+    <content type="text"><![CDATA[Amazon EKS Auto Mode has expanded its automated management plane to support the Kubernetes Gateway API. EKS Auto Mode now automatically provisions, tunes, and lifecycle-manages AWS Application Load Balancers (ALBs) directly from declarative Gateway and HTTPRoute resources, eliminating the need to install or maintain the standalone AWS Load Balancer Controller.
+
+When AWS launched Amazon EKS Auto Mode, it automated worker node provisioning (via managed Karpenter), EBS CSI driver integration, and baseline cluster networking. However, application traffic ingress still required installing third-party ingress controllers or managing complex Helm charts for the AWS Load Balancer Controller.
+
+With native Gateway API support in EKS Auto Mode, AWS fulfills the promise of truly hands-off cluster infrastructure. Here is a practical walkthrough of how Gateway API operates in Auto Mode, how to configure your first HTTPRoute, and how to cleanly migrate from legacy Ingress objects.
+What Changed in Aut…
+
+Continue reading at https://www.activenerds.com/blog/eks-auto-mode-gateway-api-setup-migration]]></content>
+    <category term="Containers &amp; Kubernetes" />
+    <category term="Aws" />
+    <category term="Eks" />
+    <category term="Gateway Api" />
+    <category term="Kubernetes" />
+    <category term="Networking" />
+  </entry>
+  <entry>
+    <title>Do Ergonomic Setups Actually Work? What the New Cochrane Evidence Says for Desk Workers</title>
+    <link href="https://www.activenerds.com/blog/ergonomic-setups-desk-workers-cochrane-evidence" />
+    <id>https://www.activenerds.com/blog/ergonomic-setups-desk-workers-cochrane-evidence</id>
+    <updated>2026-11-04T00:00:00.000Z</updated>
+    <published>2026-11-04T00:00:00.000Z</published>
+    <author>
+      <name>ActiveNerds Team</name>
+    </author>
+    <summary>A deep dive into the updated Cochrane systematic review on workplace ergonomic adaptations: what the clinical evidence says about ergonomic chairs, split keyboards, standing desks, and arm/neck pain.</summary>
+    <content type="text"><![CDATA[This analysis summarizes the findings of the updated Cochrane systematic review (&quot;Workplace ergonomic adaptations for treating work-related complaints of the arm, neck, or shoulder in computer workers&quot;). This article examines the published scientific findings and study methodologies; it is intended for educational purposes and does not constitute medical advice.
+
+If you spend eight to twelve hours a day writing code, debugging Kubernetes clusters, or attending remote design reviews, you have undoubtedly felt the ache: stiffness in the upper traps, a dull burn between the shoulder blades, or tenderness in the wrists.
+
+The tech industry&apos;s default response has been to throw high-end hardware at the problem. We invest in $1,800 ergonomic chairs, custom split mechanical ortholinear keyboards, vertical mice, monitor arms, and motorized standing desks. We treat these purchases as medical-grade insurance policies against musculoskeletal pain.
+
+However, an updated systematic review from Cochran…
+
+Continue reading at https://www.activenerds.com/blog/ergonomic-setups-desk-workers-cochrane-evidence]]></content>
+    <category term="Fitness &amp; Wellness for Tech" />
+    <category term="Ergonomics" />
+    <category term="Desk Setup" />
+    <category term="Wellness" />
+    <category term="Productivity" />
+    <category term="Remote Work" />
+  </entry>
+  <entry>
+    <title>GitHub&apos;s npm Package Firewall: How to Block Malicious Packages Before They Install</title>
+    <link href="https://www.activenerds.com/blog/github-npm-package-firewall-setup-guide" />
+    <id>https://www.activenerds.com/blog/github-npm-package-firewall-setup-guide</id>
+    <updated>2026-11-03T00:00:00.000Z</updated>
+    <published>2026-11-03T00:00:00.000Z</published>
+    <author>
+      <name>ActiveNerds Team</name>
+    </author>
+    <summary>How to enable and configure GitHub&apos;s npm Package Firewall to intercept trojanized and malicious open-source packages at install time, before they reach CI runners or developer machines.</summary>
+    <content type="text"><![CDATA[GitHub has introduced the GitHub Package Firewall for npm in public preview. Built directly into GitHub Enterprise and GitHub Packages infrastructure, it functions as an inline inspection proxy that rejects malicious open-source packages at download time.
+
+Software supply chain security has historically operated reactively. An attacker publishes a malicious npm package containing credential-stealing post-install scripts. Hours or days later, security researchers discover the threat, a CVE is registered, and Dependabot opens an alert on your repository. By then, developer laptops and ephemeral CI runners have already run npm install and executed the attack.
+
+The GitHub npm Package Firewall changes this paradigm from reactive notification to proactive, inline interception. Here is how it functions, how to enable it for your organization, and how to configure policies to safeguard your development environments.
+What the Package Firewall Does
+
+The Package Firewall sits between your build e…
+
+Continue reading at https://www.activenerds.com/blog/github-npm-package-firewall-setup-guide]]></content>
+    <category term="DevSecOps &amp; Security" />
+    <category term="Npm" />
+    <category term="Supply Chain" />
+    <category term="Github" />
+    <category term="Devsecops" />
+    <category term="Security" />
+  </entry>
+  <entry>
+    <title>Kubernetes 1.37 Deprecations: Migrating Off IPVS, KubeDNS, and Removed kubectl Flags</title>
+    <link href="https://www.activenerds.com/blog/kubernetes-1-37-deprecations-ipvs-kubedns-migration" />
+    <id>https://www.activenerds.com/blog/kubernetes-1-37-deprecations-ipvs-kubedns-migration</id>
+    <updated>2026-11-03T00:00:00.000Z</updated>
+    <published>2026-11-03T00:00:00.000Z</published>
+    <author>
+      <name>ActiveNerds Team</name>
+    </author>
+    <summary>A technical migration guide for Kubernetes 1.37 deprecations and removals, covering the transition from IPVS to nftables in kube-proxy, retiring legacy KubeDNS, and updating automated kubectl scripts.</summary>
+    <content type="text"><![CDATA[With the release of Kubernetes v1.37, several long-standing networking modes, legacy DNS configurations, and deprecated kubectl flags have officially crossed the threshold from &quot;deprecated&quot; to &quot;removed&quot;. Review this guide before updating your control planes or node pools.
+
+Upgrading Kubernetes clusters is routine, but major deprecation cycles require proactive planning. While previous releases focused on PodSecurityPolicy removals and Storage API cleanups, Kubernetes 1.37 targets lower-level networking and CLI primitives:
+IPVS mode in kube-proxy is deprecated in favor of the modern, native nftables backend.
+The legacy KubeDNS compatibility layer has reached end-of-life, requiring complete migration to CoreDNS.
+Several legacy kubectl CLI flags frequently baked into older CI/CD automation pipelines have been purged.
+
+Here is what you need to check and how to execute a zero-downtime migration.
+What&apos;s Deprecated and Removed in Kubernetes 1.37
+
+| Component / Subsystem | Status in v1.37 | Re…
+
+Continue reading at https://www.activenerds.com/blog/kubernetes-1-37-deprecations-ipvs-kubedns-migration]]></content>
+    <category term="Containers &amp; Kubernetes" />
+    <category term="Kubernetes" />
+    <category term="Devops" />
+    <category term="Networking" />
+    <category term="Nftables" />
+    <category term="Coredns" />
+  </entry>
+  <entry>
+    <title>One Signed Answer: How to Verify registry.k8s.io Images with the New SLSA Summaries</title>
+    <link href="https://www.activenerds.com/blog/verify-k8s-images-slsa-verification-summaries" />
+    <id>https://www.activenerds.com/blog/verify-k8s-images-slsa-verification-summaries</id>
+    <updated>2026-11-02T00:00:00.000Z</updated>
+    <published>2026-11-02T00:00:00.000Z</published>
+    <author>
+      <name>ActiveNerds Team</name>
+    </author>
+    <summary>How to use the newly published SLSA verification summaries on registry.k8s.io to cryptographically verify official Kubernetes container images in CI/CD and admission controllers.</summary>
+    <content type="text"><![CDATA[As of late 2026, the Kubernetes Release Team publishes SLSA Verification Summaries (v0.2/v1.0) for all official container images distributed through registry.k8s.io (including kube-apiserver, coredns, kube-proxy, and pause). You can now cryptographically attest that an image was built on GitHub Actions by the Kubernetes project itself, without relying on trusted registry hosts alone.
+
+For years, securing the Kubernetes supply chain meant verifying signatures with cosign or checking hashes against release notes. While Cosign signatures confirmed who signed the blob, they didn&apos;t inherently prove how the image was built, what source commit produced it, or whether the build pipeline was isolated.
+
+With SLSA (Supply-chain Levels for Software Artifacts) Verification Summaries, the Kubernetes project now delivers cryptographic proof of build provenance directly alongside container layers. Here is how SLSA verification works and how to integrate it into your CI/CD pipelines and Kubernetes admi…
+
+Continue reading at https://www.activenerds.com/blog/verify-k8s-images-slsa-verification-summaries]]></content>
+    <category term="Containers &amp; Kubernetes" />
+    <category term="Kubernetes" />
+    <category term="Cosign" />
+    <category term="Supply Chain" />
+    <category term="Slsa" />
+    <category term="Devsecops" />
+  </entry>
+  <entry>
+    <title>LiteLLM 1.107.0 Supply Chain Attack: How to Check Your Stack and Rotate Credentials</title>
+    <link href="https://www.activenerds.com/blog/litellm-supply-chain-compromise-credential-rotation" />
+    <id>https://www.activenerds.com/blog/litellm-supply-chain-compromise-credential-rotation</id>
+    <updated>2026-11-01T00:00:00.000Z</updated>
+    <published>2026-11-01T00:00:00.000Z</published>
+    <author>
+      <name>ActiveNerds Team</name>
+    </author>
+    <summary>Analysis of the LiteLLM 1.107.0 supply chain compromise via Python startup hooks, how to check if your AI gateway was affected, and a step-by-step credential rotation checklist.</summary>
+    <content type="text"><![CDATA[If your production stacks, local development machines, or CI/CD pipelines installed litellm==1.107.0 between its release on PyPI and subsequent yank/quarantine, treat all credentials accessible to that environment as compromised. Immediate credential rotation and forensic container audits are required.
+
+LiteLLM has become the de facto lightweight unified proxy gateway for routing requests across OpenAI, Anthropic, Bedrock, Vertex AI, and local LLM backends. Its position in modern AI platform architectures makes it an exceptionally high-value target: it typically holds master API keys, cloud IAM credentials, database connection strings, and vector database auth tokens.
+
+A critical supply chain attack targeting LiteLLM version 1.107.0 demonstrated how adversaries leverage Python startup hooks (sitecustomize.py / .pth files) to achieve persistence and exfiltrate secrets before security tooling or application logic even boots. Here is a technical breakdown of what occurred, how to audit yo…
+
+Continue reading at https://www.activenerds.com/blog/litellm-supply-chain-compromise-credential-rotation]]></content>
+    <category term="DevSecOps &amp; Security" />
+    <category term="Ai Security" />
+    <category term="Supply Chain" />
+    <category term="Python" />
+    <category term="Devsecops" />
+  </entry>
   <entry>
     <title>Deep Work Environment Setup</title>
     <link href="https://www.activenerds.com/blog/deep-work-environment-setup" />

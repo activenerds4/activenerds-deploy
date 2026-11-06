@@ -1,0 +1,166 @@
+---
+title: "Module 08: FM Deployment Strategies: On-Demand, Provisioned Throughput & SageMaker AI"
+description: "Lambda invocation, provisioned throughput, SageMaker endpoints, LLM container optimization, and model cascading (Task 2.2)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 8
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 2.2 (Skills 2.2.1 - 2.2.3): deploying FMs for application needs, LLM-specific deployment challenges, and optimized approaches that balance performance and resources.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 2, Task 2.2">
+This task is about **choosing the right serving model**: serverless on-demand, committed Provisioned Throughput, or self-managed SageMaker endpoints, and understanding why LLM serving differs from classic ML serving (memory, GPUs, token throughput).
+</Callout>
+
+---
+
+## 1. Deployment Options (Skill 2.2.1)
+
+| Option | How you pay | Strengths | Limits |
+|---|---|---|---|
+| **Bedrock on-demand** | Per input/output token | No capacity planning, scale to zero cost, quickest start | Subject to quotas and throttling under bursts |
+| **Bedrock Provisioned Throughput** | Per model unit per hour (no commitment, 1 month, or 6 months) | Guaranteed throughput, consistent performance; required to serve custom models | Pay while provisioned, even if idle |
+| **Bedrock batch inference** | Discounted per token | Asynchronous, large offline jobs from S3 | Not interactive |
+| **Lambda invoking Bedrock** | Lambda time plus tokens | Event-driven, glue logic around on-demand calls | 15-minute max; mind synchronous timeouts |
+| **SageMaker AI endpoints** | Instance hours | Full control, open-weight/custom models, GPUs, hybrid designs | You manage scaling, patching, cost |
+| **Bedrock Custom Model Import** | Per model copy usage | Serve externally trained architectures through Bedrock APIs | Supported architectures only |
+
+```
+Traffic profile?
+  sporadic/spiky ------------> Bedrock on-demand (+ cross-Region inference)
+  steady and high, SLA ------> Provisioned Throughput
+  offline bulk --------------> Batch inference
+  custom/open-weight, control -> SageMaker AI endpoint (or Custom Model Import)
+  mixed ---------------------> Hybrid: provisioned base + on-demand overflow, or SageMaker + Bedrock fallback
+```
+
+**Hybrid solution example:** serve steady baseline load on provisioned throughput or a SageMaker endpoint, and spill bursts over to on-demand Bedrock via application-level routing.
+
+```bash
+aws bedrock create-provisioned-model-throughput \
+  --provisioned-model-name support-pt \
+  --model-id amazon.nova-lite-v1:0 \
+  --model-units 1 \
+  --commitment-duration OneMonth
+```
+
+<Callout variant="warning" title="Exam Trap: Provisioned Throughput is for predictability, not savings by default">
+It is **not** automatically cheaper. It wins when sustained utilization is high or when you need guaranteed throughput or a custom model. For sporadic traffic, on-demand costs less. Questions often hide this in utilization numbers.
+</Callout>
+
+---
+
+## 2. Unique Challenges of LLM Deployment (Skill 2.2.2)
+
+| Challenge vs traditional ML | Implication |
+|---|---|
+| Huge memory footprint (billions of parameters) | Needs GPU instances with enough memory; sharding across GPUs (tensor parallelism) |
+| Token-by-token generation | Latency scales with output length; time to first token matters |
+| KV cache growth with context length and concurrency | Memory pressure limits batch size |
+| Long model load times | Slow cold starts; prefer warm capacity |
+| Variable request cost | Throughput is measured in tokens, not requests |
+| Autoscaling signals | Scale on queue depth, concurrent requests, or tokens in flight rather than CPU alone |
+
+**Container-based deployment patterns** on SageMaker AI use optimized large-model inference containers (for example the Large Model Inference container or other serving stacks) configured for tensor parallelism, continuous batching, and quantization. Other platforms: ECS or EKS on GPU EC2 instances for custom stacks.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Continuous batching, KV cache, and quantization">
+
+**Continuous batching** inserts new requests into an in-flight batch as earlier sequences finish, keeping GPUs busy and raising throughput over static batching. The **KV cache** stores attention keys and values per token so generation does not recompute history; it grows with sequence length times concurrent sequences, so memory, not compute, often caps concurrency. **Quantization** (for example 8-bit or 4-bit weights) reduces memory and can raise throughput at a possible quality cost. **Model loading strategies** include loading weights from S3 at startup, baking weights into container images (large, slow to pull), using fast storage such as EFS or instance store, and compiling optimized artifacts ahead of time (SageMaker Neo / compilation) to cut startup.
+
+</AccordionItem>
+</AccordionGroup>
+
+| SageMaker serving mode | Use |
+|---|---|
+| Real-time endpoint | Low-latency interactive |
+| Asynchronous inference | Large payloads, long processing, queue-based |
+| Inference components | Pack multiple models/adapters on shared instances with per-model resources |
+| Serverless inference | Generally unsuitable for large GPU-bound LLMs |
+
+---
+
+## 3. Optimized Deployment Approaches (Skill 2.2.3)
+
+Right-size before you scale up.
+
+| Technique | Benefit |
+|---|---|
+| Choose the smallest model that meets quality | Lower cost and latency |
+| Smaller pre-trained or distilled models for specific tasks | Fast, cheap for narrow tasks |
+| **API-based model cascading** | Route routine queries to a small model; escalate low-confidence or complex ones to a larger model |
+| Bedrock Intelligent Prompt Routing | Managed routing between models in a family based on predicted response quality and cost |
+| Batch inference for non-urgent work | Lower per-token price |
+| Prompt caching / response caching | Avoid repeat computation (Module 15) |
+
+```
+Query --> [small model attempt] --> confidence / verifier check
+              |-- pass --> return answer (cheap path)
+              '-- fail --> [large model] --> return answer
+```
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Buying Provisioned Throughput for unpredictable, low-volume traffic.
+- **Trap 2:** Putting a multi-billion-parameter model on Lambda or SageMaker Serverless Inference.
+- **Trap 3:** Scaling LLM endpoints on CPU utilization alone.
+- **Trap 4:** Using the largest model for every request when cascading would cut cost.
+- **Trap 5:** Forgetting that a Bedrock custom (fine-tuned) model cannot be invoked on-demand and needs Provisioned Throughput.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can pick a serving option from a traffic profile.
+<details>
+<summary>Explanation</summary>
+
+Spiky or low volume: on-demand Bedrock. Sustained high volume or strict throughput and custom models: Provisioned Throughput. Offline bulk: batch inference. Custom open-weight models needing control: SageMaker AI. Mixed loads: hybrid with overflow routing.
+
+</details>
+
+- [ ] I can explain why LLM deployment differs from traditional ML deployment.
+<details>
+<summary>Explanation</summary>
+
+Large memory and GPU needs, token-by-token generation latency, KV cache memory growth, slow model loading, token-based throughput, and different autoscaling signals. Optimized containers apply tensor parallelism, continuous batching, and quantization.
+
+</details>
+
+- [ ] I can design a model cascade.
+<details>
+<summary>Explanation</summary>
+
+Send queries to a small, cheap model first, evaluate confidence or run a lightweight verifier, and escalate to a larger model only when needed. Bedrock Intelligent Prompt Routing provides a managed version within a model family.
+
+</details>
+
+- [ ] I know when Provisioned Throughput is required or advisable.
+<details>
+<summary>Explanation</summary>
+
+Required to invoke Bedrock custom models; advisable for steady, high utilization needing guaranteed throughput and consistent latency. Not advisable for sporadic usage because you pay for provisioned model units even when idle.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/07-agentic-ai-strands-agentcore-mcp" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 07: Agentic AI: Strands Agents, Bedrock AgentCore, MCP & Safeguarded Workflows
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/09-enterprise-integration-gateways-cicd" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 09: Enterprise Integration: Event-Driven Patterns, Secure Access, Hybrid & GenAI Gateways →
+  </a>
+</div>

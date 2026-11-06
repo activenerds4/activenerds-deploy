@@ -1,8 +1,16 @@
 import { cn } from "@/lib/utils";
 
+interface ChecklistItemObject {
+  id?: string;
+  label: string;
+  checked?: boolean;
+}
+
+type ChecklistItem = string | ChecklistItemObject;
+
 interface ChecklistBoxProps {
   title?: string;
-  items: string[];
+  items: ChecklistItem[];
   className?: string;
 }
 
@@ -17,17 +25,20 @@ const ChecklistBox = ({ title = "Checklist", items, className }: ChecklistBoxPro
         {title}
       </p>
       <ul className="space-y-2">
-        {items.map((item, idx) => (
-          <li key={idx} className="flex items-start gap-2.5 text-sm text-foreground">
-            <span
-              className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border border-border text-accent"
-              aria-hidden
-            >
-              ✓
-            </span>
-            <span>{item}</span>
-          </li>
-        ))}
+        {items.map((item, idx) => {
+          const text = typeof item === "string" ? item : (item.label ?? String(item));
+          return (
+            <li key={idx} className="flex items-start gap-2.5 text-sm text-foreground">
+              <span
+                className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border border-border text-accent"
+                aria-hidden
+              >
+                ✓
+              </span>
+              <span>{text}</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

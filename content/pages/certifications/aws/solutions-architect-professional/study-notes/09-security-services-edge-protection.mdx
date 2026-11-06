@@ -1,0 +1,169 @@
+---
+title: "Module 09: Security Services & Edge Protection: GuardDuty, Security Hub, WAF, Shield & Network Firewall"
+description: "Detection and posture services, centralized security architecture, DDoS and web attack mitigation, inspection VPC patterns and data protection."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 9
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Detection and posture services, centralized security architecture, DDoS and web attack mitigation, inspection VPC patterns and data protection.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 1.2, 2.3 and 3.2 Security Services">
+Know what each managed security service detects or enforces, where findings go, and how to run them across an organization with delegated administration. Questions on large-scale web attack mitigation almost always involve CloudFront, WAF, Shield and Route 53 together.
+</Callout>
+
+---
+
+## 1. Security Service Map
+
+| Service | Does | Data source | Multi-account |
+|---|---|---|---|
+| GuardDuty | Threat detection (anomalies, known bad IPs, crypto mining, credential exfiltration) | CloudTrail events, VPC Flow Logs, DNS logs; optional S3 data events, EKS audit logs, runtime monitoring, malware protection, RDS login, Lambda network | Delegated admin, auto-enable |
+| Security Hub | Aggregate findings and check posture against standards (AWS Foundational Security Best Practices, CIS, PCI DSS, NIST) | Findings from GuardDuty, Inspector, Macie, Config, Firewall Manager, partners (ASFF format) | Delegated admin; cross-Region aggregation |
+| Amazon Inspector | Continuous vulnerability scanning of EC2, ECR images and Lambda functions | SSM agent / registry / function code | Delegated admin |
+| Amazon Macie | Discover sensitive data (PII) in S3 | S3 objects and bucket metadata | Delegated admin |
+| Amazon Detective | Investigate root cause with graph analysis | CloudTrail, Flow Logs, GuardDuty findings | Delegated admin |
+| AWS Config | Record resource configuration, evaluate rules, conformance packs, auto-remediate | Resource configuration | Aggregators, org rules |
+| IAM Access Analyzer | External/unused access and policy validation | Resource policies, CloudTrail | Org-level analyzer |
+| AWS CloudTrail | API audit trail; CloudTrail Lake for SQL queries | API activity | Organization trail |
+| AWS Audit Manager | Collect evidence for audits | Config, CloudTrail, Security Hub | Multi-account assessments |
+| AWS Artifact | Download AWS compliance reports and agreements | n/a | n/a |
+| Firewall Manager | Apply WAF, Shield Advanced, security groups, Network Firewall and DNS Firewall policies across accounts | AWS Organizations | Needs delegated admin plus Config enabled |
+
+## 2. Centralized Security Architecture
+
+```
+ +--------------------+     findings      +---------------------------+
+ | Member accounts    | ----------------> | Security tooling account  |
+ | GuardDuty, Macie,  |                   | Security Hub (aggregator) |
+ | Inspector, Config  |                   | -> EventBridge rules      |
+ +--------------------+                   |    -> SNS / Lambda / SSM  |
+                                          |    -> ticketing, SIEM     |
+ Log Archive account: org CloudTrail, VPC flow logs, DNS logs (immutable S3)
+```
+
+**Automated response pattern:** GuardDuty or Security Hub finding -> EventBridge rule -> Lambda or Systems Manager Automation (isolate EC2 by swapping security group, snapshot disk, revoke session credentials, block IP in WAF/NACL) -> SNS notification.
+
+```bash
+aws guardduty create-detector --enable --features Name=S3_DATA_EVENTS,Status=ENABLED
+aws securityhub enable-security-hub --enable-default-standards
+aws securityhub create-finding-aggregator --region-linking-mode ALL_REGIONS
+aws events put-rule --name gd-high --event-pattern '{"source":["aws.guardduty"],"detail-type":["GuardDuty Finding"],"detail":{"severity":[{"numeric":[">=",7]}]}}'
+```
+
+## 3. Edge Protection and DDoS Mitigation
+
+| Layer | Service | Defends |
+|---|---|---|
+| Edge caching and absorption | CloudFront | Absorbs volumetric traffic at edge locations; hides origins |
+| DNS | Route 53 | Distributed anycast name servers |
+| L3/L4 | AWS Shield Standard (automatic, free) / Shield Advanced | SYN/UDP floods, reflection; Advanced adds enhanced detection, 24x7 Shield Response Team, cost protection, health-based detection, application-layer integration with WAF |
+| L7 | AWS WAF | SQL injection, XSS, rate-based rules, bot control, geo and IP rules, managed rule groups, CAPTCHA |
+| Network | Network Firewall | Stateful and stateless inspection, Suricata-compatible rules, domain filtering |
+| Global | Global Accelerator | Static anycast IPs, Shield integration |
+
+WAF attaches to CloudFront, ALB, API Gateway, AppSync, Cognito user pools and other resources. **Shield Advanced** protects CloudFront, Route 53, Global Accelerator, ELB and Elastic IPs and requires a one-year subscription with a monthly fee.
+
+```
+ Users -> Route 53 -> CloudFront (WAF + Shield) -> ALB (only accepts CloudFront traffic) -> App
+                      origin protection: managed prefix list for CloudFront in the ALB SG
+                      or a secret custom header validated by WAF
+```
+
+<Callout variant="warning" title="Exam Trap: Large-Scale Web Attack Mitigation">
+"Mitigate DDoS and application attacks for a global web application with minimal change": CloudFront + WAF (+ Shield Advanced if there is a stated need for the response team or cost protection). Hiding the origin (restrict ALB security group to the CloudFront managed prefix list, use OAC for S3) is part of the answer. Adding more EC2 instances is not.
+</Callout>
+
+## 4. Network Firewall and Inspection Patterns
+
+- **Network Firewall** is a managed, scalable VPC firewall deployed in dedicated firewall subnets; use stateful rule groups (Suricata syntax, domain lists, protocol detection) and stateless rules. Central inspection uses TGW with appliance mode.
+- **Gateway Load Balancer** fronting third-party appliances when the stem requires a specific vendor.
+- **Security groups** (stateful, allow-only, reference other security groups), **network ACLs** (stateless, ordered allow/deny, subnet level). Use NACLs for explicit deny of IP ranges; security groups for application tier rules.
+- **Route 53 DNS Firewall** blocks malicious domains from VPC resources.
+
+## 5. Data Protection Controls
+
+| Need | Control |
+|---|---|
+| Find PII in S3 | Macie |
+| Encrypt everything | S3 default encryption (SSE-S3 default now applied), KMS, EBS encryption by default (account/Region setting), RDS encryption at creation (cannot be enabled in place; use snapshot copy) |
+| Prevent public buckets | S3 Block Public Access at account/org level (via SCP or Control Tower control) |
+| Secrets | Secrets Manager (rotation, cross-Region replication), Parameter Store SecureString |
+| Hardware key control | CloudHSM, KMS custom key store |
+| Patch compliance | Systems Manager Patch Manager with baselines and maintenance windows; Inspector for vulnerabilities |
+| Compliance auditing | Config conformance packs, Audit Manager, Security Hub standards |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Config Rules, Remediation and Organization Rules">
+
+Config evaluates resources continuously (configuration change) or periodically. Remediation actions run SSM Automation documents manually or automatically with retries (for example `AWS-DisablePublicAccessForSecurityGroup`, or enabling S3 encryption). Organization conformance packs deploy sets of rules to all accounts from the management or delegated administrator account. Remember that Config records and evaluates; it does not prevent (use SCPs/IAM for prevention).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Security Groups vs NACLs in Flow Troubleshooting">
+
+SG: stateful, evaluated as a whole (all rules), no explicit deny, only allow. NACL: stateless, rules evaluated in number order, first match wins, must allow ephemeral return ports. Typical exam: a web server reachable inbound on 443 but responses dropped because outbound ephemeral ports are denied in the NACL.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 6. Common Traps & Distractors
+
+- "Detect compromised EC2 instance communicating with a C2 server": GuardDuty, not Inspector.
+- "Find unpatched vulnerabilities (CVEs) automatically": Inspector.
+- "Block specific IP ranges at the subnet": NACL deny; "block SQL injection": WAF.
+- "Enforce a WAF rule on all accounts including new ones": Firewall Manager.
+- "Quick unified dashboard across accounts and Regions": Security Hub with a delegated admin and cross-Region aggregation.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can match a security requirement to the correct detection or enforcement service.
+<details>
+<summary>Explanation</summary>
+
+Threats and anomalies: GuardDuty. Vulnerabilities: Inspector. Sensitive data: Macie. Configuration compliance: Config. Aggregation and posture standards: Security Hub. Root cause investigation: Detective. Org-wide policy enforcement of WAF/SG/Shield: Firewall Manager.
+
+</details>
+
+- [ ] I can design automated remediation for a GuardDuty finding.
+<details>
+<summary>Explanation</summary>
+
+Route findings through EventBridge to Lambda or SSM Automation to isolate the instance (quarantine security group), take forensic snapshots, rotate or revoke credentials and notify via SNS. Centralize in the security account with cross-account permissions.
+
+</details>
+
+- [ ] I can protect a public web application from L3/L4 and L7 attacks.
+<details>
+<summary>Explanation</summary>
+
+Front the application with CloudFront and Route 53, attach WAF (managed rules, rate-based rules), enable Shield Advanced where required, and restrict the origin to CloudFront only, so attackers cannot bypass the edge protections.
+
+</details>
+
+- [ ] I can explain the difference between security groups and NACLs and when each is used.
+<details>
+<summary>Explanation</summary>
+
+Security groups are stateful, instance/ENI level and allow-only; NACLs are stateless, subnet level, support explicit deny and require explicit return-traffic rules. Use SGs for normal application tiers and NACLs for coarse subnet-wide blocks.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/08-high-availability-reliability-architecture" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 08: High Availability & Reliability: Load Balancing, Scaling & Failover
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/10-decoupling-integration-sqs-sns-eventbridge-step-functions" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 10: Decoupling & Integration: SQS, SNS, EventBridge, Step Functions & Streaming →
+  </a>
+</div>

@@ -1,0 +1,211 @@
+---
+title: "Module 14: Encryption, KMS, Data Masking & PII Discovery"
+description: "SSE-S3/KMS/DSSE, key policies and grants, cross-account encryption, in-transit TLS, client-side encryption, masking, anonymization, and Macie."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 14
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 4.3 and Skill 4.5.2: data masking and anonymization, AWS KMS encryption (keys, key policies, grants), cross-account encryption configuration, encryption in transit and before transit, and PII identification with Amazon Macie and Lake Formation (Skills 4.3.1–4.3.4, 4.5.2).
+
+<Callout variant="info" title="Exam Blueprint Focus: Encryption & Masking">
+Know the **encryption options per service**, the difference between **AWS owned / AWS managed / customer managed keys**, how **key policies** gate access (including cross-account), and which technique fits **masking vs anonymization vs tokenization**.
+</Callout>
+
+---
+
+## 1. KMS Fundamentals (Skill 4.3.2)
+
+| Key type | Control | Rotation | Cost | Notes |
+|---|---|---|---|---|
+| **AWS owned key** | None (service-internal) | Managed by AWS | Free | Default for some services (for example DynamoDB, SQS SSE) |
+| **AWS managed key** (`aws/s3`, `aws/redshift`) | View in account, cannot change policy | Automatic yearly | No monthly fee | Cannot be shared cross-account |
+| **Customer managed key (CMK)** | Full: key policy, grants, rotation, enable/disable | Optional automatic (default 365 days, configurable 90–2,560 days) or manual | Monthly + per-request | Needed for cross-account, custom policies, audit control |
+| **Imported key material / external key store (XKS) / CloudHSM key store** | Bring your own / outside AWS | Manual | Higher | Compliance-driven |
+
+* **Envelope encryption:** KMS encrypts a small **data key**; the data key encrypts bulk data (`GenerateDataKey`). Direct `Encrypt`/`Decrypt` is limited to 4 KB.
+* **Symmetric (AES-256-GCM)** is the default and used by integrated services; **asymmetric** keys for sign/verify or external encryption. **HMAC keys** exist for message authentication.
+* **Multi-Region keys** share key material across Regions (for example global tables, cross-Region copies).
+* **Key deletion** is scheduled with a 7–30 day waiting period (cannot be immediate); you can **disable** a key to block use immediately.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Key policies, IAM, and grants">
+
+* A **key policy** is the primary access control for a KMS key; IAM policies work only if the key policy allows IAM control (the default key policy statement delegating to the account root).
+* **Grants** give temporary, programmatic permissions (used by services such as EBS, Redshift, Glue); revocable and constrained with encryption context.
+* **Encryption context** is additional authenticated data (non-secret key/value pairs) that must match on decrypt and appears in CloudTrail logs.
+* Typical separation of duties: key administrators (manage, no use) vs key users (`Encrypt`, `Decrypt`, `GenerateDataKey`).
+* `kms:ViaService` condition restricts usage to calls made through a specific AWS service.
+* KMS throttling (request quotas) can hit high-volume workloads (for example, S3 with many small objects); mitigate with **S3 Bucket Keys**, data key caching, or request quota increases.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Configuring encryption across AWS account boundaries (Skill 4.3.3)">
+
+For account B to read data encrypted with a CMK in account A:
+
+1. **Key policy (account A):** allow account B's principal (or account root) `kms:Decrypt`, `kms:DescribeKey`, `kms:GenerateDataKey` as needed.
+2. **IAM policy (account B):** the role must also be allowed those KMS actions on the key ARN.
+3. **Resource policy** on the data (S3 bucket policy, Secrets Manager policy, snapshot sharing) allows account B.
+4. Must use a **customer managed key**, because AWS managed keys cannot be shared.
+
+Scenarios:
+* **Shared RDS/Redshift snapshots** encrypted with a CMK: share the key and the snapshot, then re-encrypt with a key in the target account when copying.
+* **S3 cross-account / cross-Region replication** of SSE-KMS objects: replication role needs `kms:Decrypt` on the source key and `kms:Encrypt` on the destination key; enable SSE-KMS object replication and specify the destination key.
+* **Kinesis/Firehose/Glue** cross-account delivery requires the writer role to be permitted on the destination key.
+* **Lake Formation cross-account sharing** with encrypted data requires the consumer principal to be able to use the data's KMS key.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Encryption at Rest by Service
+
+| Service | Options | Key points |
+|---|---|---|
+| **S3** | **SSE-S3** (default, AES-256, free), **SSE-KMS**, **DSSE-KMS** (dual-layer), **SSE-C** (customer-provided key), client-side | Since Jan 2023 all new objects are encrypted with SSE-S3 by default; **Bucket Keys** reduce KMS calls up to ~99%; bucket policy can require `s3:x-amz-server-side-encryption` |
+| **Redshift** | AWS KMS (AWS managed or CMK) or HSM | Enable at creation or modify to encrypt (migration happens in the background); encrypted snapshots; **data sharing** across encrypted clusters supported |
+| **RDS / Aurora** | KMS at creation | Cannot encrypt an existing unencrypted instance in place: snapshot → copy encrypted → restore |
+| **DynamoDB** | Always encrypted: AWS owned (default), AWS managed, or CMK | Cannot be disabled; global tables use the same options |
+| **EMR** | EBS and local disk encryption, S3 (EMRFS SSE/CSE), in-transit TLS via **security configuration** | Kerberos optional |
+| **Glue** | Security configuration (S3, CloudWatch Logs, job bookmarks) and Data Catalog encryption incl. connection passwords | |
+| **Kinesis Data Streams** | Server-side encryption with KMS | Firehose can use CMK |
+| **MSK** | KMS at rest, TLS in transit, SASL/IAM, mTLS | |
+| **EBS / EFS** | KMS | EFS enforce at creation |
+| **Athena** | Encrypt query results in S3 (SSE-S3, SSE-KMS, CSE-KMS), enforced per workgroup | |
+
+```bash
+# Default bucket encryption with a CMK and Bucket Keys
+aws s3api put-bucket-encryption --bucket my-lake --server-side-encryption-configuration '{
+  "Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"aws:kms","KMSMasterKeyID":"arn:aws:kms:us-east-1:111122223333:key/1111-2222"},"BucketKeyEnabled":true}]}'
+
+# Glue security configuration
+aws glue create-security-configuration --name lake-sec --encryption-configuration '{
+  "S3Encryption":[{"S3EncryptionMode":"SSE-KMS","KmsKeyArn":"arn:aws:kms:us-east-1:111122223333:key/1111-2222"}],
+  "CloudWatchEncryption":{"CloudWatchEncryptionMode":"SSE-KMS","KmsKeyArn":"arn:aws:kms:us-east-1:111122223333:key/1111-2222"},
+  "JobBookmarksEncryption":{"JobBookmarksEncryptionMode":"CSE-KMS","KmsKeyArn":"arn:aws:kms:us-east-1:111122223333:key/1111-2222"}}'
+```
+
+---
+
+## 3. Encryption in Transit and Before Transit (Skill 4.3.4)
+
+* **In transit (TLS):** HTTPS endpoints for all AWS APIs; enforce with S3 bucket policy `aws:SecureTransport = false → Deny`; RDS/Redshift `require_ssl` parameter (and `rds.force_ssl` for PostgreSQL); MSK TLS/mTLS; EMR in-transit encryption via security configuration (TLS for Spark, Hive, Tez, Hadoop); VPN (IPsec) or Direct Connect with MACsec/VPN for on-prem links; Transfer Family (SFTP/FTPS); DMS with SSL endpoints.
+* **Before transit (client-side encryption):** encrypt data before sending to AWS using the **AWS Encryption SDK**, S3 Encryption Client, or DynamoDB Encryption Client with KMS data keys. AWS never sees plaintext; you manage key use. Required when policy forbids plaintext leaving the source.
+
+| | Server-side | Client-side |
+|---|---|---|
+| Who encrypts | AWS service after receipt (TLS protects transit) | Your application before upload |
+| Key control | KMS/S3 managed | App with KMS/own keys |
+| Searchability / server processing | Works with Athena, etc. | Service cannot read data unless decrypted client-side |
+
+---
+
+## 4. Masking and Anonymization (Skill 4.3.1)
+
+| Technique | Reversible? | What it does | Example |
+|---|---|---|---|
+| **Redaction / masking** | No | Replace characters (`***-**-1234`) | Dynamic data masking in Redshift; show last 4 digits |
+| **Substitution** | No | Replace with realistic fake values | Test data generation |
+| **Hashing** (SHA-256 + salt) | No (one-way) | Deterministic pseudonym; supports joins | Hash email for analytics |
+| **Tokenization** | Yes (via vault) | Replace with token; mapping stored securely | Payment card numbers |
+| **Encryption** | Yes (key) | Ciphertext replaces value | Column-level KMS encryption |
+| **Generalization / bucketing** | No | Reduce precision (age 34 → 30–39, zip → region) | k-anonymity |
+| **Shuffling / noise (differential privacy)** | No | Perturb to prevent re-identification | Statistical releases |
+| **Nulling / suppression** | No | Remove value | Drop columns |
+
+**Pseudonymization** (reversible with extra info) is still personal data under GDPR; **anonymization** (irreversible, no re-identification) takes data out of scope.
+
+AWS tools: **Glue DataBrew** (mask, hash, shuffle, encrypt/decrypt transformations), **Glue ETL** *Detect PII* transform (detect entities and redact/hash), **Redshift dynamic data masking** and column-level/row-level security, **Lake Formation** column/row/cell filters, **CloudWatch Logs data protection policies** (mask sensitive log data), **Amazon Comprehend** PII detection/redaction, **Athena** SQL functions (`sha256`, `regexp_replace`).
+
+```sql
+-- Redshift dynamic data masking
+CREATE MASKING POLICY mask_ssn WITH (ssn VARCHAR(11)) USING ('XXX-XX-' || RIGHT(ssn, 4));
+ATTACH MASKING POLICY mask_ssn ON customers(ssn) TO ROLE analyst PRIORITY 10;
+```
+
+---
+
+## 5. PII Identification with Amazon Macie (Skill 4.5.2)
+
+* **Macie** discovers sensitive data in **S3** using managed data identifiers (names, addresses, credit cards, government IDs, credentials) and custom identifiers (regex + keywords); runs **automated sensitive data discovery** and targeted **discovery jobs** (one-time or scheduled); produces **findings** (sent to EventBridge/Security Hub) and an S3 bucket inventory with encryption, public access, and sharing posture.
+* **With Lake Formation:** use Macie findings to **tag** columns/tables (LF-Tags such as `pii=true`) and then apply tag-based permissions or masking, a common governance pattern. Pipeline: Macie finding → EventBridge → Lambda → Lake Formation tag assignment.
+* Macie covers S3; for databases use Glue Detect PII / DataBrew / Comprehend.
+
+---
+
+## 6. Common Traps and Watchouts
+
+* **"Share encrypted data cross-account"** → customer managed key + key policy + IAM + resource policy; AWS managed keys cannot be shared.
+* **"Reduce KMS cost/throttling for S3"** → S3 Bucket Keys.
+* **"Encrypt an existing unencrypted RDS instance"** → snapshot, copy with encryption, restore.
+* **"Plaintext must never leave the source"** → client-side encryption (AWS Encryption SDK).
+* **"Enforce HTTPS"** → bucket policy deny when `aws:SecureTransport` is false.
+* **"Immediate key deletion"** is impossible (7–30 day wait); **disable** for immediate effect.
+* **"Discover PII in S3"** → Macie, not GuardDuty or Inspector.
+* **Hashing without salt** is vulnerable to dictionary attacks; encryption is reversible, hashing is not.
+* **DynamoDB is always encrypted at rest;** the question is which key type.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can describe envelope encryption and the KMS key types.
+<details>
+<summary>Explanation</summary>
+
+KMS generates a data key; the plaintext data key encrypts data and the encrypted copy is stored with it. Key types: AWS owned, AWS managed, customer managed (full control, shareable, optional rotation), plus imported/XKS/CloudHSM options.
+
+</details>
+
+- [ ] I can configure cross-account decryption of KMS-encrypted data.
+<details>
+<summary>Explanation</summary>
+
+Use a CMK; the key policy allows the other account, the other account's IAM policy allows KMS actions on the key, and the data's resource policy (S3 bucket, snapshot share) allows access. Replication roles need Decrypt on source and Encrypt on destination keys.
+
+</details>
+
+- [ ] I can enforce encryption in transit and implement client-side encryption.
+<details>
+<summary>Explanation</summary>
+
+Deny non-TLS with `aws:SecureTransport`, require SSL parameters on databases, use TLS/mTLS for MSK and EMR security configurations, and use the AWS Encryption SDK or S3/DynamoDB encryption clients with KMS when data must be encrypted before leaving the client.
+
+</details>
+
+- [ ] I can choose masking vs hashing vs tokenization vs anonymization.
+<details>
+<summary>Explanation</summary>
+
+Masking hides display values; hashing gives one-way deterministic pseudonyms for joins; tokenization is reversible through a vault; anonymization (generalization, suppression, noise) is irreversible and removes re-identification risk.
+
+</details>
+
+- [ ] I can describe how Macie and Lake Formation work together for PII governance.
+<details>
+<summary>Explanation</summary>
+
+Macie scans S3 and finds sensitive data; automation tags the corresponding catalog resources with LF-Tags; Lake Formation tag-based policies then restrict or filter access to those columns/tables.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/13-authentication-authorization-iam-lake-formation" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 13: Authentication & Authorization: IAM, Secrets Manager & Lake Formation
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/15-audit-logging-privacy-governance" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 15: Audit Logs, Data Privacy, Sovereignty & Governance →
+  </a>
+</div>

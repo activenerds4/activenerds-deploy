@@ -1,0 +1,199 @@
+---
+title: "Cloud Foundation Administrator (2V0-17.25) Study Guide (18 Modules)"
+description: "Complete 18-module study guide covering VCF 5.x and 9.x architecture, SDDC Manager, vSAN ESA, NSX Edge clusters, and Day-2 operations."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "Cloud Foundation Administrator (2V0-17.25) Track"
+trackSlug: "/certifications/vmware/vcf-administrator"
+totalModules: 18
+layout: "hub"
+---
+
+<Callout variant="tip" title="Track Overview & Exam Code: 2V0-17.25">
+The **Cloud Foundation Administrator (2V0-17.25)** exam validates your technical competency in deploying, configuring, operating, and managing a VMware private cloud stack. Focus areas include Cloud Builder bring-up, workload domain provisioning, NSX Tier-0/1 routing, vSAN SPBM policies, and SDDC Manager LCM upgrades.
+</Callout>
+
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-4 my-6 not-prose">
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Exam Code</span>
+    <span className="font-mono text-sm font-bold text-primary">2V0-17.25</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Credential Level</span>
+    <span className="font-mono text-sm font-bold text-foreground">Professional</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Study Duration</span>
+    <span className="font-mono text-sm font-bold text-foreground">~25 Hours</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Curriculum</span>
+    <span className="font-mono text-sm font-bold text-foreground">18 Modules</span>
+  </div>
+</div>
+
+<TrackResourceTabs
+  notesCount="18 Modules"
+  mockTestsCount="3 Practice Exams"
+  flashCardsCount="100+ Cards"
+  cheatSheetsCount="5 Reference Cards"
+>
+  <div className="space-y-3 my-4 not-prose">
+<ModuleCard
+    moduleNumber="1"
+    domain="Architecture"
+    title="Module 01: VCF Architecture Fundamentals & BOM Integration"
+    description="Core constructs: Management Domain, VI Workload Domains, SDDC Manager, BOM validation, and component integration."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-01-architecture-fundamentals"
+  />
+  <ModuleCard
+    moduleNumber="2"
+    domain="Deployment"
+    title="Module 02: Bring-Up, Deployment & Cloud Builder / VCF Installer"
+    description="Planning workbook, deployment parameter JSON, ESXi imaging, bring-up execution pipeline, and validation checks."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-02-deployment-cloud-builder"
+  />
+  <ModuleCard
+    moduleNumber="3"
+    domain="Core Mechanism"
+    title="Module 03: Management Domain vs Workload Domains"
+    description="Domain isolation boundaries, dedicated vCenter placement, shared vs dedicated NSX instances, cluster design."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-03-mgmt-vs-workload-domains"
+  />
+  <ModuleCard
+    moduleNumber="4"
+    domain="Compute & SDDC"
+    title="Module 04: SDDC Manager Day-2 Operations & Administration"
+    description="Inventory administration, SOS diagnostics, token-based REST APIs, repository settings, and operational guardrails."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-04-sddc-manager-operations"
+  />
+  <ModuleCard
+    moduleNumber="5"
+    domain="Compute & SDDC"
+    title="Module 05: vCenter Server & ESXi Configuration in VCF"
+    description="vSphere Distributed Switch (VDS) profiles, teaming policies, Enhanced Linked Mode, NTP, DNS, and host commissioning."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-05-vcenter-esxi-config"
+  />
+  <ModuleCard
+    moduleNumber="6"
+    domain="Architecture"
+    title="Module 06: vSAN Express Storage Architecture (ESA) vs OSA"
+    description="Single-tier NVMe architecture, log-structured filesystem (LFS), snapshot engine, 25GbE+ network requirements, ReadyNode specs."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-06-vsan-esa-osa-architecture"
+  />
+  <ModuleCard
+    moduleNumber="7"
+    domain="vSAN Storage"
+    title="Module 07: vSAN Storage Policy Based Management (SPBM)"
+    description="RAID-1 mirroring, RAID-5/6 erasure coding, Failures to Tolerate (FTT), IOPS limits, thin provisioning, policy compliance."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-07-vsan-spbm-policies"
+  />
+  <ModuleCard
+    moduleNumber="8"
+    domain="NSX Networking"
+    title="Module 08: NSX Edge Clusters & Uplink Profiles"
+    description="Edge VM sizing (Medium, Large, XL), transport zones, Edge cluster deployment in SDDC Manager, BGP peering, failover modes."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-08-nsx-edge-clusters"
+  />
+  <ModuleCard
+    moduleNumber="9"
+    domain="NSX Networking"
+    title="Module 09: NSX Logical Routing (Tier-0 and Tier-1 Gateways)"
+    description="Distributed Router (DR) vs Service Router (SR), ECMP active/active routing, static vs dynamic BGP route redistribution, NAT."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-09-nsx-routing-gateways"
+  />
+  <ModuleCard
+    moduleNumber="10"
+    domain="NSX Networking"
+    title="Module 10: NSX Distributed Firewall (DFW) & Microsegmentation"
+    description="Policy evaluation categories (Emergency to Application), Applied To scoping, NSX Security Groups, context-aware Layer 7 rules."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-10-nsx-distributed-firewall"
+  />
+  <ModuleCard
+    moduleNumber="11"
+    domain="Core Mechanism"
+    title="Module 11: VI Workload Domain Provisioning & Cluster Expansion"
+    description="Commissioning hosts, network pools, deploying new VI workload domains, adding clusters, expanding storage with vSAN or FC/NFS."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-11-workload-domain-provisioning"
+  />
+  <ModuleCard
+    moduleNumber="12"
+    domain="Kubernetes"
+    title="Module 12: Supervisor Clusters & vSphere Namespaces in VCF"
+    description="Enabling Workload Management on workload domains, vSphere Namespace permissions, storage quotas, VM classes, and Harbor integration."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-12-supervisor-cluster-namespaces"
+  />
+  <ModuleCard
+    moduleNumber="13"
+    domain="Operations"
+    title="Module 13: VCF Operations & Monitoring (Operations / Aria)"
+    description="Operations deployment via SDDC Manager / Aria Suite Lifecycle, cross-domain capacity dashboards, symptom definitions, rightsizing."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-13-vcf-operations-monitoring"
+  />
+  <ModuleCard
+    moduleNumber="14"
+    domain="Operations"
+    title="Module 14: Log Intelligence, Syslog & Centralized Troubleshooting"
+    description="Centralized syslog aggregation, fluentbit agents, troubleshooting SDDC Manager task failures, vSAN traces, and NSX Edge logs."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-14-log-intelligence-troubleshooting"
+  />
+  <ModuleCard
+    moduleNumber="15"
+    domain="Automation"
+    title="Module 15: VCF Automation, Cloud Templates & Multitenancy"
+    description="Cloud accounts, Cloud Zones, Projects, Flavor/Image mappings, self-service catalog templates, governance policies."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-15-vcf-automation-multitenancy"
+  />
+  <ModuleCard
+    moduleNumber="16"
+    domain="Security"
+    title="Module 16: Identity Federation, SSO & Role-Based Access Control"
+    description="vCenter Single Sign-On (SSO), Active Directory / LDAP over SSL, OIDC federation (Entra ID, Okta), SDDC Manager role assignment."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-16-identity-sso-rbac"
+  />
+  <ModuleCard
+    moduleNumber="17"
+    domain="Security"
+    title="Module 17: Security, Certificate Management & Password Rotation"
+    description="SDDC Manager Certificate Authority (CA) integration, CSR generation, SSL certificate replacement, automated password rotation."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-17-security-certs-passwords"
+  />
+  <ModuleCard
+    moduleNumber="18"
+    domain="Lifecycle"
+    title="Module 18: Lifecycle Management (LCM), Upgrades & Maintenance"
+    description="Software bundle downloading, pre-check validation, strict upgrade sequencing (SDDC -> NSX -> vCenter -> ESXi), rollback options."
+    readTime="20m read"
+    href="/certifications/vmware/vcf-administrator/study-notes/vcf-18-lifecycle-management-lcm"
+  />
+  </div>
+</TrackResourceTabs>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Back to VMware Certifications Hub
+  </a>
+  <a href="/certifications/vmware/vcf-administrator/study-notes/vcf-01-architecture-fundamentals" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity shadow-sm">
+    Start Module 01 →
+  </a>
+</div>

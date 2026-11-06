@@ -1,0 +1,216 @@
+---
+title: "Module 17: Evaluation Systems: Model, RAG, Agent & Deployment Validation"
+description: "Bedrock Model Evaluations, LLM-as-a-judge, A/B and canary testing, retrieval quality, agent metrics, and quality gates (Task 5.1)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 17
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 5.1 (Skills 5.1.1 - 5.1.9): assessment frameworks, model evaluation, user-centered feedback, continuous quality assurance, RAG and agent evaluation, reporting, and deployment validation.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 5 (11% of scored content), Task 5.1">
+Evaluating FMs differs from classic ML: there is rarely one correct label. Know **what to measure** (relevance, factuality, consistency, fluency, safety), **how** (automatic metrics, LLM-as-a-judge, human review), and **when** (before release, in canary, continuously).
+</Callout>
+
+---
+
+## 1. Assessment Dimensions (Skill 5.1.1)
+
+| Dimension | Question | Typical method |
+|---|---|---|
+| Relevance | Does it answer the question asked? | LLM judge, human rating |
+| Factual accuracy / correctness | Are claims true? | Reference answers, grounding checks |
+| Faithfulness / groundedness | Is it supported by the retrieved context? | RAG evaluation, grounding |
+| Consistency | Same input, stable output? | Repeated runs, output diffing |
+| Fluency and coherence | Is it readable and logical? | Judge model, human |
+| Completeness and conciseness | Right level of detail | Judge model |
+| Safety and fairness | Harmful or biased content? | Guardrails evaluation, toxicity classifiers |
+| Format compliance | Valid JSON, required fields | Schema validation |
+
+Traditional metrics such as accuracy and F1 only fit tasks with fixed labels (classification). Text generation uses overlap metrics (BLEU, ROUGE), embedding-based similarity (BERTScore), and increasingly judge models.
+
+---
+
+## 2. Systematic Model Evaluation (Skill 5.1.2)
+
+**Amazon Bedrock Model Evaluations** support:
+
+| Mode | Description |
+|---|---|
+| Automatic (programmatic) | Built-in or custom datasets with metrics such as accuracy, robustness, toxicity |
+| **LLM-as-a-judge** | A judge model scores outputs on dimensions such as correctness, completeness, helpfulness, harmfulness, and refusal |
+| Human-based | Your workforce or an AWS-managed team rates outputs |
+| RAG evaluation | Evaluates retrieval only, or retrieval plus generation, for Knowledge Bases |
+
+Additional systematic methods:
+
+* **Multi-model evaluation:** run the same dataset across several models or configurations.
+* **A/B testing:** split live traffic between variants and compare outcomes.
+* **Canary testing:** send a small percentage to the new version before widening.
+* **Cost-performance analysis:** tokens per task, latency-to-quality ratio, and business outcomes.
+
+```
+Prompt dataset (JSONL in S3) --> Bedrock evaluation job (model A, model B, judge)
+   --> results in S3 --> compare quality, latency, token cost --> choose config
+```
+
+```json
+{"prompt": "What is the refund window for annual plans?",
+ "referenceResponse": "Annual plans can be refunded within 30 days.",
+ "category": "billing"}
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Strengths and risks of LLM-as-a-judge">
+
+Judge models scale evaluation cheaply and align reasonably with human preferences on many dimensions, but they have known biases: preference for longer answers, favoring their own model family, position bias when comparing two answers, and sensitivity to rubric wording. Mitigate with explicit rubrics, randomizing answer order, using a judge from a different model family than the candidate, calibrating against a human-labeled sample, and keeping humans in the loop for high-stakes dimensions.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. User-Centered Evaluation (Skill 5.1.3)
+
+| Mechanism | Implementation |
+|---|---|
+| Feedback interfaces | Thumbs up/down and comments in the UI, collected through API Gateway into DynamoDB/S3 |
+| Rating systems | Star or rubric ratings per response, tied to request ID and prompt version |
+| Annotation workflows | **SageMaker Ground Truth** or **Amazon Augmented AI** for structured human review |
+| Closing the loop | Aggregate feedback to find weak prompts and add failures to the golden dataset |
+
+---
+
+## 4. Continuous Quality Assurance (Skills 5.1.4, 5.1.9)
+
+```
+Change (prompt / model / retrieval / guardrail)
+  --> CI: regression suite on golden dataset --> automated quality gates
+  --> staging: synthetic user workflows (CloudWatch Synthetics canaries)
+  --> canary release (small traffic) --> compare hallucination rate, semantic drift, latency, cost
+  --> promote or automatic rollback
+```
+
+| Tool / technique | Role |
+|---|---|
+| Regression testing for outputs | Replay fixed inputs; compare scores to baseline; fail the build below a threshold |
+| Automated quality gates | Pipeline stage blocks deployment if metrics regress |
+| **CloudWatch Synthetics** | Scripted synthetic workflows probing the live endpoint on a schedule |
+| Semantic drift checks | Compare embeddings or judge scores between old and new outputs |
+| Response consistency checks | Repeat prompts and measure variation |
+
+---
+
+## 5. Multi-Perspective Assessment, RAG and Retrieval Testing (Skills 5.1.5, 5.1.6)
+
+Evaluate retrieval and generation **separately** so you can tell which one failed.
+
+| Retrieval metric | Meaning |
+|---|---|
+| Context relevance / precision | Fraction of retrieved chunks that are useful |
+| Context recall / coverage | Whether needed information was retrieved |
+| Ranking quality (MRR, nDCG, hit rate at k) | Whether the best chunks rank first |
+| Retrieval latency | Time to return chunks |
+
+| Generation metric | Meaning |
+|---|---|
+| Faithfulness | Claims supported by retrieved context |
+| Answer relevance | Answer addresses the question |
+| Correctness | Matches reference answer |
+| Citation accuracy | Cited source actually supports the claim |
+
+```
+Diagnosis matrix
+ good retrieval + bad answer  --> prompt/model problem
+ bad retrieval  + bad answer  --> chunking, embeddings, search config, metadata
+ good retrieval + good answer + unfaithful claims --> grounding / guardrail needed
+```
+
+Combine automated LLM-as-a-judge scoring with **human feedback collection** for a multi-perspective view.
+
+---
+
+## 6. Agent Performance (Skill 5.1.7)
+
+| Metric | What it shows |
+|---|---|
+| Task completion rate | Did the agent achieve the goal? |
+| Tool usage effectiveness | Right tool, right parameters, minimal redundant calls |
+| Steps and token cost per task | Efficiency |
+| Reasoning quality | Logical, non-circular plans in multi-step workflows |
+| Error recovery | Handles tool failures sensibly |
+| Safety | Stays within permitted actions |
+
+Use **Amazon Bedrock Agent evaluations** and agent traces to score these automatically, and add scenario test suites with expected tool-call sequences.
+
+---
+
+## 7. Reporting (Skill 5.1.8)
+
+Communicate results to stakeholders with automated, repeatable reports: **QuickSight** or **Managed Grafana** dashboards, scheduled summaries from Lambda (via SNS/email), and **model comparison visualizations** (quality versus cost versus latency). Include trends over time, the evaluation dataset version, and the exact model, prompt, and retrieval configuration so results are reproducible.
+
+---
+
+## 8. Exam Traps & Common Distractors
+
+- **Trap 1:** Using accuracy/F1 as the main metric for open-ended generation.
+- **Trap 2:** Evaluating only the final answer and not retrieval separately in RAG.
+- **Trap 3:** Trusting a single LLM judge without rubrics or human calibration.
+- **Trap 4:** Releasing a prompt or model change to 100 percent of traffic without a canary and automated rollback.
+- **Trap 5:** Evaluating once at launch instead of continuously.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose an evaluation method for a scenario.
+<details>
+<summary>Explanation</summary>
+
+Automatic metrics for objective tasks with references; LLM-as-a-judge for scalable subjective dimensions; human evaluation for high-stakes or nuanced criteria; RAG evaluation jobs to isolate retrieval and generation; A/B and canary tests for live comparison.
+
+</details>
+
+- [ ] I can diagnose a RAG problem using retrieval and generation metrics.
+<details>
+<summary>Explanation</summary>
+
+Low context recall or precision means fix chunking, embeddings, hybrid search, reranking, or metadata. Good retrieval with unfaithful answers means fix the prompt, add grounding checks, or change the model.
+
+</details>
+
+- [ ] I can design a deployment validation pipeline.
+<details>
+<summary>Explanation</summary>
+
+Regression suite and quality gates in CI, staging with synthetic workflows, canary release with monitoring of hallucination rate, semantic drift, latency and cost, and automatic rollback on alarm.
+
+</details>
+
+- [ ] I can evaluate an agent.
+<details>
+<summary>Explanation</summary>
+
+Measure task completion, tool selection and parameter correctness, steps and cost per task, reasoning quality, recovery from errors, and policy adherence using traces and Bedrock Agent evaluations.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/16-monitoring-observability-genai" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 16: Monitoring & Observability for GenAI Applications
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/18-troubleshooting-genai-applications" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 18: Troubleshooting GenAI Applications →
+  </a>
+</div>

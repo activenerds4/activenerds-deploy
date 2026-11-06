@@ -1,0 +1,472 @@
+---
+title: "Module 13: Optimizing ML and AI Infrastructure Costs and Performance: Instances, Purchasing Options, FM Token Costs & Observability"
+description: "Task 4.2: inference instance families, troubleshooting tools (CloudWatch, AgentCore Observability, X-Ray), dashboards, capacity, cost quotas and tools, purchasing options, FM inference cost and token optimization."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 13
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Domain 4, Task 4.2 - skills 4.2.1 (inference instance families), 4.2.2 (troubleshooting tools: CloudWatch, Amazon Bedrock AgentCore Observability, AWS X-Ray), 4.2.3 (dashboards), 4.2.4 (capacity for cost, performance and reliability), 4.2.5 (cost management tools and cost quotas), 4.2.6 (purchasing options), 4.2.7 (cost implications of FMs in production), 4.2.8 (agent resource consumption), 4.2.9 (FM inference cost management) and 4.2.10 (AI-specific cost patterns: tokens, embeddings, vector storage).
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 4.2 (Skills 4.2.1 - 4.2.10)">
+Task 4.2 sits in Domain 4 (24% of scored content) and has ten skills. Skills 4.2.1 to 4.2.6 existed in MLA-C01 in some form, but **skills 4.2.7, 4.2.8, 4.2.9 and 4.2.10 are NEW in MLA-C02** and are all about foundation models and agents: cost implications of FMs in production, agent resource consumption, usage optimization for FM inference, and AI-specific cost patterns. Two C01 topics were REMOVED from Task 4.2: monitoring infrastructure with Amazon EventBridge events, and troubleshooting capacity concerns involving cost and performance (provisioned concurrency, service quotas, auto scaling). Expect the C02 exam to lean on token economics, Bedrock pricing choices and purchasing options rather than quota-troubleshooting trivia. Billing and Cost Management, AWS Budgets and Cost Explorer are named in the in-scope services list, together with Amazon Bedrock AgentCore and AWS X-Ray.
+</Callout>
+
+---
+
+## 1. The Cost and Performance Map
+
+Every question in this task asks you to trade three things against each other: **cost, performance (latency and throughput) and reliability**. Start by recognizing which layer a scenario lives in.
+
+| Layer | Cost driver | Performance lever | Skills |
+|---|---|---|---|
+| Training | Instance hours, data transfer, storage | Instance family, distributed training, Spot with checkpoints | 4.2.1, 4.2.6 |
+| SageMaker AI inference | Instance hours per endpoint (even idle) | Instance family, endpoint type, scaling | 4.2.1, 4.2.4, 4.2.6 |
+| Bedrock FM inference | Input and output tokens, or hourly Provisioned Throughput | Model choice, caching, batch, throughput tier | 4.2.7, 4.2.9 |
+| Agents | Many model calls per user request, tool calls, runtime time | Step caps, smaller models, caching | 4.2.8 |
+| RAG data layer | Embedding tokens, vector database capacity and storage | Dimensions, chunking, store choice | 4.2.10 |
+| Governance | Untagged or unbounded spend | Tags, budgets, dashboards, Trusted Advisor | 4.2.3, 4.2.5 |
+
+```
+        Tag everything -> Cost Explorer / Budgets -> alert on drift
+              |                                          |
+              v                                          v
+   Right-size (Inference Recommender,      Dashboards + alarms (CloudWatch)
+   Compute Optimizer, Trusted Advisor)     Traces (X-Ray, AgentCore Observability)
+              |                                          |
+              +---> choose purchasing option <-----------+
+                    On-demand | Savings Plan | Spot (training)
+                    Bedrock: on-demand | batch | Provisioned Throughput
+                    |
+                    v
+        Reduce units of work: smaller model, shorter prompts,
+        prompt caching, max tokens, fewer agent steps, smaller vectors
+```
+
+---
+
+## 2. Skill 4.2.1: Selecting Inference Instance Families
+
+SageMaker AI instance names follow `ml.<family><generation>.<size>`. Pick the family by what the model is bound by: CPU, memory, GPU memory or accelerator support.
+
+| Family | Examples | Best for | Exam nuance |
+|---|---|---|---|
+| General-purpose CPU | ml.m5, ml.m6i | Balanced tabular models, small NLP, mixed pre/post-processing | Safe default for classical ML (XGBoost, linear models) |
+| Compute-optimized CPU | ml.c5, ml.c6i | CPU-bound inference, high request rates on small models | Cheaper per vCPU than general-purpose when memory is not the limit |
+| GPU inference | ml.g4dn, ml.g5, ml.g6 | Deep learning and mid-size LLM or vision inference | Cost-effective GPU tier for most inference |
+| High-end GPU | ml.p3, ml.p4d, ml.p5 | Large model training and the largest LLM hosting | Overkill for small models; mostly a training answer |
+| AWS Inferentia | ml.inf1, ml.inf2 | Purpose-built deep learning and generative AI inference at lower cost per inference | Model must be compiled with the AWS Neuron SDK |
+| AWS Trainium | ml.trn1 | Training; also usable for inference | Trainium is the training chip, Inferentia the inference chip |
+| AWS Graviton (Arm) | ml.c6g, ml.c7g, ml.m6g, ml.m7g | CPU inference with better price-performance | Needs an Arm-compatible container image |
+
+Memorize the decision shortcuts:
+
+* **Classical ML or small model, steady traffic:** CPU (m or c family), possibly Graviton to cut cost.
+* **Deep learning latency-sensitive or LLM that does not fit CPU:** GPU (g family first; p only when the model or throughput demands it).
+* **Same model at high volume and you want the lowest cost per inference:** Inferentia (inf2 for generative workloads), accepting the Neuron compilation step.
+* **You do not know:** do not guess, **load test it**.
+
+### Let measurements choose: Inference Recommender and Compute Optimizer
+
+**SageMaker Inference Recommender** benchmarks your registered model across instance types and returns latency, throughput and cost-per-inference results. The Default job type gives instance recommendations quickly; the Advanced job type runs your own load test with a traffic pattern and stopping conditions. Both start from a model package version in the Model Registry (Module 10).
+
+```python
+import boto3
+sm = boto3.client("sagemaker")
+
+# Quick instance-type sweep (Default job)
+sm.create_inference_recommendations_job(
+    JobName="churn-recommender-default",
+    JobType="Default",
+    RoleArn=ROLE_ARN,
+    InputConfig={"ModelPackageVersionArn":
+                 "arn:aws:sagemaker:us-east-1:111122223333:model-package/churn/3"},
+    JobDescription="Instance type sweep for churn model",
+)
+
+# Check progress and read results
+job = sm.describe_inference_recommendations_job(JobName="churn-recommender-default")
+for rec in job.get("InferenceRecommendations", []):
+    print(rec["EndpointConfiguration"]["InstanceType"], rec["Metrics"])
+```
+
+**AWS Compute Optimizer** uses utilization history to flag waste. Per current AWS documentation it provides rightsizing for EC2 instances, Auto Scaling groups, EBS volumes, Lambda and others, and it generates **idle recommendations for SageMaker endpoints** (it does not rightsize them). So for "which instance type should this new model use," the answer is Inference Recommender; for "find endpoints nobody is calling," Compute Optimizer or CloudWatch invocation metrics are the answer.
+
+---
+
+## 3. Skills 4.2.2 and 4.2.3: Troubleshooting Tools and Dashboards
+
+Each tool answers a different question. Matching tool to question is the most testable part of this skill.
+
+| Tool | Answers the question | ML and AI example |
+|---|---|---|
+| Amazon CloudWatch metrics and alarms | Is it slow, failing or saturated right now? | `ModelLatency`, `OverheadLatency`, `Invocation5XXErrors`, `GPUUtilization`; Bedrock `InputTokenCount` and `InvocationThrottles` |
+| CloudWatch Logs and Logs Insights | What happened in the requests? | Container errors; token usage per caller from Bedrock invocation logs |
+| Amazon Bedrock AgentCore Observability | What is each agent session doing and what does it cost? | Session metrics, spans for model, tool and memory calls, errors, latency |
+| CloudWatch generative AI observability | One curated view for model invocations and agents | Dashboards of latency, tokens, errors and traces |
+| AWS X-Ray | Which hop in a distributed request is slow or failing? | API Gateway to Lambda to SageMaker endpoint to a downstream API |
+| AWS CloudTrail | Who called which API? | Not performance; see Module 14 |
+
+**AgentCore Observability** (Skill 4.2.2 names it explicitly) gives visibility into agents running on Amazon Bedrock AgentCore. AWS documents that metrics are on by default for AgentCore resource types, while spans and logs are opt-in for several of them, and that viewing metrics, spans and traces requires a one-time enablement of **CloudWatch Transaction Search**. The data is viewed in the AgentCore observability pages or in CloudWatch generative AI observability, and agent code can be instrumented with OpenTelemetry-compatible tooling for richer traces and custom metrics. Module 12 covered how to use it for failure detection; here the focus is **consumption and latency**.
+
+**X-Ray** shows a service map and per-request traces. Use **sampling rules** to control trace volume so observability does not become its own cost problem.
+
+### Building a dashboard (Skill 4.2.3)
+
+A useful ML dashboard puts **performance, saturation, errors and cost signals side by side**. A CloudWatch dashboard is defined by a JSON body.
+
+```python
+import boto3, json
+cw = boto3.client("cloudwatch")
+
+body = {
+  "widgets": [
+    {"type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+     "properties": {"title": "Endpoint latency (microseconds)", "region": "us-east-1",
+                    "stat": "p95", "period": 60,
+                    "metrics": [
+                      ["AWS/SageMaker", "ModelLatency", "EndpointName", "churn-prod", "VariantName", "AllTraffic"],
+                      [".", "OverheadLatency", ".", ".", ".", "."]]}},
+    {"type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+     "properties": {"title": "Bedrock tokens per 5 min", "region": "us-east-1",
+                    "stat": "Sum", "period": 300,
+                    "metrics": [
+                      ["AWS/Bedrock", "InputTokenCount", "ModelId", "anthropic.claude-3-haiku-20240307-v1:0"],
+                      [".", "OutputTokenCount", ".", "."]]}},
+    {"type": "log", "x": 0, "y": 6, "width": 24, "height": 6,
+     "properties": {"title": "Tokens by caller", "region": "us-east-1", "view": "table",
+                    "query": "SOURCE '/bedrock/invocations' | stats sum(input.inputTokenCount) as inTok, sum(output.outputTokenCount) as outTok by identity.arn | sort inTok desc"}}
+  ]
+}
+cw.put_dashboard(DashboardName="ml-cost-perf", DashboardBody=json.dumps(body))
+```
+
+Add alarms with **metric math** (for example error rate as errors divided by invocations) and **anomaly detection** bands so thresholds follow normal daily patterns. Remember the Module 12 distinction: `ModelLatency` points at the model or instance, `OverheadLatency` at the platform.
+
+---
+
+## 4. Skill 4.2.4: Optimizing Capacity for Cost, Performance and Reliability
+
+<Callout variant="tip" title="C02 scope note">
+C02 removed capacity troubleshooting such as provisioned concurrency, service quotas and auto scaling from Task 4.2, and EventBridge-based infrastructure monitoring. Auto scaling configuration still lives in Task 3.2 (Skill 3.2.6, Module 9). Here the exam asks whether you can **choose the right capacity model**, not diagnose quota errors.
+</Callout>
+
+Capacity is the number of instances (or tokens per minute) you pay for versus the traffic you serve. Wasted idle capacity hurts cost; too little hurts latency and reliability.
+
+| Traffic pattern | Cost-aware choice | Reliability note |
+|---|---|---|
+| Steady, latency-critical | Real-time endpoint, right-sized, target-tracking scaling | At least two instances across AZs for availability |
+| Spiky or unpredictable, tolerant of cold start | Serverless Inference | No idle charge, but cold starts and concurrency limits |
+| Large payloads, long processing, can wait | Asynchronous Inference (queue; can scale to zero) | Requests are queued instead of dropped |
+| Offline scoring of a whole dataset | Batch Transform | Pay only while the job runs |
+| Many small models | Multi-model endpoint on shared instances | Fewer endpoints to pay for |
+| Idle or rarely used endpoint | Delete it, or move to serverless or async | Compute Optimizer idle findings help find these |
+
+Practical rules: use **Inference Recommender** to size before launch, scale on a metric that tracks load (for example invocations per instance), keep a minimum capacity that meets your availability target, and **delete unused endpoints and notebook instances** because a SageMaker real-time endpoint is billed while it runs whether or not it receives requests.
+
+---
+
+## 5. Skill 4.2.5: Cost Tools and Cost Quotas
+
+| Tool | Purpose | Exam nuance |
+|---|---|---|
+| AWS Billing and Cost Management | Console home for bills, cost allocation tags, budgets, Cost Explorer | Cost allocation tags must be **activated** here before they appear in reports |
+| AWS Cost Explorer | Visualize and analyze past spend and forecasts; group by service, tag, account | Reporting and analysis, does not enforce anything |
+| AWS Budgets | Cost, usage and Savings Plans budgets with alerts at thresholds | **Alerts**, not hard stops; optional budget actions can apply restrictions |
+| Cost allocation tags | Attribute spend to project, team or environment | Not retroactive; untagged spend cannot be attributed |
+| AWS Trusted Advisor | Best-practice checks including cost optimization (idle or underused resources) | The set of available checks depends on your AWS Support plan |
+| Service Quotas | View and request increases for service limits | Quotas are **limits on usage**, not spending caps |
+
+Treat "set cost quotas" as three layers: **tag** so spend is attributable, **budget** so overspend alerts fire early, and **limit** the blast radius with IAM, quotas and architectural caps (max tokens, agent step limits).
+
+```python
+import boto3
+budgets = boto3.client("budgets")
+budgets.create_budget(
+    AccountId="111122223333",
+    Budget={
+        "BudgetName": "genai-chat-monthly",
+        "BudgetLimit": {"Amount": "5000", "Unit": "USD"},
+        "TimeUnit": "MONTHLY",
+        "BudgetType": "COST",
+        "CostFilters": {"TagKeyValue": ["user:project$genai-chat"]},
+    },
+    NotificationsWithSubscribers=[
+        {"Notification": {"NotificationType": "ACTUAL", "ComparisonOperator": "GREATER_THAN",
+                          "Threshold": 80, "ThresholdType": "PERCENTAGE"},
+         "Subscribers": [{"SubscriptionType": "EMAIL", "Address": "ml-finops@example.com"}]},
+        {"Notification": {"NotificationType": "FORECASTED", "ComparisonOperator": "GREATER_THAN",
+                          "Threshold": 100, "ThresholdType": "PERCENTAGE"},
+         "Subscribers": [{"SubscriptionType": "EMAIL", "Address": "ml-finops@example.com"}]},
+    ],
+)
+
+ce = boto3.client("ce")
+ce.get_cost_and_usage(
+    TimePeriod={"Start": "2026-10-01", "End": "2026-11-01"},
+    Granularity="DAILY", Metrics=["UnblendedCost"],
+    GroupBy=[{"Type": "TAG", "Key": "project"}],
+)
+```
+
+For Bedrock, **application inference profiles** let you attach tags to a model-invocation resource so on-demand token spend can be grouped by application or team in Cost Explorer. A forecasted alert is the early warning; an actual alert is the confirmation.
+
+---
+
+## 6. Skill 4.2.6: Purchasing Options
+
+| Option | Commitment | Use it for | Do not use it for |
+|---|---|---|---|
+| On-demand | None | New, spiky or unpredictable workloads; experiments | Large, steady workloads you could commit to |
+| SageMaker AI Savings Plans | 1 or 3 years, a dollar-per-hour commitment | Steady SageMaker usage (training, endpoints, notebooks, processing, batch transform) | Bedrock token usage; unpredictable usage that may fall below the commitment |
+| Spot (managed Spot training) | None; capacity can be reclaimed | Fault-tolerant **training**, tuning jobs | Real-time endpoints or anything that cannot be interrupted |
+| Bedrock on-demand (per token) | None | Variable or unproven FM traffic | Sustained high-volume traffic needing guaranteed throughput |
+| Bedrock Provisioned Throughput | Hourly model units; no commitment, 1 month or 6 months | Steady high-volume FM traffic; **custom or fine-tuned models**, which require it | Spiky or low traffic |
+| Bedrock batch inference | Per token at a discount versus on-demand, results arrive later | Offline bulk jobs | Interactive latency-sensitive requests |
+| Bedrock service tiers | Per request | Choosing Standard, Priority, Flex or Reserved for latency and cost needs | Assuming every model supports every tier |
+
+**SageMaker AI Savings Plans** are a commitment in dollars per hour that applies across instance families, sizes and Regions and across SageMaker components. Classic EC2 Reserved Instances and Compute Savings Plans do not apply to SageMaker usage.
+
+**Spot training** is the largest single saving for training. Because capacity can be reclaimed, you **must checkpoint** to S3 so the job resumes instead of restarting, and `MaxWaitTimeInSeconds` must be at least `MaxRuntimeInSeconds`.
+
+```python
+sm.create_training_job(
+    TrainingJobName="fraud-xgb-spot-001",
+    RoleArn=ROLE_ARN,
+    AlgorithmSpecification={"TrainingImage": IMAGE_URI, "TrainingInputMode": "File"},
+    InputDataConfig=[...],
+    OutputDataConfig={"S3OutputPath": "s3://ml-train/out/"},
+    ResourceConfig={"InstanceType": "ml.g5.2xlarge", "InstanceCount": 1, "VolumeSizeInGB": 100},
+    EnableManagedSpotTraining=True,
+    StoppingCondition={"MaxRuntimeInSeconds": 7200, "MaxWaitTimeInSeconds": 14400},
+    CheckpointConfig={"S3Uri": "s3://ml-train/checkpoints/fraud-xgb/",
+                      "LocalPath": "/opt/ml/checkpoints"},
+)
+```
+
+In the SageMaker Python SDK the same settings are `use_spot_instances=True`, `max_run`, `max_wait`, `checkpoint_s3_uri` and `checkpoint_local_path`. Your training script must save to and restore from the checkpoint directory.
+
+**Bedrock service tiers** (Standard is the default, Priority for the fastest responses, Flex for cost-sensitive work that tolerates slower processing, and a Reserved tier for committed capacity arranged through your AWS account team) give a per-request way to trade latency against cost. Availability varies by model and Region, so verify on the current Bedrock pricing and documentation pages. Do not memorize prices; memorize **which pattern fits which model**.
+
+---
+
+## 7. Skill 4.2.7: Cost Implications of FMs in Production
+
+Foundation model cost is driven by **units of work**, mainly tokens, rather than by servers. Output tokens usually cost more than input tokens and also take longer to generate, so verbose answers hurt both bill and latency.
+
+Cost per request is roughly: input tokens times input rate, plus output tokens times output rate, plus any cache, retrieval and guardrail costs. Then multiply by request volume. Things that silently inflate it:
+
+* **Long system prompts and few-shot examples** resent on every call.
+* **RAG context**: retrieving ten large chunks multiplies input tokens per request.
+* **Conversation history** appended each turn, so cost grows with conversation length.
+* **Agents**: one user request becomes many model calls (Section 8).
+* **Oversized model** used for simple tasks such as classification.
+* **Retries and loops** that pay again for failed or repeated calls.
+* **Guardrails, evaluations and embeddings** that are billed as separate usage.
+
+The production question is not "what does one call cost" but "what does the **whole workflow** cost at peak volume, and what choice changes the unit economics." Define a unit metric such as cost per resolved ticket, then watch it on the dashboard from Section 3.
+
+```
+ User request
+    |
+    v
+ [Prompt build] system prompt + history + retrieved chunks   <- input tokens
+    |
+    v
+ [Model]  smaller / larger / routed                          <- model choice
+    |
+    v
+ [Output] capped by max tokens                               <- output tokens
+    |
+    +--> cache read? (prompt caching reduces repeated input cost)
+    +--> guardrail, embeddings, vector query (separate costs)
+```
+
+---
+
+## 8. Skill 4.2.8: Monitoring Agent Resource Consumption
+
+Agents plan, call tools, read memory and loop, so the cost and latency of one user request is the **sum of every step**. Consumption patterns to monitor:
+
+| Signal | Why it matters | Where to see it |
+|---|---|---|
+| Model calls and tokens per session | Main cost multiplier | Bedrock token metrics, invocation logs, AgentCore session metrics |
+| Steps or tool calls per session | Detects loops and over-planning | Traces (AgentCore Observability, agent trace, X-Ray) |
+| Session duration and runtime consumption | Drives hosting cost and timeouts | AgentCore metrics and CloudWatch |
+| Tool and action-group failures with retries | Failed calls still cost tokens and compute | Lambda metrics, traces |
+| Memory and knowledge base usage | Retrieval and embedding cost, context size | AgentCore memory metrics, retrieval metrics |
+
+Controls that reduce consumption: iteration and timeout caps, `max tokens` limits, smaller models for routine steps, caching stable instructions and tool definitions, trimming conversation history, and alarms on step count or tokens per session. Tag agent resources so the budget from Section 5 can be filtered per agent. Use AgentCore's consumption-based approach as a design hint: pay for work done, so idle time should be cheap, but confirm current AgentCore pricing details on the AWS pricing page before relying on them.
+
+---
+
+## 9. Skill 4.2.9: Managing FM Inference Costs with Usage Optimization
+
+| Lever | What it does | Trade-off |
+|---|---|---|
+| Model selection | Use the smallest model that meets the quality bar | Needs evaluation (Module 7) to prove quality is acceptable |
+| Intelligent prompt routing | Bedrock routes each prompt between models in the same family by predicted difficulty | Routing quality and supported models vary |
+| Prompt caching | Reuses the processed static prefix (system prompt, tool definitions, large documents) so repeated input costs less and starts faster | Cache entries expire (default 5 minutes, up to 1 hour on some models); static content must come first |
+| Batch inference | Submits a JSONL file in S3 and writes results to S3 at a discount, asynchronously | No real-time response |
+| Shorter prompts | Fewer input tokens, lower latency | Compress carefully to keep quality |
+| `maxTokens` limits | Caps output length and runaway generations | Too low causes truncated answers (see Module 12 stop reasons) |
+| Context trimming | Retrieve fewer or smaller chunks; summarize history | May reduce answer quality if over-trimmed |
+| On-demand vs Provisioned Throughput | Switch to committed hourly capacity when traffic is steady and high | Pay for idle capacity if traffic drops |
+| Model distillation or smaller fine-tuned model | Teach a small model to do a narrow task | Training cost and maintenance; custom models need Provisioned Throughput on Bedrock |
+
+Prompt caching uses a `cachePoint` marker in the Converse API. The response reports `cacheReadInputTokens` and `cacheWriteInputTokens` so you can compute your hit rate.
+
+```python
+import boto3
+br = boto3.client("bedrock-runtime")
+resp = br.converse(
+    modelId=MODEL_ID,   # must be a model that supports prompt caching
+    system=[{"text": LONG_POLICY_TEXT}, {"cachePoint": {"type": "default"}}],
+    messages=[{"role": "user", "content": [{"text": question}]}],
+    inferenceConfig={"maxTokens": 400, "temperature": 0.2},
+)
+print(resp["usage"])   # inputTokens, outputTokens, cacheReadInputTokens, cacheWriteInputTokens
+```
+
+Batch inference runs as a job, with batch metrics published to the `AWS/Bedrock/Batch` namespace (for example records pending processing and tokens processed per minute) that you can alarm on or use to trigger downstream steps:
+
+```python
+bedrock = boto3.client("bedrock")
+bedrock.create_model_invocation_job(
+    jobName="nightly-summaries",
+    roleArn=ROLE_ARN,
+    modelId=MODEL_ID,
+    inputDataConfig={"s3InputDataConfig": {"s3Uri": "s3://ml-batch/in/requests.jsonl"}},
+    outputDataConfig={"s3OutputDataConfig": {"s3Uri": "s3://ml-batch/out/"}},
+)
+```
+
+**Provisioned Throughput** is created with `create_provisioned_model_throughput` (parameters `modelId`, `provisionedModelName`, `modelUnits` and optional `commitmentDuration` of `OneMonth` or `SixMonths`; omit it for no commitment). It is billed hourly until deleted, longer commitments lower the hourly price, and the returned ARN is used as the model ID for inference.
+
+---
+
+## 10. Skill 4.2.10: Monitoring AI-Specific Cost Patterns
+
+Three cost streams behave differently from classic infrastructure.
+
+| Stream | Cost behavior | What to monitor | Optimization |
+|---|---|---|---|
+| Token usage | Grows with traffic, prompt length and output length | Input and output token metrics per model, per caller (invocation logs), per tag | Prompt trimming, caching, routing, `maxTokens` |
+| Embedding computation | Billed per input token when you embed documents and queries; **re-embedding the corpus** after a model or chunking change repeats the whole bill | Knowledge base ingestion jobs, embedding model invocation counts | Incremental sync, avoid unnecessary re-chunking, cache query embeddings, batch embedding jobs |
+| Vector database storage | Grows with chunks times dimensions; some stores bill provisioned capacity continuously | Index size, number of vectors, provisioned capacity utilization | Smaller embedding dimensions, deduplicate chunks, delete stale documents, pick the store that matches scale |
+
+Vector stores in scope include **Amazon OpenSearch Service** (and OpenSearch Serverless), **Amazon RDS with pgvector** and **Amazon S3** (Skill 1.1.7). Provisioned or minimum-capacity stores cost money even when idle, while object-storage-based vector options trade lower storage cost for different latency characteristics, so match the store to query rate and latency need.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Break-even logic for on-demand vs Provisioned Throughput">
+
+Provisioned Throughput converts a **variable per-token bill into a fixed hourly bill**. It wins only when utilization is high and steady: the fixed hourly cost is spread over many tokens, so the effective price per token falls below on-demand. At low utilization you pay for unused model units, and on-demand is cheaper. The decision steps are: measure sustained tokens per minute from CloudWatch, compare with the model-unit throughput for your model (provided by AWS), cost out the hourly commitment against your on-demand token bill, and choose the commitment length only when you trust the forecast (no commitment, 1 month or 6 months, with longer terms cheaper per hour but not deletable early). Remember that **custom (fine-tuned or imported) models require Provisioned Throughput**, so for those the question is sizing, not whether to use it. Batch inference is the third option: if latency does not matter, it is cheaper than on-demand without any commitment.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Inferentia, Trainium and the Neuron compilation step">
+
+Inferentia and Trainium are AWS-designed accelerators programmed through the AWS Neuron SDK. A model is **compiled for Neuron** ahead of time (shapes and data types matter), then hosted on `ml.inf` or `ml.trn` instances using compatible deep learning containers. The payoff is better price-performance for supported deep learning and generative models; the costs are the compile and validation effort and a narrower set of supported architectures than GPUs. Graviton is different: it is a CPU choice that requires an Arm-compatible container, not an accelerator. For exam scenarios: "lowest cost per inference for a supported deep learning model at scale" suggests Inferentia, "must run unmodified CUDA code" suggests GPU, and "cost-sensitive classical model" suggests CPU or Graviton. Always confirm with Inference Recommender because the winner depends on batch size, payload and latency target.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Reducing embedding and vector storage cost without hurting retrieval">
+
+The levers, in the order they usually pay off: (1) **chunk smartly** so you do not store near-duplicate or boilerplate chunks; (2) **deduplicate and expire** content so deleted documents do not stay in the index; (3) choose an **embedding dimension** that is large enough for your retrieval quality, because some embedding models let you choose smaller output dimensions (Titan Text Embeddings V2 offers 256, 512 or 1024), shrinking storage and speeding search; (4) **sync incrementally** so only changed documents are re-embedded; (5) **cache embeddings** of repeated queries; (6) pick the store whose pricing model matches your traffic, since always-on provisioned capacity suits steady high query rates while spiky or small corpora favor storage-based options. Validate each change with retrieval evaluation (Module 7) so cost cuts do not silently reduce answer quality.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 11. Exam Traps and Wrong-vs-Right Reasoning
+
+<Callout variant="warning" title="Exam Trap: Scenario patterns for Task 4.2">
+**Scenario 1 - Nightly bulk summarization.** A team summarizes two million documents overnight with an interactive Bedrock model and the bill is high. Wrong: buy 6-month Provisioned Throughput. Right: **Bedrock batch inference**, because nobody is waiting for the answers and batch is discounted versus on-demand.
+
+**Scenario 2 - Spiky chatbot launch.** Traffic is unknown for the first quarter. Wrong: commit to Provisioned Throughput or a 3-year Savings Plan. Right: **on-demand per-token** (watch token metrics), then commit once utilization is steady.
+
+**Scenario 3 - Fine-tuned model on Bedrock.** The team asks how to serve a custom model on demand. Wrong: invoke it like a base model with per-token billing. Right: custom models require **Provisioned Throughput**; choose commitment length by forecast confidence.
+
+**Scenario 4 - Interrupted training.** A 20-hour training job must be cheaper. Wrong: Spot with no checkpoints, or Spot for the real-time endpoint. Right: **managed Spot training with `CheckpointConfig`** and `MaxWaitTimeInSeconds` at least `MaxRuntimeInSeconds`; Spot is a training feature.
+
+**Scenario 5 - "Stop spend at the limit".** Wrong: "AWS Budgets blocks usage at the limit." Right: Budgets **alerts** (and can run budget actions you configure); Cost Explorer only reports; Service Quotas limit usage rather than spend. Combine tags, budgets and architectural caps such as `maxTokens` and agent step limits.
+
+**Scenario 6 - Cost spike, unknown source.** Wrong: scale up instances or open a quota ticket. Right: check **token metrics, invocation logs by caller and tag-based Cost Explorer views**; the usual cause is longer prompts, a missing `maxTokens`, an agent loop or a re-embedding job.
+
+**Scenario 7 - Which instance?** Wrong: pick `ml.p5` "to be safe". Right: run **Inference Recommender** against the registered model and pick the lowest cost per inference that meets the latency target; consider Inferentia (after Neuron compilation) or Graviton only if the workload and container allow.
+
+**Scenario 8 - Where is the latency?** Wrong: CloudTrail. Right: **X-Ray** for a hop-by-hop trace across services, **CloudWatch** for endpoint metrics, and **AgentCore Observability** for agent sessions.
+
+Also remember what C02 removed: do not over-invest in EventBridge infrastructure monitoring or provisioned concurrency, service quota and auto scaling troubleshooting for Task 4.2.
+</Callout>
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between CPU, GPU, Inferentia and Graviton for an inference workload and name the tool that proves the choice.
+<details>
+<summary>Explanation</summary>
+
+CPU (ml.m and ml.c) fits classical ML and small models; GPU (ml.g first, ml.p for the largest models) fits deep learning and LLM inference; Inferentia (ml.inf2 for generative workloads) gives the lowest cost per inference for supported models but needs Neuron compilation; Graviton is an Arm CPU option with better price-performance that needs an Arm container. Prove the choice with SageMaker Inference Recommender, which benchmarks a registered model across instance types. Compute Optimizer is used to find idle SageMaker endpoints, not to pick a first instance type.
+
+</details>
+
+- [ ] I can match CloudWatch, AgentCore Observability and X-Ray to the right troubleshooting question and describe a useful dashboard.
+<details>
+<summary>Explanation</summary>
+
+CloudWatch metrics, logs and alarms answer "is it slow, failing or saturated" and "who is using the tokens" (Logs Insights over invocation logs). AgentCore Observability shows agent session metrics, spans and traces and is viewed in AgentCore or CloudWatch generative AI observability after Transaction Search is enabled. X-Ray traces a request across services to find the slow hop. A good dashboard (created with `put_dashboard` and a JSON body) shows latency split into ModelLatency and OverheadLatency, errors, saturation, Bedrock input and output tokens and a cost-related query, with alarms and anomaly detection on top.
+
+</details>
+
+- [ ] I can explain what Budgets, Cost Explorer, tags, Trusted Advisor and Service Quotas each do, and what none of them does.
+<details>
+<summary>Explanation</summary>
+
+Cost allocation tags (activated in Billing and Cost Management) make spend attributable. Cost Explorer analyzes and forecasts spend. Budgets alerts on actual or forecasted cost and can trigger configured actions, but it does not automatically stop usage. Trusted Advisor flags cost optimization opportunities, with checks depending on the support plan. Service Quotas are limits on resource usage, not spending caps. Real cost control combines tagging, budgets and architectural limits such as maxTokens and agent step caps.
+
+</details>
+
+- [ ] I can pick the right purchasing option for training, SageMaker endpoints and Bedrock FMs.
+<details>
+<summary>Explanation</summary>
+
+Training that tolerates interruption uses managed Spot training with checkpointing to S3 and MaxWaitTimeInSeconds at least MaxRuntimeInSeconds. Steady SageMaker usage fits SageMaker AI Savings Plans (a dollar-per-hour commitment for 1 or 3 years that is flexible across instance families, sizes and Regions). Unpredictable usage stays on-demand. For Bedrock, unproven or spiky traffic uses on-demand per-token, offline bulk work uses batch inference, and steady high volume uses Provisioned Throughput (no commitment, 1 month or 6 months); custom models require Provisioned Throughput. Service tiers (Standard, Priority, Flex, Reserved) tune latency versus cost per request where supported.
+
+</details>
+
+- [ ] I can list at least six ways to lower FM inference cost and the downside of each.
+<details>
+<summary>Explanation</summary>
+
+Smaller model or intelligent prompt routing (needs quality evaluation), prompt caching of the static prefix (cache expiry, static content first), batch inference (asynchronous only), shorter prompts and trimmed context (risk of losing information), maxTokens limits (truncation risk), on-demand versus Provisioned Throughput (idle cost if traffic drops), and distillation or a smaller fine-tuned model (training effort, custom models need Provisioned Throughput). Always measure with token metrics and a unit metric such as cost per resolved request.
+
+</details>
+
+- [ ] I can describe how agents and RAG create AI-specific cost patterns and how to monitor them.
+<details>
+<summary>Explanation</summary>
+
+Agents multiply cost because one request becomes many model calls, tool calls and memory lookups, and loops or retries are paid for again. Monitor tokens, steps and duration per session through traces and AgentCore or Bedrock metrics, and cap iterations and tokens. RAG adds embedding computation (paid per token at ingestion and for query embeddings, repeated on full re-embedding) and vector storage that grows with chunk count and dimensions. Reduce them with incremental sync, deduplication, smaller embedding dimensions, expiring stale content and a vector store whose pricing model matches the traffic.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/12-monitoring-drift-observability" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 12: Monitoring Inference & Performance: Model Monitor, Drift, A/B Testing & GenAI Observability
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/14-security-iam-guardrails-compliance" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 14: Securing ML and AI Workloads: IAM, VPC Isolation, Encryption, Guardrails & Compliance →
+  </a>
+</div>

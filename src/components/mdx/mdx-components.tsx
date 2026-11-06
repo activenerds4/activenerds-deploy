@@ -21,6 +21,11 @@ import SponsoredBadge from "./SponsoredBadge";
 import PollWidget from "@/components/growth/PollWidget";
 import TrackCard from "./TrackCard";
 import ModuleCard from "./ModuleCard";
+import VendorCard from "./VendorCard";
+import CertTrackCard from "./CertTrackCard";
+import TrackResourceTabs from "./TrackResourceTabs";
+import ExamResourceCard from "./ExamResourceCard";
+import ResourceCard from "./ResourceCard";
 
 /**
  * Centralized MDX component registry.
@@ -243,6 +248,11 @@ export const mdxComponents = {
   PollWidget,
   TrackCard,
   ModuleCard,
+  VendorCard,
+  CertTrackCard,
+  TrackResourceTabs,
+  ExamResourceCard,
+  ResourceCard,
 };
 
 export type MdxComponents = typeof mdxComponents;

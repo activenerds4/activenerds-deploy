@@ -1,0 +1,186 @@
+---
+title: "AWS Certified CloudOps Engineer - Associate Study Guide (16 Modules)"
+description: "16-module SOA-C03 study guide covering CloudWatch, remediation, scaling, backup/DR, IaC, IAM, encryption, VPC networking, and troubleshooting."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+totalModules: 16
+layout: "hub"
+---
+
+<Callout variant="tip" title="Track Overview & Exam Code: SOA-C03">
+16-module SOA-C03 study guide covering CloudWatch, remediation, scaling, backup/DR, IaC, IAM, encryption, VPC networking, and troubleshooting. Follow this structured curriculum to gain hands-on proficiency and master scenario-based exam questions.
+</Callout>
+
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-4 my-6 not-prose">
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Exam Code</span>
+    <span className="font-mono text-sm font-bold text-primary">SOA-C03</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Credential Level</span>
+    <span className="font-mono text-sm font-bold text-foreground">Associate</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Study Duration</span>
+    <span className="font-mono text-sm font-bold text-foreground">~40 Hours</span>
+  </div>
+  <div className="rounded-xl border border-border/80 bg-card/60 p-4">
+    <span className="font-mono text-xs text-muted-foreground block">Curriculum</span>
+    <span className="font-mono text-sm font-bold text-foreground">16 Modules</span>
+  </div>
+</div>
+
+<TrackResourceTabs
+  notesCount="16 Modules"
+  mockTestsCount="Coming Soon"
+  flashCardsCount="Coming Soon"
+  cheatSheetsCount="Coming Soon"
+>
+  <div className="space-y-3 my-4 not-prose">
+  <ModuleCard
+    moduleNumber="1"
+    domain="Monitoring, Logging, Analysis, Remediation & Performance"
+    title="Module 01: CloudWatch Metrics, Logs, Agent, Alarms & Dashboards"
+    description="CloudWatch agent on EC2/ECS/EKS, composite alarms, metric filters, cross-account dashboards, CloudTrail, Prometheus/Grafana, and SNS notifications."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/01-cloudwatch-monitoring-logging-alarms"
+  />
+  <ModuleCard
+    moduleNumber="2"
+    domain="Monitoring, Logging, Analysis, Remediation & Performance"
+    title="Module 02: EventBridge Routing & Automated Remediation Runbooks"
+    description="Event buses, rules, input transformers, DLQs, troubleshooting rules, Systems Manager Automation runbooks, and alarm-to-remediation patterns."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/02-eventbridge-automated-remediation"
+  />
+  <ModuleCard
+    moduleNumber="3"
+    domain="Monitoring, Logging, Analysis, Remediation & Performance"
+    title="Module 03: EC2, Compute Optimizer & EBS Performance Optimization"
+    description="Instance right-sizing, burstable credits, placement groups, EBS volume types, IOPS/throughput limits, Elastic Volumes, and EBS CloudWatch metrics."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/03-compute-and-ebs-performance"
+  />
+  <ModuleCard
+    moduleNumber="4"
+    domain="Monitoring, Logging, Analysis, Remediation & Performance"
+    title="Module 04: S3, Shared File Storage & RDS Performance Tuning"
+    description="S3 multipart/Transfer Acceleration/lifecycle, DataSync, EFS vs FSx, RDS Performance Insights, Enhanced Monitoring, and RDS Proxy."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/04-s3-shared-storage-rds-performance"
+  />
+  <ModuleCard
+    moduleNumber="5"
+    domain="Reliability & Business Continuity"
+    title="Module 05: Auto Scaling, Database Scaling & Caching"
+    description="ASG policies and lifecycle, ECS/Lambda scaling, ElastiCache and DAX strategies, CloudFront caching, RDS/Aurora/DynamoDB scaling."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/05-scaling-elasticity-and-caching"
+  />
+  <ModuleCard
+    moduleNumber="6"
+    domain="Reliability & Business Continuity"
+    title="Module 06: High Availability: ELB, Route 53 Health Checks & Multi-AZ"
+    description="Load balancer types and health checks, 5xx troubleshooting, Route 53 health checks and failover, RDS Multi-AZ, and Application Recovery Controller."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/06-high-availability-elb-route53-multi-az"
+  />
+  <ModuleCard
+    moduleNumber="7"
+    domain="Reliability & Business Continuity"
+    title="Module 07: AWS Backup, Restore Strategies & Disaster Recovery"
+    description="Backup plans and vaults, EBS/RDS/DynamoDB/S3/FSx protection, point-in-time restore, versioning, and the four DR strategies mapped to RTO/RPO."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/07-backup-restore-and-disaster-recovery"
+  />
+  <ModuleCard
+    moduleNumber="8"
+    domain="Deployment, Provisioning & Automation"
+    title="Module 08: CloudFormation, CDK, StackSets & RAM"
+    description="Template mechanics, change sets, drift, rollback states, CDK constructs, StackSets, AWS RAM sharing, and deployment error remediation."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/08-cloudformation-cdk-and-multi-account-provisioning"
+  />
+  <ModuleCard
+    moduleNumber="9"
+    domain="Deployment, Provisioning & Automation"
+    title="Module 09: AMIs, EC2 Image Builder, Deployment Strategies & Terraform"
+    description="AMI lifecycle and sharing, Image Builder pipelines, rolling/immutable/blue-green/canary deployments, Terraform state, and Git workflows."
+    readTime="20m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/09-amis-image-builder-and-deployment-strategies"
+  />
+  <ModuleCard
+    moduleNumber="10"
+    domain="Deployment, Provisioning & Automation"
+    title="Module 10: Systems Manager Operations & Event-Driven Automation"
+    description="Run Command, Session Manager, Patch Manager, State Manager, Parameter Store, S3 event notifications, Lambda triggers, and Step Functions."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/10-systems-manager-and-event-driven-automation"
+  />
+  <ModuleCard
+    moduleNumber="11"
+    domain="Security & Compliance"
+    title="Module 11: IAM, Access Troubleshooting & Multi-Account Governance"
+    description="Policy evaluation logic, roles and federation, MFA and conditions, Access Analyzer, policy simulator, Organizations, SCPs, and IAM Identity Center."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/11-iam-access-and-multi-account-governance"
+  />
+  <ModuleCard
+    moduleNumber="12"
+    domain="Security & Compliance"
+    title="Module 12: Encryption, Secrets & Data Classification"
+    description="KMS keys and policies, EBS/S3/RDS encryption, ACM certificates, enforcing TLS, Secrets Manager vs Parameter Store, and Macie classification."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/12-encryption-secrets-and-data-protection"
+  />
+  <ModuleCard
+    moduleNumber="13"
+    domain="Security & Compliance"
+    title="Module 13: Compliance Enforcement & Security Findings Remediation"
+    description="AWS Config rules and conformance packs, Security Hub, GuardDuty, Inspector, Trusted Advisor, Health Dashboard, and automated remediation."
+    readTime="20m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/13-compliance-and-security-findings"
+  />
+  <ModuleCard
+    moduleNumber="14"
+    domain="Networking & Content Delivery"
+    title="Module 14: VPC Design, Gateways & Private Connectivity"
+    description="Subnets, route tables, NACLs vs security groups, NAT/egress-only gateways, VPC endpoints, PrivateLink, peering, Transit Gateway, VPN, and network cost."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/14-vpc-design-and-private-connectivity"
+  />
+  <ModuleCard
+    moduleNumber="15"
+    domain="Networking & Content Delivery"
+    title="Module 15: Route 53, CloudFront, Global Accelerator & Network Protection"
+    description="Routing policies, Resolver endpoints, query logging, CloudFront origins and caching, Global Accelerator, WAF, Shield, Network Firewall, DNS Firewall."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/15-dns-cloudfront-and-network-protection"
+  />
+  <ModuleCard
+    moduleNumber="16"
+    domain="Networking & Content Delivery"
+    title="Module 16: Network Troubleshooting, Logs & CloudWatch Network Monitoring"
+    description="Reachability Analyzer, VPC Flow Logs, ELB/WAF/CloudFront logs, CloudFront cache diagnosis, hybrid and PrivateLink faults, Network Monitor tools."
+    readTime="25m read"
+    href="/certifications/aws/cloudops-engineer-associate/study-notes/16-network-troubleshooting-and-monitoring"
+  />
+  </div>
+</TrackResourceTabs>
+
+---
+
+## Official Exam Blueprint & Domain Breakdown
+
+| Domain | Title | Weight |
+|---|---|---|
+| 1 | Monitoring, Logging, Analysis, Remediation & Performance | 22% |
+| 2 | Reliability & Business Continuity | 22% |
+| 3 | Deployment, Provisioning & Automation | 22% |
+| 4 | Security & Compliance | 16% |
+| 5 | Networking & Content Delivery | 18% |
+
+---

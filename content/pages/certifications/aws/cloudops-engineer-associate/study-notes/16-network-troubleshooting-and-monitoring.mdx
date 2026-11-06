@@ -1,0 +1,172 @@
+---
+title: "Module 16: Network Troubleshooting, Logs & CloudWatch Network Monitoring"
+description: "Reachability Analyzer, VPC Flow Logs, ELB/WAF/CloudFront logs, CloudFront cache diagnosis, hybrid and PrivateLink faults, Network Monitor tools."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 16
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 5.3 (Skills 5.3.1–5.3.5): troubleshooting VPC configurations, interpreting network logs, CloudFront caching issues, hybrid and private connectivity faults, and CloudWatch network monitoring.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 5.3 (Domain 5, 18%)">
+Skill 5.3.5 ("Configure and analyze CloudWatch network monitoring services") is **new in SOA-C03**. Network troubleshooting questions reward a **systematic order of checks** and choosing the right log for the symptom.
+</Callout>
+
+---
+
+## 1. A Repeatable Connectivity Checklist
+
+```
+ Source ENI --> SG outbound --> Source subnet NACL out --> Route table --> (IGW/NAT/TGW/peering/VPN)
+   --> Dest subnet NACL in --> Dest SG inbound --> OS firewall --> Listening process
+   ... and the return path (NACL ephemeral ports; SGs are stateful)
+```
+
+* **Reachability Analyzer** evaluates the configured path between two endpoints (ENI, instance, IGW, VPN, TGW, endpoint) and names the blocking component. It analyzes **configuration**, does not send packets, and cannot see OS firewalls or application faults.
+* **Typical findings:** missing route to NAT/IGW, SG lacking inbound rule or SG referencing wrong group, NACL deny or missing ephemeral ports, no public IP, TGW route table without propagation/association, peering route missing on one side, overlapping CIDRs, asymmetric routing.
+* **Transit Gateway:** check attachment state, **association** (which route table an attachment uses) and **propagation**/static routes, and VPC-side routes pointing at the TGW.
+* **NAT gateway:** `ErrorPortAllocation` and `PacketsDropCount` metrics, ensure private route to NAT and NAT subnet route to IGW.
+
+---
+
+## 2. Reading Network Logs
+
+### VPC Flow Logs
+
+Default fields: `version account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status`.
+
+```
+2 111122223333 eni-0abc 10.0.1.25 10.0.2.40 49152 443 6 20 4249 1700000000 1700000060 ACCEPT OK
+2 111122223333 eni-0abc 203.0.113.9 10.0.1.25 51234 22 6 1 40 1700000000 1700000060 REJECT OK
+```
+
+| Pattern | Interpretation |
+|---|---|
+| Inbound `ACCEPT`, matching outbound `REJECT` | **NACL** blocking the return traffic (SGs are stateful) |
+| Inbound `REJECT` | SG or NACL denying the request |
+| No record at all | Traffic never reached the ENI (routing) or is excluded traffic |
+| `NODATA` / `SKIPDATA` | No traffic in the window / capture lost data |
+
+* Scope: VPC, subnet, or ENI; destinations **CloudWatch Logs, S3, or Firehose**; aggregation interval 1 or 10 minutes. Query large volumes with **Athena** (S3) or **Logs Insights**.
+* **Not logged:** traffic to the Amazon DNS server (Route 53 Resolver, use resolver query logs), DHCP, instance metadata `169.254.169.254`, Windows license activation, mirrored traffic, traffic to the default VPC router reserved address.
+
+### Other Logs
+
+| Log | Delivery | Use |
+|---|---|---|
+| **ELB access logs** | S3 (off by default) | Per-request: `elb_status_code` vs `target_status_code`, latency, client IP, target |
+| **WAF web ACL logs** | CloudWatch Logs (name starts `aws-waf-logs-`), S3, Firehose | Which rule blocked what |
+| **CloudFront standard logs** | S3; **real-time logs** to Kinesis Data Streams | `x-edge-result-type` (Hit, Miss, Error), status, edge location |
+| **Container logs** | `awslogs` driver (ECS), **FireLens**, Fluent Bit / CloudWatch agent (EKS) | App-level errors |
+| Route 53 query logs | CloudWatch Logs | DNS troubleshooting |
+
+---
+
+## 3. CloudFront Caching Problems
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Low cache hit ratio | Cache key includes unnecessary headers, cookies, or query strings; low TTLs; `Cache-Control: no-cache` from origin | Cache policy that forwards only what matters, increase TTLs, normalize query strings |
+| Users see stale content | Long TTL | Versioned object names or **invalidation**; shorten TTL |
+| Response header `X-Cache: Miss from cloudfront` repeatedly | Not cacheable or unique cache keys | Check `Cache-Control`, `Set-Cookie`, vary headers |
+| `X-Cache: Error from cloudfront` / 502/503/504 | Origin unreachable, TLS/cert mismatch with origin, origin timeout | Origin health, security group allows CloudFront, origin response timeout |
+| 403 from S3 origin | OAC or bucket policy missing, object not found with no list permission | Fix bucket policy/OAC, custom error response |
+
+Diagnose with response headers (`X-Cache`, `Age`, `Via`, `X-Amz-Cf-Id`), standard logs in Athena, and CloudFront metrics (`CacheHitRate`, error rates).
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Hybrid and private connectivity faults">
+
+**Site-to-Site VPN**
+
+* Check tunnel state (`TunnelState` metric, VPN logs), both tunnels up for HA, IKE/IPsec parameters match the customer gateway, BGP session established or static routes present.
+* Enable **route propagation** on VPC route tables (or TGW propagation), allow traffic in SGs/NACLs, avoid **overlapping CIDRs**, and consider MTU/MSS problems when large packets fail but small ones pass.
+
+**VPC endpoints / PrivateLink**
+
+* Interface endpoint: **security group** must allow 443 from clients, **private DNS enabled** (and `enableDnsSupport`/`enableDnsHostnames` on), correct subnets/AZs, **endpoint policy** not blocking, and the service name matches the Region.
+* Gateway endpoint: route table has the prefix-list route and the **endpoint policy** and bucket policy (`aws:SourceVpce`) allow the access. Not reachable from on-premises or via peering/TGW.
+* Name resolves to a public IP instead of private: private DNS disabled or a custom resolver bypassing the VPC resolver.
+
+**DNS in hybrid setups:** inbound/outbound Resolver endpoint security groups and routes (Module 15).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. CloudWatch Network Monitoring
+
+| Tool | What it measures | Use it when |
+|---|---|---|
+| **Internet Monitor** | Internet availability and performance between your application's users and AWS (for example for CloudFront, ALB/NLB, VPC resources, WorkSpaces) | Users in specific networks or cities report slowness; see impact and suggested mitigation |
+| **Network Synthetic Monitor** | Active probes from VPC subnets to on-premises or other destinations: round-trip time and packet loss | Hybrid link degradation (VPN or Direct Connect style) |
+| **Network Flow Monitor** | Agent-based flow telemetry (retransmits, latency, data transferred) between your workloads and AWS services | Find which flows and components cause network performance degradation |
+
+These publish metrics to CloudWatch, so you build alarms and dashboards on them. These descriptions come from general knowledge of the services and I could not check them against current documentation, so confirm names, supported resources, and limits in the CloudWatch docs; the skill is new to the blueprint.
+
+---
+
+## 5. Exam Traps & Common Distractors
+
+- **Trap 1:** Using Reachability Analyzer to find an **application** or OS-firewall problem. It only analyzes configuration.
+- **Trap 2:** Looking in Flow Logs for DNS queries or metadata calls (they are not captured).
+- **Trap 3:** Blaming a security group when Flow Logs show **ACCEPT inbound, REJECT outbound** (NACL).
+- **Trap 4:** Invalidating CloudFront repeatedly instead of fixing the cache key or TTL.
+- **Trap 5:** Expecting a gateway endpoint to work from on-premises.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can find out why an instance cannot reach the internet from a private subnet.
+<details>
+<summary>Explanation</summary>
+
+Check the subnet route table for `0.0.0.0/0` to a NAT gateway; the NAT gateway is in a public subnet with an EIP and a route to the IGW; outbound SG/NACL rules allow traffic and ephemeral return; run Reachability Analyzer to pinpoint the blocking hop.
+
+</details>
+
+- [ ] I can interpret Flow Log lines to locate the blocking control.
+<details>
+<summary>Explanation</summary>
+
+Inbound REJECT means SG or NACL deny. Inbound ACCEPT with outbound REJECT for the same flow indicates the NACL blocks return traffic because NACLs are stateless; security groups would permit return traffic automatically.
+
+</details>
+
+- [ ] I can diagnose low CloudFront cache hit ratio.
+<details>
+<summary>Explanation</summary>
+
+Review the cache policy for forwarded headers, cookies, and query strings, check TTL and origin `Cache-Control`, analyze logs for varying cache keys, and use origin request policies for values the origin needs but that should not fragment the cache.
+
+</details>
+
+- [ ] I can pick the right CloudWatch network monitoring service.
+<details>
+<summary>Explanation</summary>
+
+Internet Monitor for end-user internet path issues, Network Synthetic Monitor for active probing of hybrid connectivity, and Network Flow Monitor for workload flow telemetry and locating performance bottlenecks.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/15-dns-cloudfront-and-network-protection" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 15: Route 53, CloudFront, Global Accelerator & Network Protection
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    ✓ Complete: Back to Study Guide Hub →
+  </a>
+</div>

@@ -1,0 +1,175 @@
+---
+title: "Section 3: Plan and Design the VMware Tanzu / VKS Solution"
+description: "Namespace isolation, capacity planning, SPBM storage classes, multi-zone topology, identity federation and OIDC mapping."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VMware Kubernetes (VKS 3V0-24.25)"
+trackSlug: "/certifications/vmware/vks-tanzu"
+moduleNumber: 3
+totalModules: 5
+layout: "article"
+---
+
+**Plan and Design the VMware Solution**
+
+
+
+<Callout variant="tip" title="Exam Tip">
+Section 3 is "evaluate the implication" territory: given a design choice (load balancer size, namespace network mode, ingress/egress scheme), what breaks, what scales, what is locked in forever? The exam guide **skips Objective 3.5** - the numbering below follows the guide exactly.
+</Callout>
+
+
+
+---
+
+## Objective 3.1: Evaluate the Implication for Load Balancer Size on Supervisor Functionality
+
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Cloud Native Storage (CNS) & First Class Disks (FCD)">
+
+Kubernetes workloads declare storage using standard `PersistentVolumeClaim` (PVC) manifests. In vSphere, these are translated by the **vSphere CSI Driver** into **First Class Disks (FCDs)** (also known as Improved Virtual Disks / IVDs).
+
+Key architectural concepts:
+
+* **Lifecycle Independence:** An FCD is a VMDK that exists as an independent entity in vCenter without being attached to any virtual machine.
+* **SPBM Integration:** When a developer requests a `StorageClass` in Kubernetes, the CSI driver queries vCenter Storage Policy Based Management (SPBM) to place the disk on vSAN storage that satisfies performance and redundancy policies (e.g. `vSAN ESA - RAID-5` or `Encryption Enabled`).
+* **vSphere Client Visibility:** Cloud Native Storage (CNS) in the vSphere Client provides a dedicated dashboard showing Kubernetes PVCs, Pod attachments, and underlying datastore health in real time.
+
+</AccordionItem>
+
+</AccordionGroup>
+
+
+| Decision | Implications |
+|---|---|
+| **Namespace load balancer size** (NSX stack) | Chosen per namespace ("Load balancer size" on the namespace T1). It caps how many LoadBalancer services / virtual servers that namespace can support. Undersizing blocks new Service type=LoadBalancer creations |
+| **Avi Service Engine sizing** | SE is the data plane: **min 2 SE VMs for HA**, 1 vCPU / 2 GB / 15 GB each to start. One SE supports up to **1000 virtual services**. Controller sizes: Small 4 CPU/12 GB, Medium 8/24, Large 24/128 (all 128 GB storage); 3-node Controller cluster recommended for production |
+| **NSX Edge / Virtual Network Appliance sizing** | For VPC models, the **Edge VM or VNA VM size determines the load balancer size and the number of load balancer instances** it can host; both are active/standby pairs, L4 only |
+| **Foundation Load Balancer** | 1-2 VMs, active/standby only when two are deployed, L4 only, VDS only. One-arm or two-arm placement. On a multi-zone Supervisor, FLB VMs live only on the **first management zone** |
+| **Supervisor control plane size** | Separate but related knob (Tiny/Small/Medium/Large): sizes the API/control plane capacity, i.e., how many workloads the Supervisor can run. **Scale-up only** |
+
+**Load balancer model comparison (VCF 9)**
+
+| Model | L7? | VPC support | Connectivity models | Notes |
+|---|---|---|---|---|
+| Avi Load Balancer | Yes (+WAF) | Yes | Centralized, Distributed VLAN, NSX Segment, VLAN | Only option with L7 rules and WAF in the VCF entitlement; additional entitlement required |
+| NSX Edge VPC LB | No (L4) | Yes | Centralized | Configured via NSX API only |
+| Virtual Network Appliance LB | No (L4) | Yes | Distributed VLAN | Multiple LB instances per appliance for different VPCs; API only |
+| NSX Edge Tier-1 LB | No (L4) | **No VPCs** | NSX Segment, VLAN | Works for segment-based Supervisors |
+| Foundation LB | No (L4) | **No VPCs, no NSX segments** | VLAN | Bundled with vCenter; Supervisor + VKS only |
+| External LB | Depends | Depends | Third-party | Reuse existing estate; third-party qualification needed |
+
+**Key takeaways**
+- If a design needs **L7 features or WAF**, only **Avi** qualifies. NSX LB, VNA, and FLB are L4-only.
+- Running out of LB capacity shows up as **LoadBalancer services stuck Pending** - size is a scale ceiling, not a performance nicety.
+- A VPC must use the **same load balancer type as its Supervisor** - you cannot mix an Avi-backed VPC with an NSX-LB-backed Supervisor.
+- Exam trap: FLB is free/bundled but **cannot do VPC networking, NSX segments, or L7**. Choosing FLB for a VCF Automation VPC design is wrong.
+
+---
+
+## Objective 3.2: Evaluate the Implication for Namespace Network Options
+
+When the Supervisor uses **NSX**, each namespace can either **inherit** the Supervisor network settings or **override cluster network settings** with its own:
+
+| Option | Implication |
+|---|---|
+| **Tier-0 Gateway selection** | Overrides the Supervisor's T0 for this namespace; **once selected, it cannot be changed**; forces you to reconfigure the CIDR ranges |
+| **Routing design** | Two options to make the Supervisor route to namespace nodes/ingress: a **VRF gateway** inheriting the Supervisor T0 config (auto-configures networks/subnets), or **BGP** between the Supervisor T0 and a dedicated T0 |
+| **NAT mode (default)** | Namespace workloads (vSphere Pods, VMs, VKS nodes) are NATed; you must configure **subnet, ingress, and egress CIDRs**. Deselecting NAT makes workload IPs directly routable outside the T0 and only subnet + ingress CIDRs are needed. **Once set, the mode cannot change** |
+| **Prerequisites for override** | NSX needs **dedicated Edge clusters**: one for T0 gateways and another for T1 gateways |
+| **IPAM** | Overridden namespace networks must have **unique** ingress, egress, and namespace subnets across the Supervisor and all other namespaces |
+
+**Key takeaways**
+- Immutable choices at namespace creation: **T0 gateway, NAT mode, and subnet prefix**. Changing your mind means a new namespace - a classic exam trap.
+- Inherit when you want simple central IPAM; override when a tenant needs its own T0, isolation, or CIDR plan.
+- VRF = inherit Supervisor routing automatically; dedicated T0 = you own BGP routing.
+
+---
+
+## Objective 3.3: Evaluate the Architecture of vSphere Namespaces with Ingress and Egress Options
+
+| Setting | Purpose | Mutability |
+|---|---|---|
+| **Namespace Network CIDR(s)** | Subnets/segments for workloads in the namespace | More CIDRs can be added later |
+| **Namespace Subnet Prefix** | Size of each carved subnet; **default /28** | **Cannot be changed once set** |
+| **Ingress CIDR** | Range for VIPs published by the load balancer for vSphere Pods / VKS LoadBalancer services | More CIDRs can be added later |
+| **Egress CIDR** | Range for **SNAT IPs** used for outbound traffic | More CIDRs can be added later |
+
+**Architecture facts**
+- All workloads in one namespace (vSphere Pods, VMs, VKS nodes) **share a single SNAT IP** for north-south egress; east-west between namespaces is not SNATed.
+- The ingress range must be **routable** from where DevOps users and external clients connect.
+- The Supervisor must be able to **route directly to VKS cluster node subnets and ingress subnets** - plan routing (VRF or BGP) before allocating CIDRs.
+- On the VDS stack, there are no ingress/egress CIDR pools: VIPs come from the Avi Data Network / FLB address ranges instead.
+
+**Key takeaways**
+- Default subnet prefix **/28** is the number to memorize; it is **immutable**.
+- Ingress CIDR = inbound VIP pool; Egress CIDR = outbound SNAT pool. Exams swap these definitions.
+- No-NAT mode removes the egress CIDR requirement because workload IPs are directly routable.
+
+---
+
+## Objective 3.4: Create the Process of Enabling a Supervisor Cluster
+
+**Ordered workflow (vSphere Client → Supervisor Management → Get Started):**
+
+1. **Prerequisites**: compatible vSphere cluster(s) (DRS + HA enabled; hosts on one VDS; lowercase hostnames), storage policies for control plane placement/image cache/ephemeral disks, networking stack decision, load balancer decision (and for Avi: Controller deployed/registered), NSX prerequisites for VPC/segment stacks (Centralized Gateway configured; Edge clusters), vSphere Zones created for a multi-zone deployment.
+2. **Select vCenter and networking stack**: VCF Networking with VPC, NSX segment networking, or vSphere networking (VDS).
+3. **Supervisor location**: name + zones - either three vSphere Zones, or one Management Zone (host-level HA); enable **control plane HA** (mandatory on three zones).
+4. **Storage**: select the policy for control plane VM placement (plus image cache / ephemeral policies).
+5. **Management Network**: DHCP or static. Static needs a **block of 5 consecutive IPs** (3 CP VMs + floating IP + patching buffer), subnet mask, gateway, DNS servers/search domains, NTP. DHCP must support client identifiers; CP IPs must never change.
+6. **Workload Network**: per stack - VPC: NSX project + **VPC connectivity profile** + private (VPC) CIDRs + DNS/NTP; VDS: port groups with one **Primary Workload Network**; NSX segments: T0, ingress/egress CIDRs, namespace network CIDRs.
+7. **Load balancer**: choose/configure FLB (VDS), NSX LB, or Avi (if NSX doesn't detect Avi, it falls back to the NSX Edge load balancer).
+8. **Advanced settings**: **control plane size** (Tiny/Small/Medium/Large - up only), optional **API server DNS names** (embedded into the auto-generated certificate), **export configuration** to JSON for redeploy/import.
+9. **Review and Finish**: activation creates and configures the control plane VMs and components.
+
+**Key takeaways**
+- If the Supervisor is activated as an option during **workload domain creation**, it defaults to VPC networking but is **not ready for namespaces** until the Centralized Gateway/Edge configuration is done.
+- DNS shared between management and workload networks: on **new** VCF 9 Supervisors, control plane DNS lookups go over the **management network** (existing upgraded Supervisors keep workload-network routing).
+- You can **export the Supervisor configuration JSON** and re-import it for redeploys - know this exists.
+
+---
+
+## Objective 3.6: Create an Implementation of Service Mesh
+
+**Implementation = Istio as a VKS standard package.**
+
+| Step | Action |
+|---|---|
+| 1. Provision cluster | VKS cluster ready; kubectl context set |
+| 2. Install Istio package | From the VKS standard package repository via VCF CLI (`vcf package install istio ...`) or kubectl PackageInstall, with a values file |
+| 3. Choose mode | **Sidecar mode** (Envoy proxy per pod) or **ambient mode** (node-level ztunnel/waypoint, no sidecars) |
+| 4. Optional hardening | **Bring your own CA** for mesh certificates, configure **tracing**, set up **Istio multi-cluster** |
+| 5. Operate | mTLS between services, traffic shifting (canary), telemetry; collect a support bundle for troubleshooting |
+
+**Key takeaways**
+- Istio on VKS is a **standard package**, installed per workload cluster - it is not a Supervisor Service and not built into the Supervisor.
+- Sidecar = per-pod proxy (classic); ambient = sidecar-less data plane. Know both names.
+- Do not confuse with **HCX Service Mesh** (site-to-site workload mobility) - entirely different feature.
+- Prerequisites to remember: Linux nodes for the mesh data plane (Istio runs on Linux nodes only in mixed clusters).
+
+---
+
+## Quick Recall Sheet
+
+- **LB sizing**: namespace LB size caps LoadBalancer services; Avi SE = data plane (max 1000 virtual services, min 2 for HA); Edge/VNA VM size determines LB capacity; **only Avi does L7/WAF**; FLB = L4, VDS only, no VPC.
+- **VPC LB must match Supervisor LB.** Control plane size: scale up only.
+- **Namespace network override**: own T0 (immutable), VRF-inherit vs BGP, NAT (default, needs egress CIDR) vs no-NAT (routable). Immutable: T0, NAT mode, **subnet prefix (default /28)**.
+- **Ingress CIDR = VIP pool; Egress CIDR = SNAT pool.** One SNAT IP per namespace. Mutable later: more network/ingress/egress CIDRs.
+- **Enable Supervisor**: prereqs -> stack -> zones (+CP HA) -> storage policies -> management network (5-IP block or client-ID DHCP) -> workload network -> LB -> control plane size/DNS names -> finish.
+- **Service mesh = Istio standard package** on the workload cluster; sidecar or ambient mode; BYO CA, tracing, multi-cluster options.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vks-tanzu/study-notes/section-2-products-and-solutions" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 2: VMware Products and Solutions (Supervisor & Networking)
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    Kubernetes (VKS Tanzu) Track
+  </a>
+  <a href="/certifications/vmware/vks-tanzu/study-notes/section-4-install-configure-administrate" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 4: Install, Configure, and Administrate VMware Tanzu →
+  </a>
+</div>

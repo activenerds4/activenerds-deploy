@@ -1,0 +1,194 @@
+---
+title: "Module 08: Data Lifecycle: S3 Tiering, Retention, TTL, COPY/UNLOAD & Resiliency"
+description: "S3 storage classes and Lifecycle rules, versioning, DynamoDB TTL, Redshift COPY/UNLOAD, legal-compliant deletion, AWS Backup, and replication."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 8
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 2.3: S3 and Redshift load/unload, S3 storage classes and Lifecycle policies, expiration, versioning and DynamoDB TTL, legal deletion, and resiliency and availability (Skills 2.3.1–2.3.6).
+
+<Callout variant="info" title="Exam Blueprint Focus: Lifecycle & Cost">
+Most questions ask for the **cheapest compliant** retention design or how to **automatically** tier or delete data. Know storage class retrieval times, minimum durations, and which features are automatic.
+</Callout>
+
+---
+
+## 1. S3 Storage Classes (Skill 2.3.2)
+
+| Class | Access pattern | Retrieval | Min duration | Notes |
+|---|---|---|---|---|
+| S3 Standard | Frequent | ms | None | Default |
+| S3 Intelligent-Tiering | Unknown/changing | ms (frequent/infrequent/archive-instant tiers); optional async archive tiers | None (30-day monitoring charge applies per object; objects under 128 KB not monitored) | Automatic cost optimization, no retrieval fees |
+| S3 Standard-IA | Infrequent, multi-AZ | ms | 30 days | Retrieval fee, 128 KB minimum billable size |
+| S3 One Zone-IA | Infrequent, re-creatable | ms | 30 days | Single AZ; lower cost |
+| S3 Glacier Instant Retrieval | Rare, but need ms | ms | 90 days | Quarterly access |
+| S3 Glacier Flexible Retrieval | Archive | Minutes to hours (expedited 1–5 min, standard 3–5 h, bulk 5–12 h) | 90 days | Cheap archive |
+| S3 Glacier Deep Archive | Long-term compliance | 12 h (standard), up to 48 h (bulk) | 180 days | Lowest cost |
+| S3 Express One Zone | Single-digit ms, high request rate | ms | None | Directory buckets, single AZ |
+
+```
+ Day 0           Day 30            Day 90               Day 365            Day 2555 (7 yr)
+ Standard ---->  Standard-IA ----> Glacier Flexible --> Deep Archive ----> Expire (delete)
+        \________________ S3 Lifecycle transition rules ______________/   \ expiration rule
+```
+
+---
+
+## 2. S3 Lifecycle, Versioning, and Expiration (Skills 2.3.2–2.3.4)
+
+* **Lifecycle rules** are scoped by prefix, tags, or object size. **Transition actions** move between classes (must follow the allowed waterfall order and minimum days, for example Standard → Standard-IA after at least 30 days). **Expiration actions** delete current objects (with versioning: add a delete marker) and permanently delete noncurrent versions via `NoncurrentVersionExpiration`.
+* Also: abort incomplete multipart uploads, remove expired delete markers.
+* **Versioning** keeps every version, protects against overwrites/deletes, and is required for replication and Object Lock. It raises storage cost unless noncurrent versions are expired. **MFA Delete** adds protection for permanent deletes.
+* **Object Lock** (WORM; governance vs compliance mode, legal hold) meets regulatory immutability requirements.
+
+```json
+{
+  "Rules": [{
+    "ID": "tier-and-expire-logs",
+    "Status": "Enabled",
+    "Filter": { "Prefix": "logs/" },
+    "Transitions": [
+      { "Days": 30,  "StorageClass": "STANDARD_IA" },
+      { "Days": 90,  "StorageClass": "GLACIER" },
+      { "Days": 365, "StorageClass": "DEEP_ARCHIVE" }
+    ],
+    "Expiration": { "Days": 2555 },
+    "NoncurrentVersionExpiration": { "NoncurrentDays": 30 },
+    "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+  }]
+}
+```
+
+```bash
+aws s3api put-bucket-lifecycle-configuration --bucket my-lake --lifecycle-configuration file://lifecycle.json
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: DynamoDB TTL (Skill 2.3.4)">
+
+* Enable TTL on a table with an attribute holding an **epoch timestamp in seconds** (Number type).
+* DynamoDB deletes expired items in the background, typically within **a few days** of expiry (not instantly); expired items may still appear in reads until removed. Filter them in queries with a condition on the TTL attribute.
+* TTL deletions **consume no write capacity** and show up in **DynamoDB Streams** (marked as system deletions), which lets you archive expired items to S3 through Lambda/Firehose.
+* Use TTL for session data, temporary state, and cost control. Use PITR and on-demand backups for recovery.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Redshift COPY and UNLOAD (Skill 2.3.1)">
+
+* **`COPY`** loads data in parallel from S3 (also DynamoDB, EMR, remote hosts). Best practices: split input into multiple files (a multiple of the number of slices), use compressed columnar or gzip files, use a manifest for exact file lists, `COMPUPDATE`/`STATUPDATE` considerations, load into staging then `MERGE`.
+* **`UNLOAD`** exports query results to S3 in parallel (CSV, Parquet, JSON), optionally partitioned (`PARTITION BY`), encrypted (`KMS_KEY_ID`, `ENCRYPTED`), compressed. Used to archive cold data to S3 and query it back through Spectrum.
+* Both require an **IAM role** associated with the cluster/workgroup with S3 (and KMS) access.
+* **Auto-copy from S3** continuously ingests new files via a `COPY JOB`.
+* **Hot/cold pattern:** keep recent data in Redshift, UNLOAD older partitions to S3 Parquet, expose via Spectrum or use **Redshift managed storage** with RA3.
+
+```sql
+COPY sales FROM 's3://lake/curated/sales/dt=2026-11-05/'
+IAM_ROLE 'arn:aws:iam::111122223333:role/redshift-load' FORMAT AS PARQUET;
+
+UNLOAD ('SELECT * FROM sales WHERE sale_date < ''2025-01-01''')
+TO 's3://lake/archive/sales/' IAM_ROLE 'arn:aws:iam::111122223333:role/redshift-load'
+FORMAT PARQUET PARTITION BY (sale_date);
+```
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Deleting data for business and legal requirements (Skill 2.3.5)">
+
+* **Retention policies:** define how long data must be kept (financial/regulatory) and when it must be deleted (privacy, for example right to erasure). Implement with Lifecycle expiration, DynamoDB TTL, scheduled deletes, and Object Lock for mandatory retention.
+* **Erasure in a data lake** is hard because files are immutable and columnar. Use **table formats with row-level deletes** (Apache Iceberg `DELETE`, Delta, Hudi), or rewrite partitions. Remember **all copies**: backups, replicas, noncurrent versions, snapshots, and derived datasets.
+* **Legal hold** overrides expiration: S3 Object Lock legal hold, Backup Vault Lock.
+* **Cryptographic erasure:** delete or disable the KMS key (schedule key deletion with a 7–30 day waiting period) to render encrypted data unreadable.
+* Evidence of deletion: log with CloudTrail and S3 server access logs.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Resiliency and availability (Skill 2.3.6)">
+
+| Service | Resiliency feature |
+|---|---|
+| S3 | 11 9s durability; versioning; **Cross-Region Replication (CRR)** and **Same-Region Replication (SRR)**; Multi-Region Access Points; Object Lock |
+| DynamoDB | Multi-AZ by default; **global tables** (multi-Region active-active); **PITR** (35 days); on-demand backups; AWS Backup |
+| RDS / Aurora | Multi-AZ; read replicas; automated backups and PITR; **Aurora Global Database**; cross-Region snapshot copy |
+| Redshift | Automated and manual snapshots; cross-Region snapshot copy; **Multi-AZ** RA3; relocation; Serverless recovery points |
+| Kinesis / MSK | Multi-AZ replication; MSK replicator for cross-Region |
+| **AWS Backup** | Central backup plans, retention, cross-account and cross-Region copy, **Vault Lock**, supports S3, DynamoDB, RDS, Aurora, Redshift, EFS, EBS |
+
+Define **RPO** (acceptable data loss) and **RTO** (acceptable downtime) first, then choose the cheapest pattern that meets them: backup/restore → pilot light → warm standby → multi-site active-active.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Common Traps and Watchouts
+
+* **"Unknown or changing access patterns"** → Intelligent-Tiering, not hand-tuned Lifecycle rules.
+* **"Retrieve archived data in milliseconds"** → Glacier Instant Retrieval (Flexible Retrieval takes minutes to hours).
+* **Minimum storage durations:** deleting or transitioning IA/Glacier objects early still bills the minimum.
+* **Versioned bucket delete only adds a delete marker;** storage cost continues until you expire noncurrent versions.
+* **DynamoDB TTL is not instantaneous** and uses an epoch-seconds attribute.
+* **`UNLOAD` + Spectrum** is the pattern for cheap cold data still queryable by Redshift.
+* **S3 replication** applies only to new objects after enabling (use Batch Replication for existing).
+* **Object Lock requires versioning.**
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can write a Lifecycle policy that tiers and expires data and cleans up versions.
+<details>
+<summary>Explanation</summary>
+
+Use Transitions (Standard-IA after 30 days, Glacier after 90, Deep Archive after 365), Expiration (for example 2,555 days), NoncurrentVersionExpiration, and AbortIncompleteMultipartUpload. Scope by prefix or tag.
+
+</details>
+
+- [ ] I can choose the right S3 class for a given retrieval time and access frequency.
+<details>
+<summary>Explanation</summary>
+
+Unknown → Intelligent-Tiering; infrequent with ms → Standard-IA / Glacier Instant Retrieval; archive minutes–hours → Glacier Flexible Retrieval; long-term lowest cost, 12+ h → Deep Archive.
+
+</details>
+
+- [ ] I can explain how DynamoDB TTL works and its limits.
+<details>
+<summary>Explanation</summary>
+
+Epoch-seconds attribute; background deletion typically within days; no WCU consumed; deletions flow to Streams; items may still be returned until deleted, so filter on the attribute.
+
+</details>
+
+- [ ] I can describe COPY/UNLOAD best practices and the hot/cold pattern.
+<details>
+<summary>Explanation</summary>
+
+COPY from many compressed/columnar files in parallel using an IAM role; UNLOAD to partitioned Parquet in S3 for cold data; query cold data with Spectrum.
+
+</details>
+
+- [ ] I can design deletion and protection for compliance and resiliency.
+<details>
+<summary>Explanation</summary>
+
+Combine Lifecycle/TTL for expiry, Object Lock and Backup Vault Lock for retention, Iceberg row-level deletes for erasure requests, KMS key deletion for cryptographic erasure, and replication/AWS Backup/PITR sized to RPO and RTO.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/07-data-catalogs-glue-lake-formation-sagemaker" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 07: Data Catalogs: Glue Data Catalog, Crawlers & SageMaker Catalog
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/09-data-modeling-schema-evolution-vectors" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 09: Data Modeling, Schema Evolution, Open Table Formats & Vector Indexes →
+  </a>
+</div>

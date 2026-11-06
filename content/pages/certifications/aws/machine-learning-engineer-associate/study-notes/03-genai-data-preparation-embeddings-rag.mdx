@@ -1,0 +1,410 @@
+---
+title: "Module 03: GenAI Data Preparation: Embeddings, Text Pre-processing, RAG Chunking & FM Tuning Datasets"
+description: "Task 1.2 (new in C02): embedding models, tokenization, RAG chunking and metadata extraction, masking/redaction/anonymization, and datasets for fine-tuning, continued pre-training and distillation."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Machine Learning Engineer Associate Track"
+trackSlug: "/certifications/aws/machine-learning-engineer-associate"
+moduleNumber: 3
+totalModules: 14
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Machine Learning Engineer - Associate (MLA-C02)
+**Scope:** Content Domain 1, Task 1.2 skills 1.2.5 to 1.2.9: the GenAI additions to data preparation. All five skills were added in MLA-C02.
+
+<Callout variant="info" title="Exam Blueprint Focus: Skills 1.2.5, 1.2.6, 1.2.7, 1.2.8, 1.2.9">
+**1.2.5** configure and use embedding models to turn text and image data into numerical representations; **1.2.6** apply advanced text pre-processing (tokenization, domain-specific augmentation); **1.2.7** prepare documents for Retrieval Augmented Generation (chunking strategies, metadata extraction); **1.2.8** mask, redact and anonymize data; **1.2.9** prepare data for FM fine-tuning, continuous pre-training and model distillation. These topics are brand new relative to MLA-C01, so expect scenario questions on Amazon Bedrock, Amazon Titan embeddings, Knowledge Bases, Amazon Comprehend and Amazon Macie.
+</Callout>
+
+---
+
+## 1. Embedding Models (Skill 1.2.5)
+
+An **embedding** is a dense numeric vector that represents the meaning of text, an image or another input. Similar items land close together in vector space, so similarity search (cosine, dot product, Euclidean) finds semantically related content. Embeddings power semantic search, RAG retrieval, clustering, recommendations and deduplication.
+
+| Aspect | Detail |
+|---|---|
+| Where to get them | Amazon Bedrock embedding models (for example Amazon Titan Text Embeddings, Titan Multimodal Embeddings, Cohere Embed), or a model you host on SageMaker AI |
+| Input | Text (and with multimodal models, images or text plus image) |
+| Output | Fixed-length float vector; the length is the model's **dimension** |
+| Key configuration | Model choice, output dimension where configurable, input token limit, normalization of vectors, language coverage |
+| Consistency rule | Use the **same embedding model** for indexing documents and embedding queries. Changing models requires **re-embedding the whole corpus** |
+| Storage | Vector database: OpenSearch Service, Aurora/RDS PostgreSQL with pgvector, S3 vector storage (Module 01) |
+
+```python
+import boto3, json
+bedrock = boto3.client("bedrock-runtime")
+
+def embed(text: str):
+    resp = bedrock.invoke_model(
+        modelId="amazon.titan-embed-text-v2:0",
+        body=json.dumps({"inputText": text, "dimensions": 1024, "normalize": True}))
+    return json.loads(resp["body"].read())["embedding"]
+
+vec = embed("How do I reset my router?")      # list of 1024 floats
+```
+
+```
+ Documents ──► chunk ──► embedding model ──► vectors + metadata ──► vector DB
+                                                                        ▲
+ User query ──────────► SAME embedding model ──► query vector ──► k-NN search
+```
+
+**Choosing an embedding model:**
+
+| Requirement | Guidance |
+|---|---|
+| Multilingual content | Pick a model that supports the required languages |
+| Text plus images in one search space | **Multimodal embedding model** (text and image vectors share one space) |
+| Lower storage and faster search | Smaller dimension (fewer floats per vector); verify retrieval quality |
+| Domain-specific language (legal, medical) | Evaluate retrieval quality on your own data; consider fine-tuning or a domain-tuned model |
+| Long passages | Check the maximum input tokens; chunk to fit |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Distance metrics and normalization">
+
+* **Cosine similarity** compares direction (angle) and ignores magnitude: the most common choice for text embeddings.
+* **Dot product** reflects both direction and magnitude; for **normalized (unit length) vectors** dot product and cosine give the same ranking.
+* **Euclidean (L2)** measures straight-line distance.
+* Always configure the vector index with the metric the embedding model was trained for. Wrong metric means poor ranking even if the vectors are fine.
+* The vector index **dimension must match** the model output exactly or ingestion fails.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Embeddings beyond text and image data">
+
+Embeddings also turn **high-cardinality categorical features** (user IDs, product IDs) into dense vectors, replacing one-hot encoding. In classical ML, learned embeddings (for example from a neural network or SageMaker built-in algorithms such as Object2Vec) capture relationships between categories. In GenAI, the same idea underlies semantic retrieval.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Advanced Text Pre-processing (Skill 1.2.6)
+
+Models do not read characters; they read **tokens**. Pre-processing prepares raw text for training or retrieval.
+
+| Technique | What it does | When it matters |
+|---|---|---|
+| **Cleaning / normalization** | Lowercasing (for non-case-sensitive tasks), Unicode normalization, removing HTML/markup, fixing encodings, whitespace cleanup | Scraped or OCR'd text |
+| **Tokenization** | Splits text into tokens: words, **subwords** (BPE, WordPiece, SentencePiece) or characters | Every NLP/LLM workflow |
+| **Stop-word removal, stemming, lemmatization** | Drops common words, reduces words to roots | Classical NLP (TF-IDF, bag of words). Generally **not** applied before LLM/transformer input, which benefit from full natural text |
+| **TF-IDF / bag-of-words** | Sparse count-based vectors | Classical text classification baselines |
+| **Padding and truncation** | Make sequences a uniform length within the model's context window | Batch training |
+| **Special tokens** | BOS/EOS, separators, role markers in chat templates | Fine-tuning must follow the model's expected template |
+| **Language detection / translation** | Route or convert text (Amazon Comprehend, Amazon Translate) | Multilingual corpora |
+| **Entity and key-phrase extraction** | Amazon Comprehend extracts entities, key phrases, sentiment, PII | Metadata for retrieval |
+| **Domain-specific augmentation** | Add synthetic or transformed examples in the domain vocabulary: synonym replacement with domain terms, back-translation, paraphrasing with an FM, templated generation, glossary expansion for abbreviations | Small or imbalanced domain datasets (medical, legal, finance) |
+
+```python
+# Subword tokenization and truncation with a Hugging Face tokenizer
+from transformers import AutoTokenizer
+tok = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+enc = tok("Patient reports acute myocardial infarction (AMI).",
+          truncation=True, max_length=128, padding="max_length")
+print(enc["input_ids"][:12])
+```
+
+```python
+# Amazon Comprehend: detect entities and key phrases
+import boto3
+c = boto3.client("comprehend")
+ents = c.detect_entities(Text="Invoice 1042 from Acme Corp was paid on 5 Nov 2026.", LanguageCode="en")
+keys = c.detect_key_phrases(Text="Invoice 1042 from Acme Corp was paid on 5 Nov 2026.", LanguageCode="en")
+```
+
+**Domain-specific augmentation guidelines:** keep labels correct after augmentation, preserve domain terminology (do not "paraphrase" drug names or legal terms), validate synthetic examples (human review or a stronger model as judge), and never let augmented copies of a test example leak into training.
+
+<Callout variant="warning" title="Exam Trap: Classical NLP steps before LLMs">
+Stemming, lemmatization and aggressive stop-word removal help bag-of-words models but can **hurt transformer and LLM input**, which rely on natural word order and function words. For LLM fine-tuning, clean and tokenize with the model's own tokenizer, and follow its prompt/chat template.
+</Callout>
+
+---
+
+## 3. Preparing Documents for RAG: Chunking and Metadata (Skill 1.2.7)
+
+**Retrieval Augmented Generation (RAG)** retrieves relevant passages from your own data and supplies them to a foundation model with the question, so answers are grounded in current, private information without retraining. The quality of RAG depends heavily on how documents are prepared.
+
+```
+ Source docs (S3: PDF, DOCX, HTML, TXT)
+        │  parse (Textract / document parsers / FM parsing)
+        ▼
+   clean text + structure + metadata
+        │  chunk (size, overlap, strategy)
+        ▼
+   chunks ──► embedding model ──► vector store (vector + text + metadata)
+                                          │
+        question ─► embed ─► retrieve top-k (+metadata filter, rerank) ─► FM prompt ─► answer
+```
+
+### Chunking strategies
+
+| Strategy | How it works | Strengths | Weaknesses | Typical use |
+|---|---|---|---|---|
+| **Fixed-size** | Split by token/character count, optional **overlap** | Simple, predictable, fast | May cut sentences or ideas in half | Uniform plain text |
+| **Sentence / paragraph-based** | Split on natural boundaries | Keeps ideas intact | Variable length | Articles, FAQs |
+| **Hierarchical (parent-child)** | Small child chunks are searched, larger parent chunk is returned as context | Precise matching **and** rich context | More complex storage | Long manuals, technical docs |
+| **Semantic** | Split where the meaning shifts, using embedding similarity between adjacent sentences | Coherent chunks | Extra embedding cost and compute at ingestion | Narrative or mixed-topic documents |
+| **Structure-aware** | Split by headings, sections, tables, code blocks | Preserves document structure | Needs reliable parsing | Markdown, HTML, manuals, contracts |
+| **No chunking** | One chunk per file | Fine for very short documents | Poor retrieval for long documents | Short records |
+
+**Tuning rules of thumb:**
+
+* **Chunks too large:** dilute the relevant fact, waste context window and tokens, lower precision.
+* **Chunks too small:** lose context, retrieved text is fragmentary, lower recall of complete answers.
+* **Overlap** (for example 10 to 20 percent) protects ideas that straddle a boundary but increases storage and cost.
+* Align chunk size with the embedding model's maximum input and the FM's context window.
+* Test with real questions: measure retrieval quality (Module 07) rather than guessing.
+
+```json
+// Amazon Bedrock Knowledge Bases: fixed-size chunking configuration
+{
+  "vectorIngestionConfiguration": {
+    "chunkingConfiguration": {
+      "chunkingStrategy": "FIXED_SIZE",
+      "fixedSizeChunkingConfiguration": { "maxTokens": 300, "overlapPercentage": 20 }
+    }
+  }
+}
+```
+
+Bedrock Knowledge Bases also offers **hierarchical** chunking (parent and child token sizes), **semantic** chunking, **no chunking**, and the option of a **custom transformation** Lambda function for your own chunking logic and metadata.
+
+### Metadata extraction
+
+Metadata is information *about* each chunk (source file, title, author, date, section, department, document type, language, access level, product, region). It enables **pre-filtered retrieval** (only 2026 policies, only the HR department), **access control** (return only chunks the caller may see), **citations** (show the source), and better **ranking**.
+
+```json
+// Metadata sidecar file next to the document in S3: handbook.pdf.metadata.json
+{
+  "metadataAttributes": {
+    "department": "HR",
+    "year": 2026,
+    "doc_type": "policy",
+    "language": "en"
+  }
+}
+```
+
+```python
+# Retrieve with a metadata filter from a Bedrock Knowledge Base
+import boto3
+br = boto3.client("bedrock-agent-runtime")
+resp = br.retrieve(
+    knowledgeBaseId="KB12345678",
+    retrievalQuery={"text": "What is the parental leave policy?"},
+    retrievalConfiguration={"vectorSearchConfiguration": {
+        "numberOfResults": 5,
+        "filter": {"equals": {"key": "department", "value": "HR"}}}})
+```
+
+**Extracting text and structure:** Amazon Textract extracts text, tables and forms from scanned documents and images; Amazon Comprehend adds entities and key phrases; Bedrock Knowledge Bases can use a foundation model as an advanced **parser** for complex layouts such as tables and figures. Preserve table structure and headings so chunks remain meaningful.
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why hierarchical chunking improves answers">
+
+Small chunks produce sharp embeddings (one idea each), so similarity search finds the right passage. But the FM often needs the surrounding paragraph to answer. Hierarchical chunking embeds and searches the **child** chunk, then returns its **parent** chunk to the FM. This improves precision and context at once. The tradeoff is more storage and a more complex index. Choose it for long structured documents; choose fixed-size for homogeneous short text where simplicity wins.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Keeping the knowledge base fresh">
+
+Documents change. Plan ingestion as a repeatable pipeline: new or updated files land in S3, a sync (Knowledge Base data source sync or an EventBridge-triggered workflow) re-chunks and re-embeds only changed content, and deleted documents are removed from the index. Stale vectors cause outdated answers. Orchestration of refresh cycles is covered in Module 11.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Mask, Redact and Anonymize Data (Skill 1.2.8)
+
+Sensitive data (PII such as names, emails, phone numbers, account numbers, health and financial identifiers) must be handled **before** it reaches training sets, vector stores or prompts.
+
+| Technique | Meaning | Reversible? | Example |
+|---|---|---|---|
+| **Masking** | Replace characters with a placeholder while keeping format | Not by design (but format is preserved) | `4111-XXXX-XXXX-1111` |
+| **Redaction** | Remove the sensitive span entirely or replace with a tag | No | `[REDACTED]` or `[NAME]` |
+| **Anonymization** | Irreversibly remove or generalize identifiers so a person cannot be re-identified (generalize age to range, drop direct identifiers, k-anonymity) | No | Age 37 becomes 30-39; zip 94110 becomes 941** |
+| **Pseudonymization / tokenization** | Replace identifiers with consistent surrogate values; a protected lookup can reverse it | Yes, with the key/map | `user_8f2c` for the same person each time |
+| **Encryption** | Cipher with a key (AWS KMS) | Yes, with the key | Column or file encryption |
+| **Hashing** | One-way digest (salted) for joining without revealing | No (but guessable without salt) | SHA-256 of ID with salt |
+
+| AWS service | Role |
+|---|---|
+| **Amazon Comprehend** | `DetectPiiEntities` locates PII spans; `ContainsPiiEntities` classifies; **PII redaction** jobs mask or replace entity types |
+| **Amazon Macie** | Discovers sensitive data in **S3** (managed and custom identifiers) and reports findings |
+| **AWS Glue / Glue Studio and Glue DataBrew** | Built-in PII detection and transforms (mask, hash, substitute, shuffle, redact) inside ETL and recipes |
+| **Amazon Bedrock Guardrails** | **Sensitive information filters** mask or block PII in prompts and responses at inference time (Module 14) |
+| **AWS KMS** | Encryption keys for data at rest |
+| **AWS Lake Formation** | Column-level, row-level and cell-level access controls on lake data |
+
+```python
+# Detect PII with Comprehend, then redact the spans
+import boto3
+c = boto3.client("comprehend")
+text = "Contact Maria Lopez at maria@example.com or 555-0100."
+pii = c.detect_pii_entities(Text=text, LanguageCode="en")["Entities"]
+redacted = text
+for e in sorted(pii, key=lambda x: x["BeginOffset"], reverse=True):
+    redacted = redacted[:e["BeginOffset"]] + f"[{e['Type']}]" + redacted[e["EndOffset"]:]
+print(redacted)   # Contact [NAME] at [EMAIL] or [PHONE].
+```
+
+```
+ S3 raw ──► Macie (discover PII)  ──► findings
+   │
+   └──► Glue / Comprehend (mask or redact) ──► S3 curated ──► embeddings / fine-tuning set
+                                                         └──► (Guardrails also filter prompts and responses at runtime)
+```
+
+**Principles:** apply redaction **before** chunking and embedding (an embedding of a name still encodes that name); keep original data in a locked-down location with least-privilege access; redact consistently across the corpus; test that anonymization resists re-identification through combinations of quasi-identifiers.
+
+<Callout variant="warning" title="Exam Trap: Discover vs remove vs enforce">
+**Macie discovers** sensitive data in S3, it does not rewrite it. **Comprehend and Glue/DataBrew** detect and transform (mask/redact) data. **Guardrails** enforce at inference time on prompts and outputs. A question about "finding PII across S3 buckets" is Macie; "redact PII from documents before building a knowledge base" is Comprehend or Glue; "stop the model from returning PII" is Guardrails.
+</Callout>
+
+---
+
+## 5. Data for FM Fine-tuning, Continued Pre-training and Distillation (Skill 1.2.9)
+
+Different customization methods need different data shapes. Match the dataset to the goal.
+
+| Method | Goal | Data required | Format (Bedrock) | Size guidance |
+|---|---|---|---|---|
+| **Fine-tuning (supervised)** | Teach a task, style or format | **Labeled** prompt-completion (or conversation) pairs | JSON Lines (`.jsonl`), one example per line, in S3 | Hundreds to thousands of high-quality examples; quality beats quantity |
+| **Continued pre-training** | Teach domain knowledge/vocabulary | **Unlabeled** domain text (documents, articles, manuals) | JSON Lines with input text only | Large volume of domain text |
+| **Distillation** | Make a smaller, cheaper **student** model mimic a larger **teacher** | **Prompts** (and optionally prompt-response pairs, or invocation logs); the teacher generates responses | Prompts in JSONL or collected invocation logs | Enough varied prompts to cover the target use case |
+| **RAG (no training)** | Ground answers in current data | Chunked, embedded documents | Vector store | n/a |
+
+```json
+{"prompt": "Summarize the claim in two sentences.\n\nClaim: ...", "completion": "The customer reports ..."}
+{"prompt": "Classify the ticket: 'My card was charged twice'", "completion": "billing_dispute"}
+```
+
+```json
+{"input": "Chapter 4. Fixed income securities are debt instruments that ..."}
+{"input": "A repurchase agreement (repo) is the sale of securities together with ..."}
+```
+
+**Preparation checklist:**
+
+* **Quality first:** remove duplicates, fix label errors, drop irrelevant or low-quality pairs, balance topics and classes.
+* **Format exactly:** each line is valid JSON; keys match what the model/customization job expects; text fits the model's context limits; follow the model's chat template for conversational data.
+* **Split:** training, validation (and optionally test); Bedrock fine-tuning accepts a **validation dataset** to monitor loss. Keep a held-out evaluation set that is never trained on.
+* **Remove sensitive data:** apply Section 4 first, since fine-tuned models can memorize training text.
+* **Avoid contamination:** no test examples in training.
+* **Safety screening:** filter toxic or policy-violating content; validate prompt-response pairs (Module 04).
+* **Store in S3** in the same Region as the customization job, encrypted, with an IAM role that lets Bedrock read the bucket.
+* **Choose the right method:** need new *knowledge that changes often* means RAG; need a new *style, format or task skill* means fine-tuning; need *domain vocabulary and unlabeled text corpus* means continued pre-training; need *lower latency and cost with similar quality* means distillation.
+
+```python
+# Start a Bedrock fine-tuning (model customization) job
+import boto3
+bedrock = boto3.client("bedrock")
+bedrock.create_model_customization_job(
+    jobName="support-ft-001",
+    customModelName="support-assistant-v1",
+    roleArn="arn:aws:iam::111122223333:role/BedrockCustomizationRole",
+    baseModelIdentifier="amazon.titan-text-express-v1",
+    customizationType="FINE_TUNING",          # or CONTINUED_PRE_TRAINING
+    trainingDataConfig={"s3Uri": "s3://ml-ft-data/train.jsonl"},
+    validationDataConfig={"validators": [{"s3Uri": "s3://ml-ft-data/val.jsonl"}]},
+    outputDataConfig={"s3Uri": "s3://ml-ft-data/output/"},
+    hyperParameters={"epochCount": "2", "batchSize": "1", "learningRate": "0.00001"})
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Fine-tuning vs continued pre-training vs RAG">
+
+* **Fine-tuning** adjusts the model weights with labeled examples so it follows a format, tone or task. It does not reliably inject large amounts of new factual knowledge and its knowledge is frozen at training time.
+* **Continued pre-training** extends the model's general language understanding with large unlabeled domain text. It is a heavier, costlier step used to teach vocabulary and domain patterns.
+* **RAG** leaves weights untouched and retrieves current documents at query time. It is cheapest to update (change documents, not the model), supports citations and access control, and is the usual answer for "answers must reflect the latest internal documents".
+* Combine them: for example RAG for facts plus light fine-tuning for response style.
+* Fine-tuning pitfalls: **overfitting** to a small dataset and **catastrophic forgetting** of general abilities (Module 06).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: How distillation data is produced">
+
+In model distillation, a large **teacher** model generates high-quality responses to your prompts, and a smaller **student** model is fine-tuned on those prompt-response pairs. You supply representative prompts (or point to stored model invocation logs), the service can generate teacher responses (and optionally apply data synthesis to expand the set), and then trains the student. The result is a model that approximates the teacher on your specific use case at lower inference cost and latency. Prompt diversity and coverage of real traffic decide how well the student generalizes.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 6. Common Traps and Distractors for Task 1.2 (GenAI)
+
+* **"Re-embed only the queries when switching embedding models."** Both documents and queries must use the same model; changing it means re-indexing everything.
+* **"Chunk size does not matter."** It strongly affects retrieval precision, cost and answer quality.
+* **"Fine-tune the model so it knows this week's policy updates."** Frequently changing knowledge calls for RAG.
+* **"Run stemming/stop-word removal before an LLM."** That is classical NLP preprocessing and can hurt LLM input.
+* **"Use Macie to redact PII."** Macie discovers; it does not transform data.
+* **"Embed first, redact later."** Sensitive content is baked into the vector. Redact before chunking and embedding.
+* **"Use unlabeled text to fine-tune a task."** Supervised fine-tuning needs labeled pairs; unlabeled text is for continued pre-training.
+* **"Use any vector dimension."** It must match the embedding model.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can explain what an embedding is, how to configure an embedding model, and why the same model must index and query.
+<details>
+<summary>Explanation</summary>
+
+An embedding is a fixed-length numeric vector capturing meaning; similar items are close under a metric such as cosine similarity. You choose a Bedrock (or SageMaker-hosted) embedding model, set parameters such as output dimension and normalization, and create the vector index with the same dimension and metric. Query vectors and document vectors must come from the same model so they share one vector space; switching models means re-embedding the entire corpus.
+
+</details>
+
+- [ ] I can choose and tune a chunking strategy for a RAG corpus and justify chunk size and overlap.
+<details>
+<summary>Explanation</summary>
+
+Fixed-size is simple; sentence/paragraph and structure-aware chunking preserve ideas; semantic chunking splits at topic shifts; hierarchical chunking searches small child chunks and returns larger parent context. Too-large chunks dilute relevance and waste tokens; too-small chunks lose context. Overlap (often 10-20 percent) prevents ideas from being cut at boundaries at the cost of extra storage. Validate with real questions and retrieval metrics, and respect the embedding model's and FM's token limits.
+
+</details>
+
+- [ ] I know why and how to attach metadata to chunks and use it at retrieval time.
+<details>
+<summary>Explanation</summary>
+
+Metadata (department, date, document type, language, access level, source) lets retrieval pre-filter candidates, enforce who may see what, support citations and improve ranking. In Bedrock Knowledge Bases you provide metadata as sidecar `.metadata.json` files next to the source objects, then pass a `filter` in the `Retrieve` or `RetrieveAndGenerate` call. Textract, Comprehend or a custom Lambda transformation can extract metadata automatically during ingestion.
+
+</details>
+
+- [ ] I can tell masking, redaction, anonymization and pseudonymization apart and name the AWS service for each need.
+<details>
+<summary>Explanation</summary>
+
+Masking hides part of a value while keeping format; redaction removes or tags the sensitive span; anonymization irreversibly prevents re-identification; pseudonymization swaps identifiers for consistent surrogates that can be reversed with a protected map. Macie discovers sensitive data in S3, Comprehend detects and redacts PII in text, Glue and DataBrew apply PII transforms in ETL, Guardrails filter sensitive information at inference, KMS encrypts, Lake Formation restricts access. Always sanitize before embedding or fine-tuning.
+
+</details>
+
+- [ ] I can pick the right customization method and dataset format for fine-tuning, continued pre-training and distillation.
+<details>
+<summary>Explanation</summary>
+
+Fine-tuning needs labeled prompt-completion pairs (JSONL) to teach a task or style. Continued pre-training needs large unlabeled domain text to build domain knowledge. Distillation uses prompts (teacher generates responses) to train a smaller, cheaper student. RAG needs chunked, embedded documents and no training. If knowledge changes frequently, RAG beats fine-tuning. Every method needs clean, deduplicated, sensitive-data-free data with a held-out evaluation set and no train/test contamination.
+
+</details>
+
+- [ ] I can apply text pre-processing correctly for classical NLP versus transformer/LLM workflows.
+<details>
+<summary>Explanation</summary>
+
+Classical models (bag-of-words, TF-IDF) benefit from lowercasing, stop-word removal, stemming or lemmatization. Transformer and LLM workflows use the model's own subword tokenizer and natural text, with padding/truncation to the context window and the correct special tokens or chat template. Domain-specific augmentation (back-translation, FM paraphrase, glossary expansion, templated generation) can enlarge small domain datasets but must preserve labels and domain terminology and must never leak into the test set.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/02-data-transformation-feature-engineering" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 02: Data Transformation & Feature Engineering with Glue, DataBrew, Data Wrangler & Feature Store
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Machine Learning Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/machine-learning-engineer-associate/study-notes/04-data-quality-bias-labeling-cleaning" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 04: Data Quality, Labeling, Bias Detection & Data Cleaning →
+  </a>
+</div>

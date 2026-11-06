@@ -1,0 +1,197 @@
+---
+title: "Module 09: Enterprise Integration: Event-Driven Patterns, Secure Access, Hybrid & GenAI Gateways"
+description: "Legacy integration, EventBridge, federation, Outposts/Wavelength, CI/CD for GenAI, and gateway architectures (Task 2.3)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 9
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 2.3 (Skills 2.3.1 - 2.3.5): enterprise connectivity, integrating GenAI into existing apps, secure access frameworks, cross-environment (hybrid and edge) designs, and CI/CD with GenAI gateways.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 2, Task 2.3">
+Enterprise scenarios involve **legacy systems, loosely coupled events, identity federation, data that cannot leave a jurisdiction, and central governance**. Look for the architecture that integrates without rewriting existing systems and keeps control in one place.
+</Callout>
+
+---
+
+## 1. Enterprise Connectivity (Skill 2.3.1)
+
+| Pattern | Use | AWS services |
+|---|---|---|
+| API-based integration with legacy systems | Wrap legacy functionality behind REST so FMs/agents can call it | API Gateway, Lambda, PrivateLink |
+| Event-driven loose coupling | Producers emit events; GenAI consumers react asynchronously | EventBridge, SNS, SQS, Kinesis, MSK |
+| Data synchronization | Keep knowledge stores consistent with systems of record | DynamoDB Streams, DataSync, AppFlow, Glue |
+| Workflow integration | Orchestrate multi-system processes | Step Functions |
+
+```
+Legacy ERP --(change event)--> EventBridge --> Lambda (enrich + summarize via Bedrock)
+                                       |--> SQS buffer --> batch embedding job --> vector store
+                                       '--> SNS --> notify business users
+```
+
+Benefits of event-driven design: the legacy system is unaware of GenAI, bursts are absorbed by queues, and failures are retried from DLQs.
+
+---
+
+## 2. Integrated AI Capabilities in Existing Apps (Skill 2.3.2)
+
+| Integration | Implementation |
+|---|---|
+| Microservice exposing AI features | API Gateway to Lambda (or container service) calling Bedrock |
+| Webhook handlers | Lambda behind API Gateway or a Function URL processes third-party callbacks (for example a CRM) and calls an FM |
+| Event-driven enhancement | EventBridge rule on a business event triggers summarization or classification |
+| Contact center | Amazon Connect with Lex and Bedrock for conversational assistance |
+
+```python
+# EventBridge pattern: classify new support cases
+{
+  "source": ["crm.cases"],
+  "detail-type": ["CaseCreated"],
+  "detail": {"priority": [{"anything-but": "low"}]}
+}
+```
+
+---
+
+## 3. Secure Access Frameworks (Skill 2.3.3)
+
+| Control | Mechanism |
+|---|---|
+| Identity federation | IAM Identity Center or SAML/OIDC federation maps corporate identities to IAM roles; Cognito for application users |
+| Role-based access to models | IAM policies allowing `bedrock:InvokeModel` only on approved model ARNs or inference profiles |
+| Least-privilege API access | Separate roles per application; condition keys and resource ARNs |
+| Data access control | Lake Formation, S3 policies, metadata-filtered retrieval |
+| Service-to-service | Roles assumed by Lambda/ECS; no long-lived keys; Secrets Manager for third-party credentials |
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+  "Resource": ["arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0"]
+}
+```
+
+<Callout variant="tip" title="Exam Tip">
+To restrict which models a team can use, scope the `Resource` in IAM (and use service control policies at the organization level). Remember that cross-Region inference profiles have their own ARNs, and the policy usually must allow both the profile and the underlying foundation model in each Region it can route to.
+</Callout>
+
+---
+
+## 4. Cross-Environment Solutions (Skill 2.3.4)
+
+| Requirement | Solution |
+|---|---|
+| Data must stay on premises but apps want FM access | **AWS Outposts** brings AWS infrastructure on premises; integrate local data with cloud-hosted FMs through private connectivity, or run supported workloads locally |
+| Ultra-low latency at the 5G edge | **AWS Wavelength** deploys compute at telecom edge locations |
+| Secure routing cloud to on premises | Private, encrypted connectivity between on premises and AWS (AWS VPN and Direct Connect are listed as out of scope for this exam, so expect the concept rather than service-specific configuration), plus PrivateLink and VPC endpoints |
+| Jurisdictional compliance | Choose Regions deliberately; geographic inference profiles; replicate only permitted data; redact before crossing boundaries |
+
+```
+On-prem DB --(private link)--> VPC --> interface endpoint (bedrock-runtime) --> Bedrock (chosen Region)
+          '--> local preprocessing (redact PII) before any data leaves
+```
+
+---
+
+## 5. CI/CD and GenAI Gateway Architectures (Skill 2.3.5)
+
+### CI/CD for GenAI components
+
+```
+Commit --> CodePipeline
+  --> CodeBuild: unit tests, prompt regression suite, security scan (dependency + IaC), guardrail tests
+  --> Deploy to staging (CloudFormation / CDK)
+  --> Automated evaluation gate (quality, latency, cost thresholds)
+  --> Manual approval (optional) --> Production (canary via CodeDeploy / AppConfig)
+  --> CloudWatch alarms --> automatic rollback
+```
+
+Treat prompts, guardrail configs, model IDs, and evaluation datasets as **versioned artifacts** in the pipeline.
+
+### GenAI gateway
+
+A **GenAI gateway** is a centralized abstraction layer between applications and FMs.
+
+| Gateway function | Implementation |
+|---|---|
+| Single API for all apps | API Gateway plus Lambda/ECS service |
+| Model routing and abstraction | Config-driven (AppConfig), provider adapters |
+| Auth, quotas, rate limits | Cognito/IAM authorizers, API Gateway usage plans and throttling |
+| Mandatory guardrails | Gateway attaches a guardrail to every call |
+| Cost attribution | Tag requests by team/app, record token usage |
+| Observability and audit | Central logging, X-Ray tracing, CloudWatch dashboards |
+| Caching and fallbacks | Shared semantic/prompt cache, automatic failover |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Why centralize through a gateway">
+
+Without a gateway, every team integrates directly, producing inconsistent security, no unified cost view, and duplicated retry and guardrail logic. A gateway enforces policy **once**: approved models only, guardrails always on, per-team quotas, consistent logging for audit. The trade-off is added latency (typically small), an additional component to operate and scale, and the risk of becoming a bottleneck, mitigated by stateless horizontal scaling and keeping the hot path lean.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 6. Exam Traps & Common Distractors
+
+- **Trap 1:** Rewriting the legacy system to embed AI when an API wrapper or event integration suffices.
+- **Trap 2:** Synchronous point-to-point calls where an SQS buffer or EventBridge would decouple and absorb bursts.
+- **Trap 3:** Embedding long-lived IAM user keys in applications.
+- **Trap 4:** Sending raw regulated data to a Region outside the compliance boundary.
+- **Trap 5:** CI/CD that deploys prompt or model changes with no automated quality gate or rollback.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can integrate GenAI with a legacy system without modifying it.
+<details>
+<summary>Explanation</summary>
+
+Capture changes as events (or poll through an API wrapper), route through EventBridge or SQS, process with Lambda calling Bedrock, and write results back through the legacy API. The legacy system remains unchanged and loosely coupled.
+
+</details>
+
+- [ ] I can restrict model access with identity and IAM.
+<details>
+<summary>Explanation</summary>
+
+Federate corporate identities into roles, scope `bedrock:InvokeModel` to approved model or inference profile ARNs, apply SCPs for organization-wide limits, and avoid long-lived keys. Log usage with CloudTrail.
+
+</details>
+
+- [ ] I can pick between Outposts, Wavelength, and Regional deployment.
+<details>
+<summary>Explanation</summary>
+
+Outposts for on-premises data or systems that must stay local; Wavelength for ultra-low latency at 5G edge; Regional deployment with geographic inference profiles and redaction when residency is satisfied by Region choice.
+
+</details>
+
+- [ ] I can describe what a GenAI gateway centralizes and the trade-offs.
+<details>
+<summary>Explanation</summary>
+
+Routing, auth, quotas, guardrails, logging, cost attribution, caching, and fallbacks in one layer for consistent governance. Trade-offs: extra hop, operational burden, and a potential bottleneck unless stateless and scalable.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/08-fm-deployment-strategies" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 08: FM Deployment Strategies: On-Demand, Provisioned Throughput & SageMaker AI
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/10-fm-api-integration-streaming-resilience-routing" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 10: FM API Integration: Sync/Async, Streaming, Resilience & Intelligent Routing →
+  </a>
+</div>

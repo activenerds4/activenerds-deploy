@@ -1,0 +1,155 @@
+---
+title: "Module 03: EC2, Compute Optimizer & EBS Performance Optimization"
+description: "Instance right-sizing, burstable credits, placement groups, EBS volume types, IOPS/throughput limits, Elastic Volumes, and EBS CloudWatch metrics."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS CloudOps Engineer Associate Track"
+trackSlug: "/certifications/aws/cloudops-engineer-associate"
+moduleNumber: 3
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified CloudOps Engineer - Associate (SOA-C03)
+**Scope:** Task 1.3 (Skills 1.3.1, 1.3.2, 1.3.6): EC2 right-sizing, burstable instances, placement groups, tags, Compute Optimizer, and EBS volume types and metrics.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 1.3 (Domain 1, 22%)">
+SOA-C02's cost and performance domain was folded into Task 1.3. Questions pair a **symptom** (high queue length, throttled IOPS, CPU credit exhaustion) with the **cheapest change that fixes it**, so know both the metric and the lever.
+</Callout>
+
+---
+
+## 1. EC2 Performance Levers
+
+| Symptom | Metric to check | Typical fix |
+|---|---|---|
+| Sustained high CPU | `CPUUtilization` | Larger size or compute-optimized family, or scale out |
+| Burstable instance slows down | `CPUCreditBalance` near 0, `CPUSurplusCreditsCharged` | Move to larger/non-burstable type, or enable T unlimited mode (costs more) |
+| Memory pressure | Agent `mem_used_percent` | Memory-optimized family (R, X) |
+| Network bottleneck | `NetworkIn/Out`, `NetworkPacketsDropped` style ENA metrics | Larger size, enhanced networking (ENA), placement group |
+| Instance idle, over-provisioned | Low utilization over weeks | **Compute Optimizer** recommendation to downsize |
+
+* **AWS Compute Optimizer** analyzes at least **30 hours** of metrics (opt in first) and recommends EC2, EBS, Lambda, ASG and ECS-on-Fargate changes. **Memory utilization** recommendations require the CloudWatch agent.
+* **Resource tags** (for example `Environment`, `Application`, `CostCenter`) let you filter metrics, attribute cost (activate as cost allocation tags), and target Systems Manager and Automation by tag.
+* **EBS-optimized** instances give dedicated EBS bandwidth; every instance type has its own aggregate EBS IOPS and throughput cap that can limit a fast volume.
+
+### Placement Groups
+
+| Type | Layout | Use case | Limit |
+|---|---|---|---|
+| Cluster | Same rack/AZ, low-latency 10 Gbps+ | HPC, tightly coupled | Single AZ; capacity errors, launch same type together |
+| Partition | Groups on separate racks | Hadoop, Cassandra, Kafka | Up to 7 partitions per AZ |
+| Spread | Each instance on distinct hardware | Few critical instances | **Max 7 running instances per AZ per group** |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Burstable (T-family) credit model">
+
+T instances earn CPU credits at a fixed rate and spend them above a baseline.
+
+* **Standard mode:** when credits hit zero the instance is throttled to baseline. `CPUCreditBalance` approaching 0 is the warning sign.
+* **Unlimited mode:** can burst beyond credits and pays for **surplus credits** (`CPUSurplusCreditsCharged`). T3/T3a/T4g default to unlimited, T2 defaults to standard.
+* **Decision:** if the workload is constantly above baseline, a burstable instance is the wrong choice, so move to M/C family. Compute Optimizer flags this.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. EBS Volume Types
+
+| Type | Media | Baseline / max performance | Best for | Boot? |
+|---|---|---|---|---|
+| gp3 | SSD | 3,000 IOPS and 125 MiB/s included, up to 16,000 IOPS and 1,000 MiB/s, **IOPS and throughput independent of size** | Default choice; cheaper than gp2 | Yes |
+| gp2 | SSD | 3 IOPS per GiB (min 100, max 16,000), burst to 3,000 for volumes under 1,000 GiB | Legacy; migrate to gp3 | Yes |
+| io1 / io2 | SSD | Provisioned IOPS up to 64,000 (io2 Block Express up to 256,000), sub-millisecond | Databases needing sustained IOPS, Multi-Attach | Yes |
+| st1 | HDD | Throughput-optimized, up to 500 MiB/s | Big sequential: logs, data warehouse | **No** |
+| sc1 | HDD | Cold, up to 250 MiB/s | Infrequently accessed | **No** |
+
+* **Multi-Attach** is only for io1/io2, same AZ, Nitro instances.
+* **Elastic Volumes:** change type, size, IOPS and throughput **without detaching**. Afterward extend the filesystem (`growpart`, `resize2fs`/`xfs_growfs`). You can modify the same volume again only after **6 hours** have passed since the last modification, and size can only increase, never shrink.
+* **Snapshots and performance:** volumes restored from snapshots load blocks lazily, so first reads are slow. Use **Fast Snapshot Restore** or pre-read the volume.
+
+### EBS CloudWatch Metrics
+
+| Metric | Meaning | Action |
+|---|---|---|
+| `VolumeQueueLength` | Pending I/O requests | Persistently high means the volume or instance limit is saturated; raise IOPS or move to io2 |
+| `VolumeReadOps` / `VolumeWriteOps` | I/O count per period; divide by seconds for IOPS | Compare to provisioned IOPS |
+| `VolumeThroughputPercentage` | Percent of provisioned IOPS delivered (Provisioned IOPS types) | Consistently low with queue length means a bottleneck elsewhere |
+| `BurstBalance` | Remaining burst credits (gp2, st1, sc1) | Falling to 0 means throttled to baseline; switch to gp3 or enlarge |
+| `VolumeIdleTime` | Seconds with no I/O | Identify unused volumes for deletion |
+
+```bash
+# Convert gp2 to gp3 with extra IOPS, no downtime
+aws ec2 modify-volume --volume-id vol-0abc123 --volume-type gp3 --iops 6000 --throughput 250
+aws ec2 describe-volumes-modifications --volume-ids vol-0abc123
+```
+
+```
+ Instance (EBS-optimized, has aggregate IOPS/throughput cap)
+    |
+    +-- gp3 root  (3,000 IOPS baseline)
+    +-- io2 data  (provisioned IOPS) <-- limited by min(volume, instance cap)
+    +-- st1 logs  (throughput, sequential only)
+```
+
+---
+
+## 3. Exam Traps & Common Distractors
+
+- **Trap 1:** Selecting st1 or sc1 for a **boot** volume. HDD types cannot be boot volumes.
+- **Trap 2:** Raising io2 IOPS when the **instance's EBS limit** is the bottleneck.
+- **Trap 3:** Adding gp2 capacity to buy IOPS when gp3 decouples size from IOPS and costs less.
+- **Trap 4:** Using a cluster placement group across AZs. It is single AZ.
+- **Trap 5:** Forgetting to extend the OS filesystem after enlarging a volume.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can identify and fix an EBS gp2 volume that slows down after sustained heavy I/O.
+<details>
+<summary>Explanation</summary>
+
+`BurstBalance` reached 0, so the volume is throttled to its baseline of 3 IOPS/GiB. Use Elastic Volumes to switch to **gp3** (3,000 IOPS baseline regardless of size, configurable up to 16,000) or io2 if sustained higher IOPS are required.
+
+</details>
+
+- [ ] I know when to choose cluster, partition, or spread placement groups.
+<details>
+<summary>Explanation</summary>
+
+Cluster: lowest latency and highest network throughput between instances in one AZ. Partition: large distributed systems that need rack-level fault isolation, with partition awareness. Spread: small number of critical instances each on separate hardware, max 7 per AZ per group.
+
+</details>
+
+- [ ] I can explain why a T3 instance's performance dropped and the options.
+<details>
+<summary>Explanation</summary>
+
+CPU credits were exhausted (standard mode) so CPU is held at baseline. Options: enable unlimited mode (pay for surplus credits), choose a larger T size with higher baseline, or move to a fixed-performance family if load is constant.
+
+</details>
+
+- [ ] I know which prerequisites Compute Optimizer has for memory-based recommendations.
+<details>
+<summary>Explanation</summary>
+
+Opt in to Compute Optimizer (single account or organization) and publish memory utilization with the CloudWatch agent. Without memory metrics, recommendations are based on CPU, network and disk only.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/02-eventbridge-automated-remediation" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 02: EventBridge Routing & Automated Remediation Runbooks
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS CloudOps Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/cloudops-engineer-associate/study-notes/04-s3-shared-storage-rds-performance" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 04: S3, Shared File Storage & RDS Performance Tuning →
+  </a>
+</div>

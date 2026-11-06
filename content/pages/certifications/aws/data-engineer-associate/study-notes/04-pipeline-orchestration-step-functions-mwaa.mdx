@@ -1,0 +1,189 @@
+---
+title: "Module 04: Pipeline Orchestration: Step Functions, MWAA, Glue Workflows & Eventing"
+description: "Step Functions, MWAA, Glue workflows, EventBridge, SNS/SQS alerting, fault tolerance, and serverless workflow design."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 4
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 1.3 and Skills 3.1.1–3.1.2, 3.1.9: orchestration with Step Functions, Amazon MWAA, Glue workflows, Lambda and EventBridge; resilient and serverless pipeline design; alerting with SNS and SQS.
+
+<Callout variant="info" title="Exam Blueprint Focus: Orchestration">
+Questions contrast **Step Functions** (serverless, AWS-native, JSON/ASL), **MWAA** (Airflow, Python DAGs, existing Airflow skills), and **Glue workflows** (Glue-only chains). Pick by workflow complexity, existing skills, and operational overhead.
+</Callout>
+
+---
+
+## 1. Orchestrator Comparison (Skill 1.3.1)
+
+| Orchestrator | Definition | Strengths | Limits / cost model | Pick when |
+|---|---|---|---|---|
+| AWS Step Functions | State machine (Amazon States Language) | 200+ service integrations, retries/catch, Map and Parallel, human callbacks, no servers | Per state transition (Standard) or per request/duration (Express) | AWS-native, serverless, branching, error handling |
+| Amazon MWAA | Managed Apache Airflow (Python DAGs) | Rich operators, backfills, dependencies, portable DAGs | Environment runs continuously (hourly charge) | Team already uses Airflow; complex dependencies across systems |
+| AWS Glue workflows | Graph of Glue triggers, jobs, crawlers | Simple, visual, run properties shared across nodes | Glue-only | Chain Glue jobs and crawlers only |
+| EventBridge | Event bus, rules, scheduler | Decoupled event routing and scheduling | Not a workflow engine (no state) | Start things; fan out events |
+| Lambda | Code | Glue logic, simple chaining | 15-min limit; chaining Lambdas becomes brittle | Small tasks inside a workflow |
+
+```
+ EventBridge (S3 PutObject / schedule)
+        |
+        v
++-------------------- Step Functions (Standard) ----------------------+
+|  Validate (Lambda) -> Run Glue job (.sync) -> Crawl -> Athena CTAS   |
+|        | Catch                |  Retry(backoff)                      |
+|        v                      v                                      |
+|   Publish SNS alert      Map state: per-partition processing         |
++---------------------------------------------------------------------+
+```
+
+---
+
+## 2. Step Functions Essentials
+
+* **Standard** workflows: up to 1 year, exactly-once execution, full history, billed per state transition. **Express**: up to 5 minutes, at-least-once (async) or at-most-once (sync), high volume, billed by requests and duration.
+* **Integration patterns:** Request-Response, **Run a Job (`.sync`)** waits for job completion (Glue, EMR, Batch, ECS, Athena), **Wait for Callback (`.waitForTaskToken`)** pauses for external signals.
+* **Error handling:** `Retry` (ErrorEquals, IntervalSeconds, BackoffRate, MaxAttempts, JitterStrategy) and `Catch` to fallback states.
+* **Map state** processes arrays in parallel; **Distributed Map** processes millions of S3 objects at high concurrency.
+
+```json
+{
+  "StartAt": "RunGlue",
+  "States": {
+    "RunGlue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": { "JobName": "orders-etl" },
+      "Retry": [{ "ErrorEquals": ["States.TaskFailed"], "IntervalSeconds": 30, "BackoffRate": 2.0, "MaxAttempts": 3 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "NotifyFailure" }],
+      "Next": "Done"
+    },
+    "NotifyFailure": { "Type": "Task", "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": { "TopicArn": "arn:aws:sns:us-east-1:111122223333:pipeline-alerts", "Message.$": "$.Cause" }, "End": true },
+    "Done": { "Type": "Succeed" }
+  }
+}
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: MWAA architecture and troubleshooting (Skill 3.1.2)">
+
+* MWAA runs Airflow's scheduler, workers (Celery, auto-scaled), and web server in AWS-managed VPC components attached to **your VPC**. DAGs, `requirements.txt`, and plugins are stored in an **S3 bucket**.
+* **Environment classes** (mw1.small/medium/large...) set capacity; workers auto-scale between min and max.
+* **Execution role** must allow access to the services DAGs call (Glue, EMR, S3, KMS).
+* **Troubleshooting:** DAG not appearing (syntax error, wrong S3 path, versioning off); tasks stuck in queued (worker capacity); import errors after adding packages (`requirements.txt` incompatibility, use constraints file); networking failures (private subnets need NAT or VPC endpoints for S3, SQS, KMS, CloudWatch, ECR); view **CloudWatch Logs** for scheduler, worker, DAG processing, and web server.
+* Use Airflow **sensors** (S3KeySensor) and operators (GlueJobOperator, EmrAddStepsOperator, AthenaOperator).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Glue workflows and triggers">
+
+* A workflow contains **triggers** (on-demand, scheduled, event/EventBridge, conditional on job/crawler state), **jobs**, and **crawlers**.
+* **Workflow run properties** pass state between nodes.
+* Visualize the graph and run status in the console. For cross-service logic, prefer Step Functions.
+* A Glue **EventBridge event trigger** can start a workflow on S3 events, with batching conditions (batch size and window).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Building resilient pipelines (Skill 1.3.2)">
+
+* **Performance:** parallelize (Map, partitioned processing), use columnar formats, right-size compute.
+* **Availability and fault tolerance:** multi-AZ managed services, retries with exponential backoff and jitter, DLQs, idempotency keys, checkpointing.
+* **Scalability:** serverless and auto-scaling services (Glue, Lambda, Kinesis on-demand, Athena), SQS to absorb bursts.
+* **Resiliency:** immutable raw layer for reprocessing, state machines that resume, cross-Region replication for DR when required.
+* **Decoupling:** SQS/SNS/EventBridge so producers and consumers fail independently.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Notifications: SNS and SQS (Skill 1.3.4)
+
+| Service | Pattern | Delivery | Use in data pipelines |
+|---|---|---|---|
+| SNS | Pub/sub, push | Fan-out to email, SMS, SQS, Lambda, HTTPS, Firehose | Alerts on failure, broadcast events; filter policies per subscriber |
+| SQS Standard | Queue, pull | At-least-once, best-effort order | Buffer bursts, decouple, DLQ for failures |
+| SQS FIFO | Ordered queue | Exactly-once processing, ordering per message group | Ordered, deduplicated processing |
+
+**Fan-out pattern:** SNS topic → multiple SQS queues (each consumer pulls at its own pace). Connect **CloudWatch alarms** and **EventBridge rules** (Glue job state change, Step Functions status change) to SNS for alerts.
+
+```bash
+# Alert on Glue job failures
+aws events put-rule --name glue-job-failed \
+  --event-pattern '{"source":["aws.glue"],"detail-type":["Glue Job State Change"],"detail":{"state":["FAILED","TIMEOUT"]}}'
+aws events put-targets --rule glue-job-failed \
+  --targets "Id"="1","Arn"="arn:aws:sns:us-east-1:111122223333:pipeline-alerts"
+```
+
+---
+
+## 4. Serverless Workflows (Skill 1.3.3)
+
+Serverless data pipelines typically combine **EventBridge + Step Functions + Lambda + Glue + Athena + S3 + SNS**. Benefits: no servers to patch, pay-per-use, automatic scaling. Maintain them with **IaC (SAM/CDK)**, versioned state machine definitions, aliases for Lambda, CloudWatch alarms on `ExecutionsFailed`, and X-Ray (out of scope for service questions, but tracing helps).
+
+---
+
+## 5. Common Traps and Watchouts
+
+* **"Complex branching, retries, wait for Glue to finish, serverless"** → Step Functions with `.sync`.
+* **"Team has existing Airflow DAGs"** → MWAA.
+* **"Only chain Glue jobs and crawlers"** → Glue workflows.
+* **EventBridge is a router/scheduler, not an orchestrator.**
+* **Standard vs Express:** long-running or exactly-once → Standard; high-volume short → Express.
+* **MWAA costs run continuously**; not ideal for a couple of infrequent jobs.
+* **Chaining Lambda from Lambda** is an anti-pattern; use Step Functions.
+* **SNS has no replay or storage;** use SQS when you need durability.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Step Functions, MWAA, and Glue workflows.
+<details>
+<summary>Explanation</summary>
+
+Step Functions for serverless AWS-native orchestration with rich error handling and direct service integrations. MWAA for Airflow compatibility, complex DAGs, and backfills. Glue workflows for simple Glue-only graphs.
+
+</details>
+
+- [ ] I can design retry and failure handling in Step Functions.
+<details>
+<summary>Explanation</summary>
+
+Use Retry with backoff rate and max attempts for transient errors, Catch to route to a notification or compensation state, `.sync` integrations to wait for jobs, and SNS to alert. Make downstream tasks idempotent.
+
+</details>
+
+- [ ] I can troubleshoot an MWAA DAG that does not appear or tasks that fail.
+<details>
+<summary>Explanation</summary>
+
+Check DAG syntax and S3 location, `requirements.txt` compatibility, execution role permissions, VPC networking (NAT/VPC endpoints), worker capacity, and CloudWatch Logs for scheduler/worker/DAG processing.
+
+</details>
+
+- [ ] I know the difference between SNS and SQS and how to combine them.
+<details>
+<summary>Explanation</summary>
+
+SNS pushes messages to many subscribers; SQS stores messages for pull-based consumers. SNS → SQS fan-out gives each consumer a durable queue with its own DLQ and retry.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/03-transform-glue-emr-lambda-redshift" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 03: Data Transformation with Glue, EMR, Lambda, Flink & Redshift
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/05-programming-concepts-iac-cicd-lambda" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 05: Programming Concepts: Lambda, IaC (SAM, CDK, CloudFormation) & CI/CD →
+  </a>
+</div>

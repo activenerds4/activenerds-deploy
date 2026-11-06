@@ -1,0 +1,175 @@
+---
+title: "Module 05: Securing Applications: WAF, Shield, Cognito, GuardDuty & Secrets"
+description: "DDoS and SQL injection defenses, threat detection services, secrets handling, and secure application access patterns."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 5
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 1.2 — AWS Shield, AWS WAF, Firewall Manager, Amazon Cognito, GuardDuty, Macie, Inspector, Detective, Security Hub, Secrets Manager, and secure application access patterns
+
+<Callout variant="info" title="Exam Blueprint Focus: Threat vectors external to AWS and security service selection">
+The blueprint calls out DDoS and SQL injection as threat vectors and asks you to match services such as Cognito, GuardDuty, and Macie to use cases. Learn each service's single sentence purpose; most questions are matching exercises with plausible distractors.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Layered DDoS and web exploit defense">
+
+Defense in depth places controls at each layer:
+
+* **Edge (Layer 3/4/7):** CloudFront and Route 53 absorb volumetric attacks across the global edge network; AWS Shield Standard is automatically included for all customers at no cost.
+* **Application (Layer 7):** AWS WAF filters HTTP(S) requests with rules for SQL injection, cross-site scripting, IP reputation, geo-matching, and rate-based throttling.
+* **Origin protection:** Restrict the ALB or origin to accept traffic only from CloudFront (managed prefix list or custom header), and keep instances in private subnets.
+* **Resilience:** Auto Scaling absorbs legitimate surges; Shield Advanced adds cost protection for scaling charges during an attack.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Secrets Manager versus Systems Manager Parameter Store">
+
+Both store configuration securely and integrate with IAM and KMS. **Secrets Manager** provides built-in automatic rotation (for example, RDS credentials via Lambda), cross-Region secret replication, and is billed per secret. **Parameter Store** offers a free standard tier for plain or encrypted parameters but has no native rotation. If a stem says "automatically rotate database credentials", choose Secrets Manager.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Service | One-line purpose | Data source / target | Exam trigger phrase |
+|---|---|---|---|
+| AWS Shield Standard | Free automatic L3/L4 DDoS protection | All AWS customers | "DDoS protection, no extra cost" |
+| AWS Shield Advanced | Paid enhanced DDoS protection, response team, cost protection | ALB, CloudFront, Route 53, Global Accelerator, EIP | "DDoS response team", "protect against scaling costs" |
+| AWS WAF | Layer 7 web ACL filtering | CloudFront, ALB, API Gateway, AppSync, Cognito user pools | "SQL injection", "block IPs", "rate limit" |
+| AWS Firewall Manager | Central management of WAF, Shield Advanced, SGs, Network Firewall across accounts | AWS Organizations | "enforce across all accounts" |
+| Amazon Cognito | Customer identity: sign-up, sign-in, federation | Web and mobile apps | "users sign in with social or SAML" |
+| Amazon GuardDuty | Intelligent threat detection | CloudTrail, VPC Flow Logs, DNS logs, S3 data events, EKS and more | "detect compromised instances or unusual API calls" |
+| Amazon Macie | Discover sensitive data (PII) in S3 | Amazon S3 | "find PII in buckets" |
+| Amazon Inspector | Automated vulnerability scanning | EC2, ECR images, Lambda functions | "software vulnerabilities, CVEs" |
+| Amazon Detective | Investigate root cause of findings | GuardDuty, CloudTrail, Flow Logs | "investigate and visualize relationships" |
+| AWS Security Hub | Aggregate findings and check security standards | GuardDuty, Inspector, Macie, and partners | "single pane for security posture" |
+| AWS Secrets Manager | Store and rotate secrets | Applications via API | "rotate credentials automatically" |
+| AWS Certificate Manager | Provision and renew TLS certificates | ELB, CloudFront, API Gateway | "manage TLS certificates" |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+Users --> Route 53 --> CloudFront (+ AWS WAF web ACL, Shield)
+                          |  OAC / prefix list / custom header
+                          v
+                      ALB (public subnet, SG allows CloudFront only)
+                          |
+                          v
+                 App tier (private subnets) --reads--> Secrets Manager (IAM role)
+                          |
+                          v
+                 RDS (isolated subnets, KMS encrypted)
+
+ Detection plane:  GuardDuty + Inspector + Macie  -->  Security Hub  -->  EventBridge --> SNS/Lambda
+```
+
+### Cognito: user pools versus identity pools
+
+| Feature | User pool | Identity pool |
+|---|---|---|
+| Purpose | Authentication (who are you) | Authorization to AWS resources (temporary AWS credentials) |
+| Output | JWT tokens (ID, access, refresh) | STS credentials mapped to IAM roles |
+| Federation | Social, SAML, OIDC IdPs | Accepts tokens from user pools, social, SAML, and optionally guest access |
+| Pairs with | API Gateway Cognito authorizer, ALB authentication | Direct S3 or DynamoDB access from clients |
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```json
+{
+  "Name": "RateLimitPerIP",
+  "Priority": 1,
+  "Statement": {
+    "RateBasedStatement": { "Limit": 2000, "AggregateKeyType": "IP" }
+  },
+  "Action": { "Block": {} },
+  "VisibilityConfig": {
+    "SampledRequestsEnabled": true,
+    "CloudWatchMetricsEnabled": true,
+    "MetricName": "RateLimitPerIP"
+  }
+}
+```
+
+```bash
+# Retrieve a secret at runtime using the instance or task role (no stored keys)
+aws secretsmanager get-secret-value --secret-id prod/app/db --query SecretString --output text
+
+# Enable GuardDuty in the current Region
+aws guardduty create-detector --enable
+```
+
+**Practical guidance:** attach AWS managed rule groups (for example, the SQL database and Core rule sets) to a web ACL first in Count mode to measure false positives, then switch to Block. Remember that **WAF cannot be attached directly to a Network Load Balancer or an EC2 instance**.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Choosing Shield Advanced when the stem only needs baseline DDoS protection. Shield Standard is automatic and free.
+- **Trap 2:** Using security groups or NACLs to stop SQL injection. These operate at Layer 3/4; use AWS WAF.
+- **Trap 3:** Mixing up GuardDuty (threat detection from logs), Inspector (vulnerabilities), and Macie (sensitive data in S3).
+- **Trap 4:** Placing database passwords in environment variables, AMIs, or source control. Use Secrets Manager or Parameter Store.
+- **Trap 5:** Selecting a Cognito identity pool when the question asks for user sign-up and sign-in (that is a user pool).
+- **Trap 6:** Forgetting that a CloudFront-fronted app still needs origin lockdown, otherwise attackers bypass WAF by hitting the ALB directly.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can design a layered defense against DDoS and SQL injection.
+<details>
+<summary>Explanation</summary>
+
+Front the application with CloudFront and Route 53 (absorb volumetric attacks), attach AWS WAF with managed SQL injection and rate-based rules, lock the origin to CloudFront only, keep compute in private subnets, and use Auto Scaling for legitimate load. Add Shield Advanced for the response team and cost protection if the stem requires it.
+
+</details>
+
+- [ ] I can match GuardDuty, Inspector, Macie, Detective, and Security Hub to scenarios.
+<details>
+<summary>Explanation</summary>
+
+GuardDuty detects threats by analyzing logs. Inspector scans workloads for software vulnerabilities. Macie classifies sensitive data in S3. Detective helps investigate the cause and scope of findings. Security Hub aggregates findings and evaluates configuration against security standards.
+
+</details>
+
+- [ ] I can distinguish Cognito user pools from identity pools.
+<details>
+<summary>Explanation</summary>
+
+User pools are a user directory that authenticates users and issues JSON Web Tokens. Identity pools exchange identities (from a user pool, social, or SAML provider) for temporary AWS credentials tied to IAM roles so clients can access AWS services directly.
+
+</details>
+
+- [ ] I can choose Secrets Manager or Parameter Store for a given requirement.
+<details>
+<summary>Explanation</summary>
+
+Use Secrets Manager when you need native automatic rotation, secret replication across Regions, or database credential management. Use Parameter Store for low-cost configuration values and secrets where rotation is not required.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/04-vpc-network-security" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 04: VPC Architecture & Network Security Controls
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/06-data-protection-encryption" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 06: Data Protection: KMS, ACM, Backups & Retention →
+  </a>
+</div>

@@ -1,0 +1,162 @@
+---
+title: "Module 01: Exam Blueprint, Strategy & the Well-Architected Mindset"
+description: "Exam format and scoring, the four domains, how scenario questions are built, and the Well-Architected pillars as a decision filter."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 1
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Exam format and scoring, the four domains, how scenario questions are built, and the Well-Architected pillars as a decision filter.
+
+<Callout variant="tip" title="Exam Blueprint Focus: How SAP-C02 Is Built">
+SAP-C02 is a scenario exam. Almost every question describes a company with competing constraints (cost, RTO/RPO, operational effort, compliance, existing on-premises assets) and asks for the BEST option. You are rarely choosing a correct vs incorrect service; you are choosing the option that satisfies every stated constraint with the least operational overhead.
+</Callout>
+
+---
+
+## 1. Exam Format & Scoring Facts (from the official guide)
+
+| Item | Detail |
+|---|---|
+| Exam code | SAP-C02 |
+| Scored questions | 65 |
+| Unscored (pretest) questions | 10, not identified on the exam |
+| Question types | Multiple choice (1 correct, 3 distractors) and multiple response (2+ correct out of 5+ options, all must be selected) |
+| Scoring | Scaled 100-1,000; minimum passing score 750 |
+| Model | Compensatory: you do not need to pass each domain, only the overall exam |
+| Guessing | No penalty; unanswered counts as incorrect |
+| Target candidate | 2+ years designing and implementing cloud solutions on AWS |
+
+## 2. Domain Weights & Where They Live in This Guide
+
+| Domain | Weight | Primary modules |
+|---|---|---|
+| 1. Design Solutions for Organizational Complexity | 26% | 02, 03, 04, 05, 06, 14 |
+| 2. Design for New Solutions | 29% | 07, 08, 09, 10, 11, 12, 13, 14 |
+| 3. Continuous Improvement for Existing Solutions | 25% | 15, 16 (plus reliability, performance and cost in 08, 12, 14) |
+| 4. Accelerate Workload Migration and Modernization | 20% | 17, 18, 19 |
+| Emerging topics (unscored pretest items) | n/a | 20 |
+
+<Callout variant="info" title="Domains Overlap">
+Task statements repeat across domains (for example DR appears in 1.3, 2.2 and 3.4; cost appears in 1.5, 2.6 and 3.5). Study by theme, as this guide does, rather than domain by domain.
+</Callout>
+
+## 3. Anatomy of a Professional-Level Question
+
+```
++--------------------------------------------------------------+
+| STEM: company context (size, accounts, Regions, legacy)      |
++--------------------------------------------------------------+
+| CONSTRAINTS (the real question lives here):                  |
+|   - "least operational overhead"  -> managed / serverless    |
+|   - "most cost-effective"         -> Spot, tiering, Savings  |
+|   - "minimize downtime"           -> replication, blue/green |
+|   - "without changing the app"    -> rehost / compat services|
+|   - "centrally manage"            -> Organizations, RAM, delegated admin |
++--------------------------------------------------------------+
+| OPTIONS: 4-5 plausible architectures; 2 violate a constraint |
+|          immediately, 1-2 violate a subtle one               |
++--------------------------------------------------------------+
+```
+
+**Elimination procedure:**
+1. Underline every constraint word in the stem (RTO, RPO, "existing", "minimal changes", "on-premises", "compliance", "multiple accounts").
+2. Eliminate options that require custom code or self-managed servers when a managed feature exists.
+3. Eliminate options that break a hard technical rule (for example, VPC peering is not transitive; SCPs do not grant permissions; CloudFront certificates must be in us-east-1).
+4. Between the remaining two, pick the one with lower operational overhead, then lower cost.
+
+## 4. The Well-Architected Framework as a Decision Filter
+
+The exam validates designs "based on the AWS Well-Architected Framework." Map each stem keyword to a pillar:
+
+| Pillar | Stem signals | Typical winning pattern |
+|---|---|---|
+| Operational Excellence | "automate", "reduce manual", "repeatable" | IaC, Systems Manager Automation, EventBridge-driven remediation |
+| Security | "least privilege", "audit", "encrypt", "isolate" | IAM roles, SCPs, KMS, PrivateLink, Security Hub |
+| Reliability | "RTO", "RPO", "failover", "single point of failure" | Multi-AZ, multi-Region, health-checked DNS, decoupling |
+| Performance Efficiency | "latency", "throughput", "global users" | Caching, CloudFront, Global Accelerator, purpose-built DB |
+| Cost Optimization | "reduce cost", "unpredictable", "idle" | Savings Plans, Spot, tiering, serverless, rightsizing |
+| Sustainability | "reduce footprint" (rare) | Graviton, rightsizing, managed services, storage tiering |
+
+## 5. Configuration: Study Environment & Tools
+
+```bash
+# Verify an architecture claim hands-on instead of memorizing it
+aws organizations describe-organization
+aws ec2 describe-transit-gateways --query 'TransitGateways[].{Id:TransitGatewayId,State:State}'
+aws service-quotas list-service-quotas --service-code vpc --query 'Quotas[?QuotaName==`VPCs per Region`]'
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Out-of-Scope Knowledge (Do Not Over-Study)">
+
+The guide explicitly lists these as out of scope for the target candidate: frontend development for mobile apps, the 12-factor app methodology, and in-depth operating system knowledge. It also lists Amazon GameLift as an out-of-scope service. Spend the saved time on networking, multi-account governance, DR and migration, where the exam is densest.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Short Service Names on the Exam">
+
+AWS uses official short names (for example Amazon SNS, AWS KMS) to reduce reading load. The exam Help feature lists them. Some names keep abbreviations that are never expanded (Amazon API Gateway, Amazon EMR), so know the common ones cold.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 6. Common Traps in Exam Strategy
+
+- **Spending time on unscored items:** you cannot identify them; treat every question as scored.
+- **Skipping multiple-response questions:** partial selection earns nothing. Read "choose TWO/THREE" carefully.
+- **Choosing the most powerful architecture:** the exam rewards the simplest architecture that meets every constraint.
+- **Ignoring existing investments:** "company already has Direct Connect/Active Directory" usually means the answer extends them.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can state the scoring model and why weak domains do not automatically fail me.
+<details>
+<summary>Explanation</summary>
+
+The exam is compensatory: a single scaled score (100-1,000, pass at 750) is computed across the whole exam. Section-level feedback is informational only, and the guide warns to interpret it with caution because domains have different weights.
+
+</details>
+
+- [ ] I can explain how to treat a multiple-response question.
+<details>
+<summary>Explanation</summary>
+
+Multiple response items have two or more correct answers out of five or more options, and you must select all correct answers to earn credit. There is no penalty for guessing, so always answer every question.
+
+</details>
+
+- [ ] Given "least operational overhead" in a stem, I know which family of answers to prefer.
+<details>
+<summary>Explanation</summary>
+
+Prefer managed and serverless features (Aurora, DynamoDB, Fargate, Lambda, Step Functions, Control Tower, Systems Manager) over self-managed EC2 solutions, custom scripts and cron jobs.
+
+</details>
+
+- [ ] I can name three hard technical rules that eliminate distractors quickly.
+<details>
+<summary>Explanation</summary>
+
+Examples: VPC peering is non-transitive; SCPs never grant permissions and do not affect the management account; certificates for CloudFront must be requested in us-east-1; gateway endpoints exist only for S3 and DynamoDB; Multi-AZ RDS standby is not a read scaling solution (except Multi-AZ DB clusters).
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ↑ Back to the Study Guide Hub
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/02-network-connectivity-vpc-tgw-vpn-direct-connect" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 02: Network Connectivity: VPC Peering, Transit Gateway, VPN & Direct Connect →
+  </a>
+</div>

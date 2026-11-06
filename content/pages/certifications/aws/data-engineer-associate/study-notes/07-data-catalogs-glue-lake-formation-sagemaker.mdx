@@ -1,0 +1,171 @@
+---
+title: "Module 07: Data Catalogs: Glue Data Catalog, Crawlers & SageMaker Catalog"
+description: "Glue Data Catalog and Hive metastore, crawlers, schema discovery, partition sync, connections, and business catalogs with Amazon SageMaker Catalog."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 7
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 2.2: technical catalogs (AWS Glue Data Catalog, Hive metastore), crawlers and schema discovery, partition synchronization, connections, consuming data via catalogs, and business catalogs with Amazon SageMaker Catalog (Skills 2.2.1–2.2.6).
+
+<Callout variant="info" title="Exam Blueprint Focus: Cataloging">
+Know that the **Glue Data Catalog** is the central technical metastore used by Athena, Redshift Spectrum, EMR, and Glue. New in guide v1.1: **business data catalogs** with Amazon SageMaker Catalog (Skill 2.2.6).
+</Callout>
+
+---
+
+## 1. Technical vs Business Catalogs
+
+| Aspect | Technical catalog | Business catalog |
+|---|---|---|
+| Example | AWS Glue Data Catalog, Hive metastore | Amazon SageMaker Catalog (in SageMaker Unified Studio) |
+| Contents | Databases, tables, schemas, partitions, locations, formats | Business terms, descriptions, data assets and products, ownership, subscriptions |
+| Audience | Engines and engineers | Analysts, data consumers, stewards |
+| Purpose | Make data queryable | Make data discoverable, understood, and governed with request/approve access |
+
+```
+ Sources (S3, JDBC, Kinesis) --crawler--> Glue Data Catalog <--reads-- Athena | EMR | Redshift Spectrum | Glue ETL
+                                                  |
+                                     Lake Formation permissions
+                                                  |
+                              SageMaker Catalog (business metadata, subscriptions)
+```
+
+---
+
+## 2. AWS Glue Data Catalog (Skill 2.2.2)
+
+* **One catalog per account per Region**; contains **databases** and **tables** (metadata only; data stays in S3/JDBC/etc.). Tables carry columns, data types, **SerDe**, location, format, and partition keys.
+* **Hive metastore compatibility:** EMR/Spark/Hive can use Glue as their metastore (`hive.metastore.client.factory.class=com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory`). An external Hive metastore can be used instead via a connection or Lambda-based Athena metastore connector.
+* **Access control** through IAM and **Lake Formation** (database/table/column/row/cell-level permissions).
+* **Resource sharing** across accounts through Lake Formation or AWS RAM.
+* **Schema Registry** (Glue) stores Avro/JSON/Protobuf schemas for streaming producers/consumers with compatibility rules.
+* **Iceberg tables** can be registered in the Glue Data Catalog (Module 09).
+
+---
+
+## 3. Crawlers and Schema Discovery (Skills 2.2.3, 2.2.5)
+
+A **crawler** connects to a data store, classifies data (built-in or custom classifiers), infers schema, and creates/updates tables.
+
+* **Targets:** S3, JDBC databases, DynamoDB, Delta/Hudi/Iceberg tables, MongoDB, DocumentDB.
+* **Schedule:** on demand or cron; also trigger from events (Glue workflow, EventBridge).
+* **Schema change policy:** update table definition or ignore; delete behavior (log, mark deprecated, delete) when objects disappear.
+* **Grouping behavior:** combine compatible schemas into one table; partitions are inferred from Hive-style folder layout (`dt=2026-11-05/`).
+* **Incremental crawls** (new folders only) cut crawl time/cost.
+* **Connections** (Skill 2.2.5): Glue connections store JDBC/network details (VPC, subnet, security group, credentials via Secrets Manager) used by crawlers and jobs. Create new source/target connections for RDS, Redshift, MongoDB, Kafka, and others.
+
+```bash
+aws glue create-crawler --name raw-orders-crawler \
+  --role arn:aws:iam::111122223333:role/GlueCrawlerRole \
+  --database-name raw \
+  --targets '{"S3Targets":[{"Path":"s3://lake/raw/orders/"}]}' \
+  --schedule "cron(0 3 * * ? *)" \
+  --schema-change-policy UpdateBehavior=UPDATE_IN_DATABASE,DeleteBehavior=LOG \
+  --recrawl-policy RecrawlBehavior=CRAWL_NEW_FOLDERS_ONLY
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Synchronizing partitions (Skill 2.2.4)">
+
+Partition metadata in the catalog must match the S3 layout or queries miss data.
+
+| Method | How | When |
+|---|---|---|
+| **Crawler** | Re-run to add new partitions | Simple, scheduled |
+| **`MSCK REPAIR TABLE`** (Athena/Hive) | Scans S3 for Hive-style partitions and adds them | Few, one-time catch-up; slow at huge scale |
+| **`ALTER TABLE ADD PARTITION`** | Explicit add | Known partitions, event-driven (Lambda after file lands) |
+| **Glue ETL `enableUpdateCatalog` + `partitionKeys`** | Job writes data and registers partitions | New partitions created by the job |
+| **Athena partition projection** | Computes partitions from table properties; no catalog partition entries | Very large or predictable partition sets (dates, IDs); fastest planning |
+| **`batch_create_partition` API** | Bulk programmatic add | Custom pipelines |
+
+**Exam signal:** "new daily partitions are not queryable until a crawler runs" → partition projection or add partitions programmatically at write time.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Consuming data through a catalog (Skill 2.2.1)">
+
+* **Athena** queries `database.table` using catalog metadata; the S3 location and format come from the table definition.
+* **Glue ETL** reads with `create_dynamic_frame.from_catalog(database, table_name, push_down_predicate=...)`.
+* **Redshift Spectrum** maps an external schema to a catalog database.
+* **EMR Spark** uses `spark.sql("SELECT ... FROM db.table")` with Glue as metastore.
+* Lake Formation filters (column/row) are enforced for integrated engines when the principal is registered through Lake Formation.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Amazon SageMaker Catalog and business catalogs (Skill 2.2.6)">
+
+* Part of **Amazon SageMaker Unified Studio** (built on the former DataZone capabilities). Organized into **domains**, **domain units**, and **projects**.
+* **Publishing:** producers publish **data assets** (Glue tables, Redshift tables) with business names, glossary terms, and metadata forms; assets can be bundled as **data products**.
+* **Discovery and subscription:** consumers search the catalog and **request subscriptions**; owners approve; access is granted through Lake Formation/Redshift under the hood.
+* **Automatic metadata generation** can suggest descriptions and column names with generative AI.
+* Compare: Glue Data Catalog answers "where is the data and what schema"; SageMaker Catalog answers "what does it mean, who owns it, and how do I get access".
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 4. Common Traps and Watchouts
+
+* **"Central metastore for Athena, EMR, and Redshift Spectrum"** → Glue Data Catalog.
+* **A crawler does not move data;** it only writes metadata.
+* **Crawler changed my schema unexpectedly** → set the schema change policy to log, not update, or use a fixed schema/ETL mapping.
+* **New partitions invisible in Athena** → sync partitions (crawler, `MSCK REPAIR`, `ADD PARTITION`, or projection).
+* **Crawler cannot reach JDBC source** → connection VPC/subnet/security group and S3 endpoint.
+* **Business glossary, data products, subscriptions** → SageMaker Catalog, not the Glue Data Catalog.
+* **Cross-account catalog sharing** → Lake Formation (or RAM), with resource links.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can describe what the Glue Data Catalog stores and who uses it.
+<details>
+<summary>Explanation</summary>
+
+Metadata only: databases, tables, schemas, partitions, locations, SerDe. Used by Athena, Glue ETL, EMR, Redshift Spectrum, and Lake Formation. It can serve as a Hive metastore for EMR.
+
+</details>
+
+- [ ] I can configure a crawler and explain schema change behavior.
+<details>
+<summary>Explanation</summary>
+
+Define targets, role, schedule, classifiers, and the schema change policy (update vs log; delete vs deprecate). Use incremental recrawl of new folders to reduce cost. Connections provide network and credential details for JDBC targets.
+
+</details>
+
+- [ ] I can list four ways to keep partitions in sync.
+<details>
+<summary>Explanation</summary>
+
+Re-run crawler, `MSCK REPAIR TABLE`, `ALTER TABLE ADD PARTITION` / `batch_create_partition`, Glue ETL catalog updates, or Athena partition projection (no sync needed).
+
+</details>
+
+- [ ] I can explain the difference between a technical and a business catalog.
+<details>
+<summary>Explanation</summary>
+
+Technical (Glue Data Catalog) holds schemas for engines. Business (SageMaker Catalog) adds business metadata, glossary, ownership, data products, and an access request/approval workflow for consumers.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/06-choosing-a-data-store" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 06: Choosing the Right Data Store & Migration Tools
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/08-data-lifecycle-retention-resiliency" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 08: Data Lifecycle: S3 Tiering, Retention, TTL, COPY/UNLOAD & Resiliency →
+  </a>
+</div>

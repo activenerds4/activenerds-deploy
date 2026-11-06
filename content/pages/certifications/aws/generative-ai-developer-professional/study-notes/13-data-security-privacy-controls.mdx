@@ -1,0 +1,189 @@
+---
+title: "Module 13: Data Security & Privacy: VPC Isolation, PII Handling & Retention"
+description: "VPC endpoints, IAM/Lake Formation, KMS, Comprehend and Macie PII detection, masking, and S3 lifecycle retention (Task 3.2)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 13
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 3.2 (Skills 3.2.1 - 3.2.3): protected AI environments, privacy-preserving systems, and privacy-focused designs that retain FM utility.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 3, Task 3.2">
+Expect scenarios where data must **not traverse the public internet**, **PII must be detected or masked before or after the model**, or **retention limits apply**. Know which service detects PII (Comprehend, Macie, Guardrails) and where each sits in the pipeline.
+</Callout>
+
+---
+
+## 1. Protected AI Environments (Skill 3.2.1)
+
+### Network isolation
+
+Use **interface VPC endpoints (AWS PrivateLink)** so traffic to Bedrock stays on the AWS network.
+
+| Endpoint service | Purpose |
+|---|---|
+| `bedrock-runtime` | InvokeModel, Converse, ApplyGuardrail |
+| `bedrock` | Control plane (model customization, guardrails, listing) |
+| `bedrock-agent` | Agents/KB control plane |
+| `bedrock-agent-runtime` | Retrieve, RetrieveAndGenerate, InvokeAgent |
+| S3 gateway endpoint, DynamoDB gateway endpoint, other interface endpoints | Keep dependent traffic private |
+
+```
+Private subnet (Lambda/ECS, no internet route)
+   --> interface endpoint com.amazonaws.<region>.bedrock-runtime --> Bedrock
+   --> gateway endpoint S3 --> private buckets
+Endpoint policy + IAM + SCP limit what can be called, and by whom
+```
+
+```json
+{
+  "Statement": [{
+    "Effect": "Allow", "Principal": "*",
+    "Action": ["bedrock:InvokeModel", "bedrock:Converse"],
+    "Resource": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0"
+  }]
+}
+```
+
+An **endpoint policy** (attached to the VPC endpoint) restricts which actions and resources are reachable through that path.
+
+### Access control
+
+| Control | Use |
+|---|---|
+| IAM policies | Scope who may invoke which models and read which data; deny by default |
+| **AWS Lake Formation** | Fine-grained (table, column, row-level) permissions on data lake data feeding GenAI |
+| S3 bucket policies and Block Public Access | Protect source documents |
+| **AWS KMS** customer managed keys | Encrypt data at rest (S3, knowledge bases, custom models, agent data) and control key access |
+| **CloudWatch** | Monitor data access patterns, alarm on anomalies |
+| CloudTrail | Audit API calls |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: What Bedrock does with your data">
+
+By design, Bedrock does not use your prompts or completions to train the underlying base models, and does not share them with model providers. Data is encrypted in transit (TLS) and at rest. Customization data is used to create **your** private model copy. Model invocation logging is **off by default**; if you enable it, you choose where logs go (S3 or CloudWatch Logs) and you become responsible for protecting that data, including encryption and retention. The exam treats these native privacy properties as the baseline, then asks what you must add.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 2. Privacy-Preserving Systems (Skill 3.2.2)
+
+| Need | Service | Notes |
+|---|---|---|
+| Detect PII in text | **Amazon Comprehend** (`DetectPiiEntities`, `ContainsPiiEntities`) | Returns entity types and offsets; supports redaction jobs |
+| Discover PII at rest in S3 | **Amazon Macie** | Scans buckets, classifies sensitive data, produces findings |
+| Filter FM input/output | **Bedrock Guardrails sensitive information filters** | Block or mask PII in prompts and responses; custom regex |
+| Retention and deletion | **S3 Lifecycle configurations** | Expire logs, transcripts, and conversation exports after the retention period |
+| Conversation data TTL | DynamoDB TTL | Auto-delete session history |
+
+```
+Document upload --> Macie / Comprehend scan --> PII found?
+     |-- yes --> redact/mask or quarantine --> clean bucket --> ingestion
+     '-- no  --> ingestion to knowledge base
+```
+
+```python
+comp = boto3.client("comprehend")
+pii = comp.detect_pii_entities(Text=text, LanguageCode="en")["Entities"]
+masked = text
+for e in sorted(pii, key=lambda x: x["BeginOffset"], reverse=True):
+    masked = masked[:e["BeginOffset"]] + f"[{e['Type']}]" + masked[e["EndOffset"]:]
+```
+
+```json
+{ "Rules": [{ "ID": "expire-chat-exports", "Status": "Enabled",
+  "Filter": {"Prefix": "exports/"}, "Expiration": {"Days": 30} }] }
+```
+
+---
+
+## 3. Privacy with Retained Utility (Skill 3.2.3)
+
+Removing everything useful from the prompt makes the FM useless. Preserve meaning while removing identity.
+
+| Technique | Detail |
+|---|---|
+| **Masking / tokenization** | Replace values with typed placeholders (`[PERSON_1]`) before the model; map back after generation in a secure service |
+| **Anonymization** | Remove direct identifiers; generalize quasi-identifiers (age ranges, region) |
+| **Pseudonymization** | Reversible mapping stored separately with strict access |
+| Guardrail PII masking on output | Prevent leakage from retrieved context or model memory |
+| Data minimization | Send only fields the task needs |
+| Per-user retrieval scoping | Metadata filters and IAM so users only retrieve what they may see |
+
+```
+User text --> Comprehend detect PII --> replace with placeholders (map in encrypted store)
+          --> FM generates using placeholders --> response
+          --> re-hydrate placeholders for authorized user --> deliver
+```
+
+<Callout variant="tip" title="Exam Tip: Where each PII tool fits">
+Comprehend: programmatic text analysis in your pipeline. Macie: finding PII sitting in S3. Guardrails: inline filtering on model inputs and outputs. If the scenario says "scan S3 buckets for sensitive data," choose Macie; "mask PII in model responses," choose Guardrails.
+</Callout>
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Assuming Bedrock traffic is private by default; configure PrivateLink endpoints for no-internet designs.
+- **Trap 2:** Using Macie to filter live prompts (it scans S3), or Comprehend when the requirement is guardrail-style inline masking with minimal code.
+- **Trap 3:** Enabling model invocation logging without encryption, access control, and retention.
+- **Trap 4:** Putting PII or secrets into prompts unnecessarily.
+- **Trap 5:** Applying a retention policy only to source data but not to logs, caches, and conversation stores.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can design a no-public-internet path to Bedrock.
+<details>
+<summary>Explanation</summary>
+
+Run compute in private subnets, create interface VPC endpoints for bedrock-runtime (and others needed), add S3/DynamoDB gateway endpoints, attach endpoint policies, and restrict with IAM and SCPs. Encrypt with KMS and audit with CloudTrail.
+
+</details>
+
+- [ ] I can choose between Comprehend, Macie, and Guardrails for PII.
+<details>
+<summary>Explanation</summary>
+
+Comprehend detects PII in text within your code; Macie discovers PII in S3 data stores; Guardrails filters PII inline on prompts and responses with block or mask actions.
+
+</details>
+
+- [ ] I can protect privacy without destroying prompt utility.
+<details>
+<summary>Explanation</summary>
+
+Mask or tokenize identifiers with typed placeholders, minimize fields, anonymize or pseudonymize, scope retrieval per user, filter outputs, and re-hydrate values only for authorized recipients.
+
+</details>
+
+- [ ] I can implement retention for GenAI data.
+<details>
+<summary>Explanation</summary>
+
+Apply S3 Lifecycle expiration to exports and logs, DynamoDB TTL to conversation history, define log retention in CloudWatch Logs, and ensure caches and derived stores follow the same policy.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/12-input-output-safety-guardrails-threat-detection" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 12: Input & Output Safety: Guardrails, Hallucination Control & Threat Detection
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/14-governance-compliance-responsible-ai" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 14: Governance, Compliance & Responsible AI →
+  </a>
+</div>

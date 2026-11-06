@@ -1,0 +1,290 @@
+---
+title: "Module 13: CI/CD, Container Deployments & Deployment Strategies"
+description: "CodeBuild buildspec, CodeDeploy appspec hooks, CodePipeline, ECS and EKS deployments, blue/green, canary, rolling, and rollbacks."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 13
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Testing and Deployment
+
+<Callout variant="info" title="Exam Focus: Testing and Deployment (Task 3.3, Skills 3.3.2 and 3.3.4 to 3.3.9)">
+**Containerized deployments (ECS task definitions, EKS manifests, Fargate, rolling updates) and AI tools for CI/CD are new in DVA-C03.** Core favorites remain: CodeBuild `buildspec`, CodeDeploy `appspec` hooks, CodePipeline stages, and deployment strategies (blue/green, canary, rolling). *Designing and creating* pipelines is out of scope; **using and debugging** them is in scope.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: In-Place vs Blue/Green, Rolling vs Canary">
+
+* **In-place:** update existing instances. Cheap, but capacity dips and rollback means redeploying.
+* **Rolling:** update in batches. Mixed versions run simultaneously; reduced capacity unless an extra batch is added.
+* **Blue/green:** stand up a **new full environment (green)**, test it, then **switch traffic**; rollback is a quick traffic switch back to blue. Costs double capacity during the cutover.
+* **Canary:** shift a **small percentage** first, watch metrics, then shift the rest.
+* **Linear:** shift traffic in equal increments over time.
+* **All-at-once:** fastest, highest risk, causes downtime on failure.
+
+* **Exam Trap:** Questions about "minimal downtime and instant rollback" point to **blue/green**. "Limit blast radius with real traffic" points to **canary**.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. AWS CodeBuild
+
+A fully managed build service. A **build project** defines the source, environment (image, compute), service role, and a **buildspec**.
+
+```yaml
+version: 0.2
+env:
+  variables: { STAGE: "dev" }
+  parameter-store: { DB_HOST: "/myapp/dev/db/host" }
+  secrets-manager: { API_KEY: "prod/api:key" }
+phases:
+  install:
+    runtime-versions: { python: 3.12 }
+  pre_build:
+    commands:
+      - pip install -r requirements.txt
+      - aws ecr get-login-password | docker login --username AWS --password-stdin $ECR_URI
+  build:
+    commands:
+      - pytest --junitxml=reports/results.xml
+      - docker build -t $ECR_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION .
+  post_build:
+    commands:
+      - docker push $ECR_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION
+reports:
+  unit: { files: ["results.xml"], base-directory: reports, file-format: JUNITXML }
+artifacts:
+  files: ["**/*"]
+cache:
+  paths: ["/root/.cache/pip/**/*"]
+```
+
+* File name defaults to **`buildspec.yml`** at the source root; you can override it or embed it in the project.
+* **Phases:** `install`, `pre_build`, `build`, `post_build` (post_build **runs even if build fails**, unless it is the install or pre_build phase that failed). Check `CODEBUILD_BUILD_SUCCEEDING` before pushing artifacts.
+* Docker builds require **privileged mode** on the project. Logs go to **CloudWatch Logs** and optionally S3. The service role needs permissions for ECR, S3, CloudWatch, and secrets.
+* **Test reports** (JUnit, Cucumber, etc.) show results in the console. **Caching** (S3 or local) speeds builds.
+
+---
+
+## 2. AWS CodeDeploy (Skill 3.3.4)
+
+| Compute Platform | Deployment Types | Notes |
+|---|---|---|
+| **EC2/On-premises** | **In-place** or **Blue/green** | Requires the **CodeDeploy agent** on instances; deployment groups by tags or Auto Scaling groups |
+| **AWS Lambda** | Traffic shifting between versions (alias) | Canary, Linear, All-at-once |
+| **Amazon ECS** | **Blue/green** (traffic shift via load balancer listeners/target groups) | Uses a CodeDeploy deployment controller on the service |
+
+### EC2/On-Premises `appspec.yml` and Hook Order
+
+```yaml
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /var/www/app
+hooks:
+  ApplicationStop:   [ { location: scripts/stop.sh,     timeout: 60, runas: root } ]
+  BeforeInstall:     [ { location: scripts/backup.sh } ]
+  AfterInstall:      [ { location: scripts/configure.sh } ]
+  ApplicationStart:  [ { location: scripts/start.sh } ]
+  ValidateService:   [ { location: scripts/health.sh,   timeout: 120 } ]
+```
+
+**In-place lifecycle order:** `ApplicationStop` → (Download Bundle) → `BeforeInstall` → (Install) → `AfterInstall` → `ApplicationStart` → `ValidateService`. With a load balancer, `BeforeBlockTraffic/AfterBlockTraffic` and `BeforeAllowTraffic/AfterAllowTraffic` hooks wrap deregistration and registration. A non-zero exit from a hook **fails** the deployment.
+
+### Lambda and ECS appspec Hooks
+
+| Platform | Hooks |
+|---|---|
+| **Lambda** | `BeforeAllowTraffic`, `AfterAllowTraffic` (each runs a Lambda function; use for smoke tests) |
+| **ECS** | `BeforeInstall`, `AfterInstall`, `AfterAllowTestTraffic`, `BeforeAllowTraffic`, `AfterAllowTraffic` |
+
+### Deployment Configurations
+
+| Platform | Presets |
+|---|---|
+| EC2 | `CodeDeployDefault.AllAtOnce`, `HalfAtATime`, `OneAtATime` |
+| Lambda / ECS | `Canary10Percent5Minutes` (and 10/15/30 minute variants), `Linear10PercentEvery1Minute` (and 2/3/10 minute variants), `AllAtOnce` |
+
+**Rollback:** enable **automatic rollback** on deployment failure or when **CloudWatch alarms** fire. A rollback is a **new deployment of the last known good revision** (it redeploys; it does not undo file changes). You can also stop a deployment and roll back manually.
+
+---
+
+## 3. AWS CodePipeline (Skill 3.3.5)
+
+A pipeline is an ordered set of **stages**, each with **actions** (sequential or parallel via run order).
+
+```
+Source (Git/S3/ECR) ──> Build (CodeBuild) ──> Test ──> Deploy to Staging ──> Manual Approval ──> Deploy to Prod
+        │                      │                                                     │
+   artifact in S3 ───────> output artifact ──────────────> input artifacts       SNS notification
+```
+
+* **Action categories:** Source, Build, Test, Deploy, Approval, Invoke.
+* **Artifacts** pass between stages through an **S3 artifact store** (encrypted with KMS; cross-account or cross-Region pipelines need the key and bucket policies configured).
+* **Triggers:** push events (via CodeConnections or EventBridge), pull requests, tags (V2 pipelines), manual or scheduled starts.
+* **Manual approval** pauses the pipeline and can notify through **SNS**; approvers need `codepipeline:PutApprovalResult`.
+* **Deploy providers:** CloudFormation (create/replace change sets, execute), CodeDeploy, ECS (standard and blue/green), Elastic Beanstalk, S3, Lambda invoke.
+* **Multiple environments:** one stage per environment, with approvals and environment-specific parameters, promoting the **same artifact**.
+* The pipeline's **service role** must be able to use each action's resources (S3 artifact bucket, CodeBuild project, CodeDeploy group).
+
+---
+
+## 4. Deployment Strategies and Elastic Beanstalk Policies (Skill 3.3.6)
+
+| Elastic Beanstalk Policy | Behavior | Capacity During Deploy | Rollback |
+|---|---|---|---|
+| **All at once** | Deploy to all instances simultaneously | Brief outage | Redeploy |
+| **Rolling** | Batches; some instances serve old version | Reduced by batch size | Redeploy |
+| **Rolling with additional batch** | Launches an extra batch first | **Full capacity maintained** | Redeploy |
+| **Immutable** | New Auto Scaling group of new instances, then swap | Full | **Fast** (terminate new group) |
+| **Traffic splitting** | Canary: percentage of traffic to new instances for an evaluation period | Full | Fast |
+| **Blue/green** (separate environment) | New environment, then **swap CNAMEs** | Full | Swap back |
+
+**Lambda:** alias weighted routing (canary and linear through CodeDeploy). **ECS:** rolling update (default) or blue/green. **API Gateway:** canary release on a stage. Pick the strategy from the scenario's tolerance for downtime, cost, and rollback speed.
+
+---
+
+## 5. Containerized Deployments (Skill 3.3.2, New in DVA-C03)
+
+### Amazon ECS
+
+```json
+{
+  "family": "orders-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512", "memory": "1024",
+  "taskRoleArn": "arn:aws:iam::111122223333:role/OrdersTaskRole",
+  "executionRoleArn": "arn:aws:iam::111122223333:role/ecsTaskExecutionRole",
+  "containerDefinitions": [{
+    "name": "api",
+    "image": "111122223333.dkr.ecr.us-east-1.amazonaws.com/orders-api:1.4.2",
+    "essential": true,
+    "portMappings": [{ "containerPort": 8080 }],
+    "secrets": [{ "name": "DB_PASSWORD", "valueFrom": "arn:aws:secretsmanager:us-east-1:111122223333:secret:prod/db-AbCdEf" }],
+    "logConfiguration": { "logDriver": "awslogs", "options": { "awslogs-group": "/ecs/orders-api", "awslogs-region": "us-east-1", "awslogs-stream-prefix": "api" } },
+    "healthCheck": { "command": ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"], "interval": 30, "retries": 3 }
+  }]
+}
+```
+
+| Concept | What to Know |
+|---|---|
+| **Task definition** | Immutable, versioned blueprint (`family:revision`): images, CPU/memory, ports, env, secrets, roles, logging, volumes |
+| **Task role vs execution role** | **Task role** = permissions for your app code. **Execution role** = permissions for ECS to pull from ECR, fetch secrets for injection, and write logs |
+| **Service** | Keeps `desiredCount` tasks running, integrates with load balancers, handles deployments |
+| **Launch types** | **Fargate** (serverless; no instances to manage; requires `awsvpc`) vs **EC2** (you manage instances; GPUs, custom AMIs, cost control, daemon scheduling) |
+| **Rolling update settings** | `minimumHealthyPercent` and `maximumPercent` control how many tasks can be stopped or added during a deployment (for example 100 and 200 keeps full capacity) |
+| **Deployment circuit breaker** | Detects failing deployments and **automatically rolls back** to the last steady state |
+| **Deployment controller** | `ECS` (rolling, and built-in blue/green in newer releases), `CODE_DEPLOY` (blue/green with hooks), or `EXTERNAL` |
+
+### Amazon EKS
+
+* Deploy with **Kubernetes manifests** (`Deployment`, `Service`, `Ingress`, `ConfigMap`, `Secret`) using `kubectl apply -f`; connect with `aws eks update-kubeconfig --name cluster`.
+* **Rolling updates** are the default Deployment strategy, tuned with `maxSurge` and `maxUnavailable`; `kubectl rollout status` and `kubectl rollout undo` monitor and revert.
+* **Pod access to AWS:** **IAM roles for service accounts (IRSA)** or **EKS Pod Identity**, never node-wide credentials.
+* **Probes:** readiness (receive traffic) and liveness (restart) (Module 14). Compute can be **managed node groups** or **Fargate profiles**.
+
+---
+
+## 6. Rollbacks and Source Control (Skills 3.3.7 and 3.3.8)
+
+| Platform | Automatic Rollback | Manual Rollback |
+|---|---|---|
+| CloudFormation | On failed create/update; **rollback triggers** (alarms) | Update to a previous template; continue update rollback |
+| CodeDeploy | On failure or alarm | Redeploy the last good revision |
+| Lambda + SAM | Alarm-driven via `DeploymentPreference` | Repoint alias to previous version |
+| ECS | **Circuit breaker** | Update service to previous task definition revision |
+| Beanstalk | Immutable and traffic splitting reverts fast | Redeploy a previous application version, or swap CNAMEs |
+| API Gateway | Canary promoted/abandoned | Redeploy an earlier deployment to the stage |
+
+**Source control for releases:** use **branches** (feature, release, hotfix) and **tags** or labels (`v1.4.2`) to mark releases; trunk-based development with short-lived branches fits CI/CD; tag images and artifacts with the **commit SHA** for traceability; protect main with required reviews and passing builds.
+
+---
+
+## 7. AI Tools in CI/CD Workflows (Skill 3.3.9, New in DVA-C03)
+
+AWS AI tooling can assist, but pipelines must keep **deterministic gates**:
+
+* **Automated deployment approvals:** AI summarizes change risk and test results for approvers; **humans (or policy) still approve production**.
+* **Environment provisioning:** generate or update IaC templates from specs (Kiro), then validate with `cfn-lint`, change sets, and tests before applying.
+* **Post-deployment validation:** AI-assisted analysis of smoke tests, canary metrics, and logs to detect regressions and trigger rollback.
+* Keep AI output **reviewed, versioned, and auditable**; never give an AI agent unrestricted production deploy credentials.
+
+---
+
+## 8. Common Exam Traps and Scenario Distractors
+
+* "Deploy to EC2 with scripts that stop the app, copy files, and start it" → CodeDeploy **appspec hooks**.
+* "Run a smoke test before shifting traffic to a new Lambda version" → `BeforeAllowTraffic` hook function.
+* "Containers cannot pull from ECR or read secrets at startup" → **task execution role** missing permissions.
+* "Application inside the container cannot call DynamoDB" → **task role** missing permissions.
+* "Roll back an ECS deployment automatically when new tasks keep failing" → **deployment circuit breaker**.
+* "Keep full capacity during rolling deployment on Beanstalk" → **rolling with additional batch** (or immutable).
+* "Pipeline must pause for a manager's sign-off" → CodePipeline **manual approval** action.
+* "Docker build fails in CodeBuild with daemon error" → enable **privileged mode**.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] An ECS service on Fargate fails to start tasks with `CannotPullContainerError` for ECR and cannot fetch a secret. Which role needs fixing?
+<details>
+<summary>Explanation</summary>
+
+The **task execution role** (ECR pull, `secretsmanager:GetSecretValue`, CloudWatch Logs). The task role is for the application code.
+
+</details>
+- [ ] Which Elastic Beanstalk policy keeps full capacity and allows near-instant rollback by discarding new instances?
+<details>
+<summary>Explanation</summary>
+
+**Immutable** (new Auto Scaling group; terminating it reverts). Traffic splitting is also canary-like with fast revert.
+
+</details>
+- [ ] Order the CodeDeploy EC2 in-place hooks.
+<details>
+<summary>Explanation</summary>
+
+`ApplicationStop`, `BeforeInstall`, `AfterInstall`, `ApplicationStart`, `ValidateService` (with Download Bundle and Install steps between).
+
+</details>
+- [ ] A canary deployment of a Lambda version should revert if the error alarm fires. What do you configure?
+<details>
+<summary>Explanation</summary>
+
+CodeDeploy deployment config such as `Canary10Percent5Minutes` with the CloudWatch alarm attached and automatic rollback enabled (in SAM: `DeploymentPreference` with `Alarms`).
+
+</details>
+- [ ] Why should a production pipeline keep a human or policy approval even when AI tools summarize risk?
+<details>
+<summary>Explanation</summary>
+
+AI output can be wrong or incomplete. Approvals and automated policy checks provide accountable, deterministic control over what reaches production.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/12-infrastructure-as-code-sam-cdk" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 12: Infrastructure as Code: CloudFormation, AWS SAM & AWS CDK
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/14-logging-monitoring-and-tracing" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 14: Logging, Metrics, Alarms, Tracing & Health Checks →
+  </a>
+</div>

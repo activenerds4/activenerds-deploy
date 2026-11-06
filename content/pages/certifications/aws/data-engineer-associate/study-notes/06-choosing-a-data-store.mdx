@@ -1,0 +1,176 @@
+---
+title: "Module 06: Choosing the Right Data Store & Migration Tools"
+description: "S3, Redshift, DynamoDB, RDS/Aurora, MemoryDB, Keyspaces, Neptune, DocumentDB, OpenSearch; Redshift federated queries, Spectrum, materialized views, locks, and Transfer Family/DMS/DataSync."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Data Engineer Associate Track"
+trackSlug: "/certifications/aws/data-engineer-associate"
+moduleNumber: 6
+totalModules: 15
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Data Engineer - Associate (DEA-C01)
+**Scope:** Task 2.1: selecting and configuring data stores for cost, performance, and access patterns; vector-capable stores and in-memory stores; migration tools; Redshift federated queries, Spectrum, and materialized views; locking (Skills 2.1.1–2.1.6).
+
+<Callout variant="info" title="Exam Blueprint Focus: Data Store Selection (Domain 2 = 26%)">
+The core skill is mapping **access pattern + scale + latency + cost** to a store. New in guide v1.1: Aurora PostgreSQL with HNSW indexing for vectors and MemoryDB for fast key/value access (Skill 2.1.3).
+</Callout>
+
+---
+
+## 1. Data Store Decision Matrix (Skills 2.1.1–2.1.3)
+
+| Store | Type | Strength | Latency | Scale model | Pick when |
+|---|---|---|---|---|---|
+| Amazon S3 | Object (data lake) | Cheap, durable (11 9s), any format | 10s–100s ms | Virtually unlimited | Lake, raw/curated zones, Athena/EMR/Glue |
+| Amazon S3 Tables | Managed Apache Iceberg tables | Automatic compaction, snapshot management | Query-engine bound | Managed | Tabular lake data with Iceberg features, less table maintenance |
+| Amazon Redshift | Columnar MPP warehouse | Complex SQL analytics, joins, BI | Seconds | Provisioned RA3 nodes or Serverless (RPUs) | Enterprise DW, high-concurrency BI |
+| Amazon Athena | Serverless SQL on S3 | Pay per TB scanned | Seconds | Serverless | Ad hoc lake queries |
+| Amazon DynamoDB | Key-value / document NoSQL | Single-digit ms at any scale | ms | Partitions; on-demand or provisioned | High-scale OLTP, known key access, IoT, sessions |
+| Amazon RDS / Aurora | Relational OLTP | ACID, joins, familiar engines | ms | Vertical + read replicas; Aurora up to 15 replicas | Transactional apps; Aurora PostgreSQL + **pgvector** for vectors |
+| Amazon MemoryDB | Durable in-memory (Redis OSS compatible) | Microsecond reads, multi-AZ durability via transaction log | µs read, single-digit ms write | Shards | Primary DB for fast key/value, leaderboards, vector search |
+| Amazon Keyspaces | Managed Cassandra | CQL, wide-column | ms | Serverless | Existing Cassandra workloads |
+| Amazon DocumentDB | MongoDB-compatible | JSON documents | ms | Cluster + replicas | Existing MongoDB apps |
+| Amazon Neptune | Graph | Relationship traversals (Gremlin, SPARQL, openCypher) | ms | Cluster | Social graphs, fraud, lineage |
+| Amazon OpenSearch Service | Search/analytics | Full-text, log analytics, vector search | ms | Domains / Serverless | Search, observability |
+| Amazon EMR (HDFS/HBase) | Cluster storage | Hadoop ecosystem | varies | Cluster | Existing Hadoop workloads |
+| Kinesis Data Streams / MSK | Streaming log | Durable ordered stream | ms | Shards/brokers | Event storage and replay |
+
+```
+ Access pattern?
+   |-- Ad hoc SQL on files, pay per query -------------> S3 + Athena
+   |-- Complex joins, many BI users -------------------> Redshift
+   |-- Known key, ms latency, huge scale --------------> DynamoDB
+   |-- Sub-ms reads / durable in-memory ---------------> MemoryDB (ElastiCache = cache only)
+   |-- Relational transactions -------------------------> RDS / Aurora
+   |-- Relationships / traversals ----------------------> Neptune
+   |-- Full-text / log search --------------------------> OpenSearch
+   |-- Vector similarity inside relational DB ----------> Aurora PostgreSQL (pgvector, HNSW/IVFFlat)
+```
+
+<Callout variant="warning" title="Exam Trap: MemoryDB vs ElastiCache">
+**ElastiCache** is a cache in front of a database (data can be lost). **MemoryDB** is a durable primary database with a multi-AZ transaction log. If a question says "use as the primary data store with microsecond reads and durability," pick MemoryDB.
+</Callout>
+
+---
+
+## 2. Redshift Configuration (Skills 2.1.2, 2.1.5)
+
+* **Provisioned (RA3):** managed storage separated from compute, resize, **concurrency scaling**, **Reserved Instances** for steady workloads. **Serverless:** pay per RPU-second, auto-scales, set base and max RPU, good for spiky/unpredictable.
+* **Distribution styles:** `AUTO`, `KEY` (co-locate joins), `EVEN`, `ALL` (small dimension tables). **Sort keys** (compound/interleaved/auto) speed range filters.
+* **Redshift Spectrum:** query S3 external tables (via external schema + Glue/Lake Formation catalog) from Redshift without loading. Pricing per TB scanned; use Parquet and partitions.
+* **Federated queries:** query live data in **RDS/Aurora PostgreSQL and MySQL** from Redshift without ETL.
+* **Materialized views:** precomputed results; `REFRESH MATERIALIZED VIEW` or `AUTO REFRESH YES`; support incremental refresh for supported queries; can sit over Spectrum external tables and streaming ingestion sources.
+* **Data sharing** (Module 15) and **zero-ETL** replication from Aurora/RDS/DynamoDB.
+
+```sql
+-- External schema over Glue Data Catalog (Spectrum)
+CREATE EXTERNAL SCHEMA lake FROM DATA CATALOG DATABASE 'curated'
+IAM_ROLE 'arn:aws:iam::111122223333:role/spectrum-role';
+
+-- Materialized view that auto-refreshes
+CREATE MATERIALIZED VIEW mv_daily_sales AUTO REFRESH YES AS
+SELECT sale_date, region, SUM(amount) AS total FROM sales GROUP BY 1,2;
+
+-- Federated query setup
+CREATE EXTERNAL SCHEMA pg FROM POSTGRES DATABASE 'orders' SCHEMA 'public'
+URI 'orders.cluster-xyz.us-east-1.rds.amazonaws.com' IAM_ROLE 'arn:aws:iam::111122223333:role/fed'
+SECRET_ARN 'arn:aws:secretsmanager:us-east-1:111122223333:secret:pgcreds';
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Locks and concurrency control (Skill 2.1.6)">
+
+* **Redshift** uses MVCC-style **serializable isolation** and table-level locks. Operations such as `ALTER TABLE`, `TRUNCATE`, `VACUUM` (some modes), and `DROP` take stronger locks that can block or be blocked by long transactions. Inspect with `STV_LOCKS`, `SVV_TRANSACTIONS`, and `PG_LOCKS`; find sessions with `STV_RECENTS` or `SVV_` views and terminate with `PG_TERMINATE_BACKEND(pid)`. Commit or roll back promptly, avoid long idle transactions, and schedule maintenance off-peak. Use **workload management (WLM)** queues and query monitoring rules to protect priority workloads.
+* **RDS/Aurora:** engine-specific locks (row locks in InnoDB, advisory locks in PostgreSQL). Diagnose blocking with `SHOW ENGINE INNODB STATUS`, `pg_locks`, **Performance Insights**. Fixes: shorter transactions, proper indexing, lower isolation levels where safe, retry on deadlock, kill blocking sessions.
+* **DynamoDB** has no table locks; use **conditional writes** and optimistic locking with a version attribute, plus **transactions** (`TransactWriteItems`) for ACID across items.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: DynamoDB design and capacity">
+
+* Keys: **partition key** (even distribution), optional **sort key**. Secondary indexes: **LSI** (same PK, created at table creation) and **GSI** (different keys, eventually consistent, own capacity).
+* **On-demand** for unpredictable traffic; **provisioned with auto scaling** (and reserved capacity) for steady traffic.
+* **Standard-IA table class** for infrequently accessed data.
+* **DAX** is a write-through in-memory cache for microsecond eventually consistent reads.
+* Reads: eventually consistent (default, half cost), strongly consistent (same Region, not on GSIs), transactional (2x).
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Migration and Transfer Tools (Skills 2.1.4, 2.1.5)
+
+| Tool | Purpose | Notes |
+|---|---|---|
+| **AWS Transfer Family** | Managed SFTP, FTPS, FTP, AS2 into S3 or EFS | Partner file exchange; integrates with IAM/identity providers |
+| **AWS DMS** | Database migration and CDC | Homogeneous and heterogeneous; DMS Schema Conversion for schema |
+| **AWS DataSync** | Online transfer of NFS/SMB/HDFS/object data to S3/EFS/FSx | Scheduled, bandwidth throttling, integrity checks |
+| **AWS Snow Family** | Offline transfer of TB–PB (Snowball Edge) | Slow or no network |
+| **S3 Batch Operations / replication** | Bulk object operations / copy | Copy, tag, restore at scale |
+| **AWS Backup** | Policy-based backup | Module 08 |
+
+---
+
+## 4. Common Traps and Watchouts
+
+* **"Query data in S3 from Redshift without loading"** → Spectrum.
+* **"Query operational PostgreSQL from Redshift without ETL"** → federated query.
+* **"Speed up repeated aggregation queries"** → materialized view.
+* **"Single-digit ms at massive scale, known key"** → DynamoDB, not RDS.
+* **"Ad hoc, infrequent SQL"** → Athena over Redshift provisioned.
+* **"Sub-millisecond durable primary store"** → MemoryDB.
+* **"SFTP from partners into S3"** → Transfer Family, not EC2 SFTP servers.
+* **Redshift `ALL` distribution** for large tables wastes storage; use for small dimensions only.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can map an access pattern to the correct AWS data store.
+<details>
+<summary>Explanation</summary>
+
+Ad hoc SQL on files → S3 + Athena; BI warehouse → Redshift; key-value at scale → DynamoDB; relational OLTP → RDS/Aurora; sub-ms durable → MemoryDB; graph → Neptune; search → OpenSearch; vectors in relational → Aurora PostgreSQL with pgvector.
+
+</details>
+
+- [ ] I can explain Spectrum, federated queries, and materialized views and when each applies.
+<details>
+<summary>Explanation</summary>
+
+Spectrum reads S3 data through external tables. Federated queries read live RDS/Aurora PostgreSQL/MySQL data. Materialized views store precomputed results to accelerate repeat queries and can be refreshed automatically.
+
+</details>
+
+- [ ] I know how to handle lock contention in Redshift and RDS.
+<details>
+<summary>Explanation</summary>
+
+Identify blockers via `STV_LOCKS`/`SVV_TRANSACTIONS` (Redshift) or `pg_locks`/InnoDB status (RDS), commit or terminate long sessions, shorten transactions, schedule DDL off-peak, and use WLM to isolate workloads.
+
+</details>
+
+- [ ] I can pick a migration or transfer tool for SFTP, databases, and offline petabytes.
+<details>
+<summary>Explanation</summary>
+
+SFTP → Transfer Family; databases → DMS; file shares online → DataSync; petabytes with poor connectivity → Snowball Edge.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/data-engineer-associate/study-notes/05-programming-concepts-iac-cicd-lambda" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 05: Programming Concepts: Lambda, IaC (SAM, CDK, CloudFormation) & CI/CD
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Data Engineer Associate Track
+  </a>
+  <a href="/certifications/aws/data-engineer-associate/study-notes/07-data-catalogs-glue-lake-formation-sagemaker" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 07: Data Catalogs: Glue Data Catalog, Crawlers & SageMaker Catalog →
+  </a>
+</div>

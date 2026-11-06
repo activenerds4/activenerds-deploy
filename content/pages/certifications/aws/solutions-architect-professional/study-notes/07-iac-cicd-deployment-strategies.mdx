@@ -1,0 +1,179 @@
+---
+title: "Module 07: Infrastructure as Code, CI/CD & Deployment Strategies"
+description: "CloudFormation StackSets, change sets and drift, CodePipeline and CodeDeploy, blue/green, canary, rolling and immutable rollouts, Service Catalog."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 7
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** CloudFormation StackSets, change sets and drift, CodePipeline and CodeDeploy, blue/green, canary, rolling and immutable rollouts, Service Catalog.
+
+<Callout variant="info" title="Exam Blueprint Focus: Task 2.1 Deployment Strategy">
+Expect questions on infrastructure as code at multi-account scale, choosing a rollout strategy with a rollback mechanism, and using managed services to cut patching and provisioning overhead. Know which deployment style fits which downtime, cost and risk constraint.
+</Callout>
+
+---
+
+## 1. CloudFormation at Scale
+
+| Feature | Purpose | Exam nuance |
+|---|---|---|
+| Change sets | Preview changes before executing | Use to detect replacement of stateful resources |
+| StackSets | Deploy stacks to many accounts and Regions | **Service-managed** permissions integrate with Organizations (auto-deploy to new accounts in an OU); self-managed needs admin and execution roles |
+| Drift detection | Find out-of-band changes | Reports drift; does not fix it |
+| Nested stacks | Reusable components within one deployment | Updated as a unit; good for composition |
+| Cross-stack references | `Export` / `Fn::ImportValue` | An exported value cannot be changed or deleted while imported |
+| DeletionPolicy | Retain, Snapshot, Delete | Protect databases and buckets |
+| UpdatePolicy / CreationPolicy | Rolling updates for Auto Scaling groups; wait for `cfn-signal` | Used for safe instance rollouts |
+| Rollback triggers | CloudWatch alarms that roll back a stack update | Automatic rollback on alarm breach |
+| Stack policies | Block updates to critical resources | Guard against accidental replacement |
+| Custom resources | Lambda-backed provisioning of anything | Must send a response to the pre-signed URL or the stack hangs |
+| Hooks and Registry | Proactive validation of resources, third-party types | Used by Control Tower proactive controls |
+| CDK | Define infrastructure in code that synthesizes to CloudFormation | Constructs L1/L2/L3 |
+
+```bash
+aws cloudformation create-change-set --stack-name app --change-set-name cs1 --template-body file://t.yaml
+aws cloudformation create-stack-set --stack-set-name baseline --template-body file://baseline.yaml \
+  --permission-model SERVICE_MANAGED --auto-deployment Enabled=true,RetainStacksOnAccountRemoval=false
+aws cloudformation create-stack-instances --stack-set-name baseline \
+  --deployment-targets OrganizationalUnitIds=ou-ab12-prod --regions us-east-1 eu-west-1
+```
+
+```yaml
+Resources:
+  AppASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      ResourceSignal: { Count: 2, Timeout: PT10M }
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 2
+        MaxBatchSize: 1
+        PauseTime: PT5M
+        WaitOnResourceSignals: true
+```
+
+## 2. Deployment Strategy Comparison
+
+| Strategy | Downtime | Capacity during deploy | Rollback speed | Cost | Typical service |
+|---|---|---|---|---|---|
+| All-at-once | Yes | Whole fleet updated | Redeploy (slow) | Lowest | Beanstalk, CodeDeploy in-place |
+| Rolling | No (reduced capacity) | Reduced while batches update | Redeploy (slow) | Low | ASG, Beanstalk, ECS |
+| Rolling with additional batch | No | Full capacity kept | Redeploy | Slight extra | Beanstalk |
+| Immutable | No | Full new fleet beside old | Fast (terminate new) | Double briefly | Beanstalk, ASG instance refresh variants |
+| Blue/green | No | Two full environments | Fastest (switch back) | Double during cutover | CodeDeploy, ECS, Route 53, ALB weights |
+| Canary | No | Small percentage of traffic first | Fast | Low | Lambda aliases, API Gateway stages, CodeDeploy, CloudFront staging |
+| Linear | No | Gradual constant increments | Fast | Low | CodeDeploy for Lambda/ECS |
+
+```
+ Blue/green with ALB weighted target groups
+                +--> Target group BLUE  (v1)  weight 90 -> 0
+ Users -> ALB --+
+                +--> Target group GREEN (v2)  weight 10 -> 100
+ Alarm breach -> CodeDeploy automatically shifts weight back to BLUE
+```
+
+<Callout variant="warning" title="Exam Trap: Database Schema Changes">
+Blue/green swaps compute, not data. If schemas change, use backward-compatible (expand/contract) migrations, or Aurora/RDS Blue/Green Deployments (managed staging copy with replication and switchover). Rolling back after destructive schema changes is impossible with traffic shifting alone.
+</Callout>
+
+## 3. AWS Developer Tools Pipeline
+
+```
+ Source (CodeCommit/GitHub/S3) -> CodeBuild (build/test, buildspec.yml)
+   -> CodePipeline stages -> manual approval -> CodeDeploy (appspec.yml)
+   -> targets: EC2/on-prem, Lambda, ECS
+```
+
+- **CodePipeline** orchestrates stages with artifact stores in S3 (KMS encrypted); cross-account/cross-Region actions need artifact bucket access and KMS key sharing.
+- **CodeBuild** runs managed build containers; privileged mode for Docker builds; secrets via Secrets Manager/Parameter Store references.
+- **CodeDeploy** appspec hooks: `BeforeInstall`, `AfterInstall`, `ApplicationStart`, `ValidateService`; Lambda hooks: `BeforeAllowTraffic`, `AfterAllowTraffic`. Deployment configs such as `CodeDeployDefault.LambdaCanary10Percent5Minutes`, `LambdaLinear10PercentEvery1Minute`, `ECSAllAtOnce`.
+- **CodeArtifact** hosts package repositories (npm, Maven, PyPI) with upstream proxying; **CodeGuru** provides review and profiling recommendations.
+- **Elastic Beanstalk** gives managed platform deployment with the policies above plus traffic splitting and environment swap (CNAME swap) for blue/green.
+
+## 4. Configuration Management & Service Catalog
+
+| Service | Use |
+|---|---|
+| Systems Manager Parameter Store / AppConfig | Configuration values; AppConfig supports gradual feature-flag rollout with alarm-based rollback |
+| Systems Manager State Manager | Keep instances in a desired configuration |
+| Systems Manager Automation / Run Command | Runbooks and ad-hoc commands without SSH |
+| Service Catalog | Portfolios of approved CloudFormation products with launch constraints; developers launch without holding broad IAM permissions |
+| AWS Proton | Platform teams publish environment and service templates for developers |
+| License Manager | Track BYOL and software licenses |
+| Elastic Beanstalk, App Runner, Lightsail | Managed deployment for simple applications |
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Service Catalog Launch Constraints (Least Privilege Self-Service)">
+
+A launch constraint assigns an IAM role that Service Catalog assumes to provision the product, so end users need only `servicecatalog:*` permissions rather than permissions for every underlying resource. This is the exam answer for "let developers provision approved stacks but not broad IAM/EC2 permissions." Combine with template constraints to limit parameters (for example instance types).
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Delegating Complex Work to AWS (Managed Services)">
+
+Task 2.1 emphasizes adopting managed services to remove provisioning and patching effort and to make advanced technologies accessible: Aurora instead of self-managed databases, Fargate instead of managing ECS hosts, Elastic Beanstalk for app platforms, managed node groups for EKS, SageMaker AI, Rekognition, Textract or Comprehend instead of building ML pipelines, and Step Functions instead of custom orchestration code.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 5. Common Traps & Distractors
+
+- "Deploy a baseline to all current and future accounts": StackSets with service-managed permissions and auto-deployment.
+- "Gradually shift Lambda traffic and roll back on errors": alias weighted routing via CodeDeploy canary/linear with CloudWatch alarms.
+- "Zero downtime and instant rollback": blue/green.
+- "Lowest cost and downtime acceptable": all-at-once.
+- "Developers need limited self-service": Service Catalog, not IAM admin rights.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose a deployment strategy given downtime, cost and rollback requirements.
+<details>
+<summary>Explanation</summary>
+
+All-at-once is cheapest but causes downtime and slow rollback. Rolling avoids downtime but reduces capacity and rolls back slowly. Immutable and blue/green provide fast rollback at higher temporary cost. Canary and linear limit blast radius by shifting traffic gradually with alarm-based rollback.
+
+</details>
+
+- [ ] I can explain how StackSets roll out to new accounts automatically.
+<details>
+<summary>Explanation</summary>
+
+With service-managed permissions and automatic deployment enabled for an OU, CloudFormation deploys stack instances to accounts as they join the OU and can remove them when accounts leave, using a trusted-access integration with Organizations rather than per-account roles.
+
+</details>
+
+- [ ] I know how to prevent accidental replacement or deletion of stateful resources.
+<details>
+<summary>Explanation</summary>
+
+Review change sets for Replacement actions, apply stack policies, use DeletionPolicy Retain or Snapshot, enable termination protection on stacks, and use IAM/SCP controls on stack deletion.
+
+</details>
+
+- [ ] I can implement automatic rollback of a Lambda deployment.
+<details>
+<summary>Explanation</summary>
+
+Publish a new version, shift an alias gradually using a CodeDeploy canary or linear configuration, attach CloudWatch alarms (errors, latency) and optional pre/post traffic hook Lambda functions; CodeDeploy automatically shifts the alias back when an alarm triggers.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/06-disaster-recovery-backup-business-continuity" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 06: Disaster Recovery, Backup & Business Continuity
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/08-high-availability-reliability-architecture" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 08: High Availability & Reliability: Load Balancing, Scaling & Failover →
+  </a>
+</div>

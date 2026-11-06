@@ -1,0 +1,182 @@
+---
+title: "Module 11: High-Performing Database Solutions"
+description: "Aurora, RDS, DynamoDB capacity math, ElastiCache, read replicas, RDS Proxy, purpose-built engines, and DMS migrations."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 11
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 3.3 — Amazon Aurora, Amazon RDS, DynamoDB, ElastiCache, read replicas, RDS Proxy, purpose-built database engines, capacity planning, and AWS DMS migrations
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 3, Task 3.3 — Determine high-performing database solutions">
+Classify the access pattern first (read-intensive versus write-intensive, relational versus key-value, in-memory, graph, analytics), then pick the purpose-built engine, then add scaling features (replicas, caching, proxy, capacity mode).
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: DynamoDB capacity math">
+
+* **1 RCU** = one strongly consistent read per second of an item up to 4 KB, or two eventually consistent reads. Transactional reads cost 2 RCUs per 4 KB.
+* **1 WCU** = one write per second of an item up to 1 KB. Transactional writes cost 2 WCUs.
+* Example: 100 strongly consistent reads per second of 8 KB items needs 100 x 2 = 200 RCUs; eventually consistent needs 100 RCUs.
+* Example: 50 writes per second of 3 KB items needs 50 x 3 = 150 WCUs.
+* A partition supports up to about 3,000 RCUs and 1,000 WCUs; poor key design causes **hot partitions**. Choose high-cardinality partition keys.
+* **On-demand** mode suits unpredictable traffic; **provisioned** with auto scaling suits steady, predictable traffic. Maximum item size is 400 KB.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Aurora architecture">
+
+Aurora separates compute from a distributed, self-healing storage layer that keeps six copies across three AZs and grows automatically (up to 128 TiB). Writes go to one writer instance; up to 15 readers share the same storage, so replica lag is typically milliseconds. Endpoints: **cluster (writer)**, **reader** (load-balances across replicas), and **custom endpoints** for instance subsets. **Aurora Serverless v2** scales capacity in fine-grained ACU steps for variable workloads.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Need | Service | Why |
+|---|---|---|
+| Relational OLTP, MySQL or PostgreSQL compatible, high performance | Amazon Aurora | Up to several times throughput of standard engines, six-way replication |
+| Standard relational engines (MySQL, PostgreSQL, MariaDB, Oracle, SQL Server, Db2) | Amazon RDS | Managed patching, backups, Multi-AZ |
+| Key-value or document at any scale, single-digit millisecond | Amazon DynamoDB | Serverless, global tables, streams |
+| Microsecond reads for DynamoDB | DynamoDB Accelerator (DAX) | API-compatible, write-through in-memory cache |
+| In-memory caching or data store | Amazon ElastiCache (Redis OSS / Valkey, Memcached) | Sub-millisecond latency |
+| MongoDB-compatible documents | Amazon DocumentDB | Managed document database |
+| Highly connected graph data | Amazon Neptune | Gremlin, SPARQL, openCypher |
+| Cassandra-compatible wide-column | Amazon Keyspaces | Serverless CQL |
+| Data warehouse, columnar OLAP | Amazon Redshift | MPP, Spectrum, serverless option |
+| Search and log analytics | Amazon OpenSearch Service | Full-text search and dashboards |
+
+| ElastiCache engine | Redis OSS / Valkey | Memcached |
+|---|---|---|
+| Data structures | Rich (lists, sets, sorted sets, hashes) | Simple key-value |
+| Persistence and backup | Yes | No |
+| Replication and Multi-AZ failover | Yes | No |
+| Threading | Single-threaded command execution per shard | Multi-threaded |
+| Use when | HA, leaderboards, pub/sub, sessions | Simple, horizontally scaled ephemeral cache |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+                     +-------------------------+
+App / Lambda ------> |       RDS Proxy         |  pools connections, IAM auth, faster failover
+                     +-----------+-------------+
+                                 |
+        writes                   |                      reads
+   +-------------------+         |          +--------------------------+
+   | Aurora writer     |<--------+--------->| Aurora readers (up to 15)|
+   +---------+---------+                    +------------+-------------+
+             |                                           |
+       shared cluster volume: 6 copies across 3 AZs      |
+                                                         v
+                                              ElastiCache (lazy loading)
+                                              absorbs hot repeated reads
+```
+
+### Read replicas versus Multi-AZ versus caching
+
+| Technique | Primary purpose | Consistency | Notes |
+|---|---|---|---|
+| Multi-AZ | Availability | Synchronous | No read scaling for classic standby |
+| Read replicas | Scale reads; cross-Region reads and DR | Asynchronous (eventually consistent) | Application must direct reads to the replica endpoint |
+| ElastiCache | Reduce DB load and latency | Depends on strategy and TTL | Best for repeated reads of the same data |
+| DAX | Microsecond DynamoDB reads | Eventually consistent reads served from cache | No code redesign beyond client swap |
+| RDS Proxy | Connection management | N/A | Valuable for Lambda and many short-lived connections |
+
+### Migration with DMS
+
+* **Homogeneous** (same engine): DMS alone, or native tools.
+* **Heterogeneous** (different engines, such as Oracle to Aurora PostgreSQL): use the **AWS Schema Conversion Tool** for schema and code, then **DMS** for data.
+* DMS supports full load plus **ongoing change data capture (CDC)** for near-zero downtime cutover and can run with a Multi-AZ replication instance.
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```bash
+# Add an Aurora reader and inspect endpoints
+aws rds create-db-instance --db-instance-identifier prod-reader-1 \
+  --db-cluster-identifier prod-cluster --engine aurora-mysql --db-instance-class db.r6g.large
+
+# Create an RDS Proxy for a cluster
+aws rds create-db-proxy --db-proxy-name app-proxy --engine-family MYSQL \
+  --auth '[{"AuthScheme":"SECRETS","SecretArn":"<secret-arn>","IAMAuth":"REQUIRED"}]' \
+  --role-arn <role-arn> --vpc-subnet-ids subnet-a subnet-b
+
+# DynamoDB table in on-demand mode
+aws dynamodb create-table --table-name Orders \
+  --attribute-definitions AttributeName=OrderId,AttributeType=S \
+  --key-schema AttributeName=OrderId,KeyType=HASH --billing-mode PAY_PER_REQUEST
+```
+
+**Capacity planning for RDS:** choose instance class by memory and CPU needs, use gp3 or Provisioned IOPS (io1 or io2) storage for I/O-intensive workloads, enable storage autoscaling, and use Performance Insights to find bottlenecks. **Indexes in DynamoDB:** a GSI has its own partition key and can be added anytime; an LSI shares the table partition key, must be created with the table, and limits the item collection size to 10 GB.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Using Multi-AZ to scale read traffic. Add read replicas (or Aurora readers).
+- **Trap 2:** Using a relational database for a massive key-value workload requiring single-digit millisecond latency at scale. Choose DynamoDB.
+- **Trap 3:** Choosing a heterogeneous migration with DMS alone. You also need the Schema Conversion Tool.
+- **Trap 4:** Picking ElastiCache for Memcached when persistence, replication, or failover is needed. Choose Redis OSS or Valkey.
+- **Trap 5:** Ignoring connection exhaustion with Lambda and relational databases. Use RDS Proxy.
+- **Trap 6:** Using DAX for write-heavy or strongly consistent read workloads. DAX helps eventually consistent, read-heavy access.
+- **Trap 7:** Using Redshift for transactional (OLTP) workloads. Redshift is analytic (OLAP).
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can calculate DynamoDB RCUs and WCUs for a stated workload.
+<details>
+<summary>Explanation</summary>
+
+Round item size up to the next 4 KB for reads and 1 KB for writes. Strongly consistent reads use one RCU per 4 KB, eventually consistent use half, and transactional use double. Writes use one WCU per 1 KB, transactional double. Multiply by operations per second.
+
+</details>
+
+- [ ] I can choose between Aurora, RDS, and DynamoDB.
+<details>
+<summary>Explanation</summary>
+
+Choose Aurora for high-performance relational workloads needing fast failover and many replicas, RDS when a specific engine such as Oracle or SQL Server is required, and DynamoDB for serverless key-value or document access at massive scale with predictable low latency.
+
+</details>
+
+- [ ] I can design read scaling and caching for a read-heavy application.
+<details>
+<summary>Explanation</summary>
+
+Add Aurora or RDS read replicas and direct reads to the reader endpoint, add ElastiCache in front using lazy loading with TTL for repeated reads, use DAX for DynamoDB, and use RDS Proxy to pool connections.
+
+</details>
+
+- [ ] I can plan a heterogeneous database migration.
+<details>
+<summary>Explanation</summary>
+
+Use the Schema Conversion Tool to convert schema and procedural code to the target engine, then use DMS for full load plus CDC to keep the target in sync until cutover, minimizing downtime.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/10-high-performing-storage" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 10: High-Performing & Scalable Storage
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/12-network-architecture-edge-delivery" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 12: High-Performing Network Architecture & Edge Delivery →
+  </a>
+</div>

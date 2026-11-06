@@ -1,0 +1,307 @@
+---
+title: "Section 4: Install, Configure, and Administrate VMware Tanzu"
+description: "Supervisor enablement, namespace RBAC, content library syncing, VKS cluster provisioning via Cluster API (CAPI), Harbor registry."
+date: "2026-10-31"
+author: "ActiveNerds Cloud Architecture Team"
+category: "vmware"
+track: "VMware Kubernetes (VKS 3V0-24.25)"
+trackSlug: "/certifications/vmware/vks-tanzu"
+moduleNumber: 4
+totalModules: 5
+layout: "article"
+---
+
+**Install, Configure, Administrate the VMware Solution**
+
+
+
+<Callout variant="tip" title="Exam Tip">
+Section 4 is hands-on: wizards, kubectl, VCF CLI, and YAML. Expect "which command/field/sequence" questions. Commands below are aligned to VCF 9.0 documentation: the CLI is **VCF CLI** (`vcf`), and workload-cluster YAML uses the **Cluster v1beta1/v1beta2 API** (the v1alpha3 `TanzuKubernetesCluster` API is deprecated).
+</Callout>
+
+
+
+---
+
+## Objective 4.1: Create Supervisor Clusters with NSX VPC, NSX Segment, vDS, and Avi Load Balancer Options
+
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Cluster API (CAPI) Architecture on the Supervisor">
+
+VKS does not provision Kubernetes workload clusters using static scripts. It relies on the upstream open-source **Cluster API (CAPI)** framework:
+
+* The Supervisor Cluster acts as the **Management Cluster**.
+* A developer runs `kubectl apply -f cluster.yaml` against the Supervisor API.
+* The **CAPW (Cluster API Provider for VMware Cloud Foundation / vSphere)** controller reconciles this request by orchestrating the **Virtual Machine Service** to clone worker and control-plane VM nodes from a curated Tanzu Kubernetes Release (vKr) OVA.
+* The controller configures cloud-init, provisions certificates via `kubeadm`, attaches virtual disks, and joins worker nodes to the new Kubernetes cluster automatically.
+
+</AccordionItem>
+
+</AccordionGroup>
+
+
+| Deployment path | Networking stack | Load balancer | Notes |
+|---|---|---|---|
+| **VCF Networking with VPC** | NSX VPCs (recommended, VCF 9 default) | NSX (Edge) LB or Avi; VPC must match Supervisor LB | Requires Centralized Gateway / Edge prep before namespaces; select NSX project + VPC connectivity profile + private CIDRs |
+| **NSX Segment networking** | NSX T0/T1 + segments, NCP-managed | NSX LB or Avi (registered with NSX) | T0, ingress/egress CIDRs, namespace network CIDRs at enablement |
+| **VDS + Foundation Load Balancer** | vSphere networking (port groups) | FLB (bundled with vCenter, L4) | Simplest path; also the basis of the **simplified deployment flow**; FLB can be added later to an existing simplified Supervisor |
+| **VDS + Avi Load Balancer** | vSphere networking | Avi (Controller + SEs + AKO) | Avi needs Management and Data networks on different subnets; Controller static IPs (4 for a 3-node cluster) |
+| **NSX + Avi Load Balancer** | NSX segments | Avi instead of NSX LB | Avi 22.1.4+ Enterprise, NSX 4.1.1+; one vCenter (no Enhanced Linked Mode), single T0 |
+| **Exported configuration** | Any | Any | Re-import a previously exported Supervisor JSON configuration |
+
+**Universal prerequisites:** DRS+HA on each cluster (DRS fully automated for zone deployments), hosts on one VDS, lowercase ESX hostnames, storage policies ready, NTP/DNS, block of 5 static management IPs (or client-identifier DHCP), MTU &ge;1500 on distributed port groups, latency &le;100 ms between zone clusters.
+
+**Key takeaways**
+- vSphere Pods are **not supported on the VDS stack** - pick NSX if pods are a requirement.
+- Control plane HA = 3 control plane VMs; mandatory with three zones.
+- With Avi: the first Service Engine is only created when the first virtual service exists.
+
+---
+
+## Objective 4.2: Configure and Manage vSphere Namespaces and Zones
+
+**Namespace creation (Supervisor Management → Namespaces → New Namespace):**
+1. Select Supervisor, enter a **DNS-compliant name**.
+2. Network: pick a Workload Network (VDS stack) or **Override cluster network settings** (NSX stack) with T0/VRF/NAT/CIDRs.
+3. Select a **vSphere Zone** (zoned Supervisor; a namespace can use 1-3 zones).
+4. **Permissions**: add users/groups (View/Edit/Owner) from SSO sources or a registered OIDC provider.
+5. **Storage**: assign storage policies - each becomes a Kubernetes StorageClass in the namespace (topology-aware policies required on multi-zone Supervisors).
+6. **Capacity and Usage**: set CPU/memory/storage limits; **VM Service**: associate VM classes and VM content library.
+7. Required privileges: `Namespaces.view`, `Namespaces.edit`, `Namespaces.owner`.
+
+**Zones:** a vSphere Zone maps 1:1 to a vSphere cluster; add a cluster as a zone to a Supervisor; a Supervisor spans exactly 3 zones; namespaces are placed on zones.
+
+**Key takeaways**
+- Self-service: a namespace can be provisioned from a **self-service namespace template** activated on the cluster.
+- Forgetting the VM class association is the classic reason `kubectl get virtualmachineclass` returns nothing for DevOps.
+
+---
+
+## Objective 4.3: Create Workloads as Supervisor Pods or via VM Service
+
+| | vSphere Pods | VM Service VMs |
+|---|---|---|
+| **What** | Containers on ESX in CRX microVMs (own kernel each, OCI compatible) | Declarative VMs (VirtualMachine CR) from VM Service |
+| **Networking** | NSX topology required | Any stack (placed on namespace subnets; default Private subnet on VPC; default VM SubnetSet cannot be changed) |
+| **Define with** | Pod/Deployment YAML against the Supervisor namespace | VirtualMachine YAML: **VM class + VirtualMachineImage (from VM content library)** |
+| **Provisioning UIs** | kubectl | kubectl, VCF CLI, IaaS Services Console (VCF Automation), Local Consumption Interface |
+
+**Key takeaways**
+- Spherelet = the ESX-native kubelet that runs vSphere Pods; CRX = the isolated runtime.
+- VM Service is also what VKS uses under the hood to build cluster node VMs - one API for both.
+
+---
+
+## Objective 4.4: Install, Uninstall, and Manage Supervisor Add-On Services (e.g., Harbor, external-dns)
+
+**Two different "add-on" layers - do not confuse them:**
+
+| Layer | Examples | Installed where / how |
+|---|---|---|
+| **Supervisor Services** | Harbor (registry), Contour (ingress), ExternalDNS | On the Supervisor from Supervisor Management → Services: upload the **service definition YAML**, then install a version on a Supervisor with a **data values YAML** |
+| **VKS standard packages** | Harbor, ExternalDNS, Contour, Cert Manager, Istio, Prometheus, Fluent Bit, Telegraf, Velero, Cluster Autoscaler, SR-IOV plugin, Helm Controller, Gatekeeper, Windows gMSA webhook | Inside a VKS cluster via `vcf package install` or kubectl (Carvel PackageInstall) |
+
+**Harbor as Supervisor Service:** needs a load balancer or ingress controller (NGINX-based LB or **Contour installed first on the same Supervisor**), an FQDN for the admin UI, and the *Manage Supervisor Services* privilege. vCenter 8.0a+; since Harbor 2.11.2 the registry can be exposed via load balancer. Without regional Harbor, Harbor Supervisor Service can integrate with the Software Depot to proxy images.
+
+**ExternalDNS:** standard package that automates DNS records for Services/Ingresses against an external DNS provider (configured in its values file).
+
+**Lifecycle rules:** only **one version of a service per Supervisor**; installing a newer version overrides; deactivated versions cannot install; precheck **warnings** are skippable, **errors** block.
+
+**Key takeaways**
+- Package component namespaces: Contour/Envoy run in `tanzu-system-ingress`, Harbor in `tanzu-system-registry`. **Never install packages into `tanzu-system-*` namespaces yourself.**
+- CLI pattern: `vcf package install NAME -p <available-package> -v <version> --values-file <file> -n <namespace>`; list with `vcf package installed list -A`; update/delete with `vcf package installed update\|delete`.
+
+---
+
+## Objective 4.5: Provision, Delete, Monitor, and Scale VKS Clusters Using kubectl and VCF CLI
+
+**Provision workflow (kubectl):**
+1. Log in to the Supervisor, switch to the target namespace context.
+2. `kubectl get virtualmachineclass` - only classes **bound to the namespace** are usable.
+3. `kubectl describe namespace <ns>` or `kubectl describe storageclasses` - find StorageClasses.
+4. `kubectl get kr` (`kubectl get kubernetesreleases`) - list compatible VKrs.
+5. Author cluster YAML: Cluster v1beta1/v1beta2 API (`spec.topology.classRef.name`, e.g. `builtin-generic-v3.x` versioned ClusterClass; controlPlane replicas; workers.machineDeployments; variables for VM class, storage class, CNI, pod/service CIDRs).
+6. `kubectl apply -f cluster-1.yaml`; monitor with `kubectl get cluster` (READY False -> True) and `kubectl get cluster,tanzukubernetescluster,virtualmachineservice,kubeadmcontrolplane,machinedeployment,machine,virtualmachine`; node VMs visible in the vSphere Client under the namespace.
+7. Log in to the cluster (VCF CLI plugin), `vcf context use <cluster>`, verify with `kubectl get nodes`.
+
+**Scale:** `kubectl edit cluster/<name>` (or the TKC resource) and change `spec.topology.controlPlane.replicas` / worker `machineDeployments[].replicas`; saving applies the change. **Production clusters require 3 control plane nodes.** Horizontal scaling = change replicas; vertical scaling = change VM class (triggers rolling update; new nodes get the new class, existing nodes keep the old until rolled).
+
+**Delete:** `kubectl delete cluster <name>` (declarative teardown through Cluster API).
+
+**Key takeaways**
+- Login only succeeds once control plane nodes run and the auth plugin is up; wait for all nodes READY.
+- Editing a VM class **definition** does not retro-fit existing nodes - the mismatch trap.
+
+---
+
+## Objective 4.6: Update VKS Clusters Through Rolling Updates and Configuration Changes
+
+| Trigger | Effect |
+|---|---|
+| **User-initiated** | Edit **VKr version** (upgrade), **storage class**, or **VM class** in the cluster manifest; or update via VCF CLI |
+| **System-initiated** | vSphere Namespace updates propagate to clusters; controller (`vmware-system-tkg-controller-manager`) updates inject new values; replacing/renaming the VirtualMachineImage; **switching content libraries with differently-named images** |
+| **Update order** | Add-ons -> control plane -> workers, with pre-checks between stages; control plane first, then workers (with multiple node pools: one worker per node pool at a time; node pools updated **sequentially** in vSphere 8+) |
+| **Mechanics** | New node created and verified -> old node drained and deleted. Pods not governed by a controller (Deployment/ReplicaSet) are **deleted** during the drain. **PodDisruptionBudgets are respected** |
+| **Version rule** | Kubernetes minor versions must be updated **sequentially - no skipping** (1.28 -> 1.29 -> 1.30) |
+| **Status** | Cluster shows `updating` during the roll, `running` when complete; rollback is supported if the upgrade fails |
+
+**Key takeaways**
+- Changing the **VKr version string in YAML is THE upgrade trigger** - that is the most-tested mechanic.
+- As of VKS 3.0 the VKS controller is independent of vCenter/Supervisor upgrades; upgrading those does not roll clusters, but upgrading the VKS version may.
+- Use PDBs on workloads to protect availability during rolls; identical node pools do not make upgrades faster.
+
+---
+
+## Objective 4.7: Create, Configure, and Upgrade Autoscalers
+
+| Fact | Detail |
+|---|---|
+| **What** | Kubernetes Cluster Autoscaler, delivered as a **standard package** (install via kubectl or VCF CLI); 1:1 between the cluster and the autoscaler deployment |
+| **Version rule** | Autoscaler package **minor version must match the VKr minor version** (VKr 1.27.11 -> autoscaler v1.27.x); mismatch = **package reconciliation fails**. Minimum: vSphere 8 U3, VKr 1.27.x |
+| **Configuration** | Per node pool annotations on the Cluster spec: `cluster.x-k8s.io/cluster-api-autoscaler-node-group-min-size` / `-max-size` |
+| **Zero scaling** | Scale to/from zero requires **VKS 3.3+ and VKr 1.31.4+** (not supported on VKS 3.2 and earlier) |
+| **min=max** | Invalid on VKr before v1.30 (min size cannot equal max size) |
+| **Multi-zone** | Can scale node pools pinned to a specific zone |
+| **Upgrades** | With **VKS Add-on management** (VKS 3.5+), the autoscaler version upgrades automatically with cluster upgrades; legacy package-managed installs are upgraded via the package workflow |
+| **OS labels/taints** | For mixed Windows/Linux pools: `capacity.cluster-autoscaler.kubernetes.io/labels` and `.../taints` must match pod scheduling requirements exactly |
+
+**Key takeaways**
+- Autoscaler scales **worker** nodes based on unschedulable pods; some pod types block scale-down.
+- Version mismatch between autoscaler package and VKr is the #1 autoscaler failure on the exam.
+
+---
+
+## Objective 4.8: Manage Package Repositories, Standard Packages, Registry Secrets, and Private Registries
+
+| Task | How |
+|---|---|
+| **Package repository** | Standard packages come from the **VKS standard packages repository** (see Standard Packages Release Notes); images are served through **regional Harbor**. Add/point the PackageRepository on the cluster, then install packages from it |
+| **Install/manage packages** | `vcf package available get/list`, `vcf package install`, `vcf package installed list/get/update/delete` (Carvel underneath); the namespace for PackageInstall objects (e.g. `vcf-cli-managed-packages`) must exist; package *workloads* run in their own `tanzu-system-*` namespaces |
+| **Registry secrets** | Manage registry credential secrets so clusters/pods can pull from private registries (docker-registry type secrets, referenced by imagePullSecrets) |
+| **Private registries** | Create the credential secret, reference it in pod specs; for cluster-level trust of a private registry CA, use the cluster spec **trust variables / additional trusted CA certificates** |
+
+**Key takeaways**
+- Updating a package **version** usually means updating its repository first, then `vcf package installed update`.
+- Default configuration applies if `--values-file` is omitted - know that packages are configurable through the values file.
+
+---
+
+## Objective 4.9: Create and Manage Snapshots in VKS Clusters
+
+| Fact | Detail |
+|---|---|
+| **Mechanism** | CSI volume snapshots via the vSphere CSI driver (`csi.vsphere.vmware.com`) |
+| **Hard rule** | Use only the **pre-existing VolumeSnapshotClass** (e.g., `volumesnapshotclass-delete`); **do not create your own VolumeSnapshotClass**. Pre-existing classes support only the **Delete** deletionPolicy - `Retain` on a custom class is unsupported |
+| **Dynamic snapshot** | PVC (Block volume) -> VolumeSnapshot referencing the class -> readyToUse true |
+| **Pre-provisioned (static)** | Reuse an existing Supervisor-side snapshot: create `VolumeSnapshotContent` with the snapshot handle, then a bound `VolumeSnapshot`. To reuse a snapshot from an old cluster, set the old VolumeSnapshotContent deletionPolicy to **Retain** first, then delete the old objects |
+| **Restore** | Create a PVC whose `dataSource` is the VolumeSnapshot |
+| **Constraint** | A disk with snapshots **cannot be resized** |
+
+---
+
+## Objective 4.10: Upgrade the Supervisor Service Within a Given Situation
+
+| Situation | Correct action |
+|---|---|
+| Newer service version available | Add the new version to vCenter, then **install the newer version on the Supervisor** - it **overrides** the older version (one version per Supervisor at a time) |
+| Precheck warnings | Review and acknowledge; installation can proceed |
+| Precheck errors | Incompatible - **resolve first**, installation is blocked |
+| Unsigned/untrusted service version | VCF 9.0 prechecks verify publisher identity and warn; review the developer certificate |
+| Supervisor platform update | In VCF 9, Supervisor Kubernetes releases ship through the **Supervisor Content Library** (independent of vCenter going forward); clusters/hosts managed with **vSphere Lifecycle Manager** (clusters using Update Manager cannot transition to vLCM while a Supervisor is enabled) |
+
+**Key takeaways**
+- "Upgrade" a Supervisor Service = install the newer version over the old; "update" is the term for Supervisor/Kubernetes version changes.
+- Deactivated service versions cannot be installed at all.
+
+---
+
+## Objective 4.11: Create Storage Strategies Using Dynamic and Static Persistent Volumes with Support for Expansion
+
+| Strategy | How |
+|---|---|
+| **Dynamic PV** | Workload PVC references a StorageClass (from the namespace's storage policies); pvCSI/CNS provision the FCD on demand. Choose **Immediate** vs **WaitForFirstConsumer** (late binding for topology/zones) |
+| **Static PV** | Pre-create the PV pointing at an existing FCD/volume, then bind with a matching PVC; static volumes can be resized if a storage class is associated |
+| **Expansion (online)** | Patch the PVC (`kubectl patch pvc <name> -p '{"spec":{"resources":{"requests":{"storage":"2Gi"}}}}'`) while mounted - grows without downtime |
+| **Expansion (offline)** | Patch while unattached; PVC shows `FilesystemResizePending` until a pod mounts it |
+| **Limits** | No expansion for: **ReadWriteMany volumes**, **StatefulSet volumeClaimTemplates volumes**, volumes with **snapshots**, in-tree/migrated volumes. Storage quota caps still apply. All datastore types (VMFS, vSAN, vSAN Direct, vVols, NFS) supported |
+
+**Key takeaways**
+- Expansion is **increase-only** and done at the **PVC**, never the PV directly.
+- The StatefulSet and snapshot exclusions are favorite exam traps.
+
+---
+
+## Objective 4.12: Create Workload Deployment Models, Including Pods, VMs, Ingress Controllers, and Private Registries
+
+| Model | Pattern |
+|---|---|
+| **Pods/Deployments with LoadBalancer service** | Expose via Service type LoadBalancer -> external VIP from NSX LB / Avi / FLB |
+| **Ingress (L7)** | **Contour** (standard package or Supervisor Service) with Envoy; Envoy's LoadBalancer service gets the external IP; Ingress resources route host/path traffic. For manual Contour YAML deploys, comment out the AWS-specific `aws-load-balancer-backend-protocol` and `externalTrafficPolicy: Local` lines |
+| **VMs** | VM Service VirtualMachine with VM class + image; or vSphere Pods for containerized isolation |
+| **Private registries** | Credential secret + imagePullSecrets in the workload spec; registry CA trust via cluster trust variables; Harbor (Supervisor Service or in-cluster package) as the registry |
+| **Storage-backed apps** | PVC + StorageClass; StatefulSets across zones with late-binding (WaitForFirstConsumer) classes |
+
+**Key takeaways**
+- LoadBalancer = one external VIP per service; Ingress = one VIP, many routes. Exam questions test choosing between them.
+- VKS ships its own **priority classes** for workload admission; use them rather than inventing new ones for platform workloads.
+
+---
+
+## Objective 4.13: Implement Backup and Restore Strategies Using Velero with External Object Storage
+
+| Method | Consistency / traits | Best for |
+|---|---|---|
+| **CSI snapshot** (recommended for CNS block volumes) | Crash-consistent, dedup/compression/encryption via repository, parallel across volumes; snapshot->object storage movement since Velero 1.12; clone throughput ~1 GB/s | CNS block volumes (default choice) |
+| **File System backup** (Kopia uploader; Restic deprecated in 1.15) | **Not crash-consistent** (live filesystem reads); incremental at file level | CNS file volumes and NFS volumes |
+| **vSphere Plugin snapshot** | Crash-consistent block-level; **every backup is full (no CBT)**; no dedup/encryption; can offload traffic via a dedicated backup network/Data Manager VM | When direct snapshot access/network offload matters |
+
+**Strategy points**
+- Velero backs up **Kubernetes resources** for stateless workloads and **resources + PV data** for stateful ones, to external S3-compatible object storage.
+- Velero itself is installed on the VKS cluster (standard package / documented versions 1.16-1.18 in VCF 9.0 docs).
+- Use **backup hooks (quiesce)** if you must use file system backup for churn-heavy apps.
+
+---
+
+## Objective 4.14: Edit YAML Code to Modify a VKS Deployment
+
+| Skill | Details |
+|---|---|
+| **Edit live objects** | `kubectl edit cluster/<name>` (uses `KUBE_EDITOR`/`EDITOR`); save applies, closing without saving cancels |
+| **Cluster spec hotspots** | `spec.topology.controlPlane.replicas`, `workers.machineDeployments[].replicas`, `classRef` (versioned ClusterClass), `variables`: VM class, storage class, CNI, pod/service CIDRs, trust/CA, node drain/rollout settings |
+| **Validation rules** | Key names may contain only **alphanumerics, `-`, `_`, `.`** - a **space in a key name fails validation** (`a valid config key must consist of alphanumeric characters...`). Validate YAML with a syntax checker before apply |
+| **Safe workflow** | Get current YAML (`kubectl get cluster <name> -o yaml`) -> edit -> apply -> watch `kubectl get cluster` (READY/phase) and machines roll |
+
+**Key takeaways**
+- Declarative mindset: you modify YAML and let controllers converge - never hand-edit node VMs.
+- A space in a YAML key name is a documented provisioning failure - a sneaky exam item.
+
+---
+
+## Quick Recall Sheet
+
+- Supervisor flavors: **VPC / NSX segments / VDS+FLB / VDS+Avi / NSX+Avi**; 5 management IPs; Avi needs separate mgmt+data subnets; FLB is VDS-only.
+- Namespaces: name (DNS-compliant), network, zone, permissions, storage policies, limits, VM classes. Zones = 1 cluster each, exactly 3 per Supervisor.
+- vSphere Pods = CRX+Spherelet (**NSX only**); VM Service = VirtualMachine CR (class+image).
+- Supervisor Services vs standard packages - two layers. One service version per Supervisor. `tanzu-system-*` namespaces are off-limits.
+- Provision: `get virtualmachineclass` -> `describe namespace` (storage) -> `get kr` -> Cluster v1beta1/2 YAML -> apply -> `get cluster`. Scale: `kubectl edit` replicas. **3 CP nodes for production.**
+- Rolling update: add-ons -> CP -> workers; VKr/storage/VM-class edits trigger it; **sequential minor versions only**; PDBs respected; unmanaged pods die.
+- Autoscaler: package minor = VKr minor; min!=max (pre-1.30); zero scaling needs VKS 3.3+ / VKr 1.31.4+.
+- Snapshots: pre-existing class only, **Delete policy only**; restore = PVC dataSource.
+- Storage: expand at the PVC, increase-only; **no RWX, no StatefulSet volumes, no snapshotted disks**.
+- Velero: **CSI snapshot (block, crash-consistent, recommended)**, file system (file/NFS, not crash-consistent), vSphere plugin (full every time, network offload).
+- YAML: keys allow `[-._a-zA-Z0-9]` only - spaces fail validation.
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/vmware/vks-tanzu/study-notes/section-3-plan-and-design" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Previous: Section 3: Plan and Design the VMware Tanzu / VKS Solution
+  </a>
+  <a href="/certifications/vmware" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    Kubernetes (VKS Tanzu) Track
+  </a>
+  <a href="/certifications/vmware/vks-tanzu/study-notes/section-5-performance-optimization-upgrades" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Section 5: Performance, Optimization, and Lifecycle Upgrades →
+  </a>
+</div>

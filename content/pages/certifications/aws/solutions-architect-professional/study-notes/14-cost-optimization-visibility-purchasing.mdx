@@ -1,0 +1,185 @@
+---
+title: "Module 14: Cost Optimization, Visibility & Purchasing Options"
+description: "Savings Plans vs Reserved Instances vs Spot, data transfer modeling, tagging and cost allocation, Budgets, Cost Explorer and rightsizing tools."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Professional Track"
+trackSlug: "/certifications/aws/solutions-architect-professional"
+moduleNumber: 14
+totalModules: 20
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Professional (SAP-C02)
+**Scope:** Savings Plans vs Reserved Instances vs Spot, data transfer modeling, tagging and cost allocation, Budgets, Cost Explorer and rightsizing tools.
+
+<Callout variant="info" title="Exam Blueprint Focus: Tasks 1.5, 2.6 and 3.5 Cost">
+Cost questions combine pricing models, data transfer, storage tiering, tagging and visibility tools. The correct answer typically meets the performance/availability requirement at lowest cost, not simply the cheapest option.
+</Callout>
+
+---
+
+## 1. Compute Purchasing Options
+
+| Option | Discount vs On-Demand (up to) | Commitment | Flexibility | Best for |
+|---|---|---|---|---|
+| On-Demand | 0% | None | Full | Spiky, short-term, unknown |
+| Compute Savings Plans | About 66% | 1 or 3 years of $/hour | Any instance family, size, Region, OS; also Fargate and Lambda | Changing architectures, containers, serverless |
+| EC2 Instance Savings Plans | About 72% | 1 or 3 years | Fixed family in a Region; any size/OS/tenancy | Stable known family |
+| Standard Reserved Instances | About 72% | 1 or 3 years | Fixed attributes; can be sold on the RI Marketplace | Steady state, predictable; capacity reservation when zonal |
+| Convertible Reserved Instances | About 66% | 1 or 3 years | Exchangeable for other attributes | Need to change families |
+| Spot Instances | Up to about 90% | None | Interruptible with a 2-minute warning | Fault-tolerant, stateless, batch, CI, big data, containers |
+| Dedicated Hosts / Instances | Varies | Optional | Physical server visibility | BYOL per-socket/core licensing, compliance |
+| On-Demand Capacity Reservations | None (pair with Savings Plans) | Optional | Guarantee capacity in an AZ | DR readiness, events |
+
+Notes: Savings Plans apply automatically to the highest-savings usage and share across an organization's consolidated billing. Reserved Instances (regional) provide discounts and size flexibility; zonal RIs reserve capacity. Savings Plans also exist for SageMaker AI and database services in some forms; check current offerings. Reserved capacity exists for RDS, ElastiCache, Redshift, OpenSearch and DynamoDB.
+
+**Spot best practices:** diversify across many instance types and AZs, use **capacity-optimized** (or price-capacity-optimized) allocation strategy, EC2 Fleet/Spot Fleet or Auto Scaling mixed instances policy (base On-Demand plus Spot), handle interruption notices (EventBridge, instance metadata), checkpoint work, and use Spot for EMR task nodes, ECS/EKS worker nodes, batch jobs.
+
+```bash
+aws autoscaling create-auto-scaling-group --auto-scaling-group-name workers --min-size 2 --max-size 50 \
+  --vpc-zone-identifier "subnet-a,subnet-b,subnet-c" --mixed-instances-policy file://mixed.json
+```
+
+```json
+{
+  "LaunchTemplate": {"LaunchTemplateSpecification": {"LaunchTemplateName": "worker", "Version": "$Latest"},
+    "Overrides": [{"InstanceType": "m6i.large"}, {"InstanceType": "m5.large"}, {"InstanceType": "m7g.large"}]},
+  "InstancesDistribution": {"OnDemandBaseCapacity": 2, "OnDemandPercentageAboveBaseCapacity": 20,
+    "SpotAllocationStrategy": "price-capacity-optimized"}
+}
+```
+
+## 2. Data Transfer Cost Model
+
+| Path | Cost behavior |
+|---|---|
+| Internet to AWS (inbound) | Free |
+| AWS to internet (outbound) | Charged per GB (tiered); CloudFront egress usually cheaper than direct |
+| Same AZ, private IP | Free |
+| Between AZs in a Region | Charged in each direction (per GB); design chatty tiers to stay AZ-local where possible while maintaining HA |
+| Between Regions | Charged per GB outbound from source |
+| Through NAT gateway | Hourly plus per-GB processing, in addition to data transfer; use gateway endpoints for S3/DynamoDB |
+| Through Transit Gateway | Per-attachment hourly plus per-GB processed |
+| VPC peering within Region | Same-AZ free; cross-AZ charged like regular AZ transfer |
+| S3 to CloudFront | Free |
+| Direct Connect | Lower data-out rate than internet, port-hour charges |
+| PrivateLink | Per-hour per-AZ plus per-GB |
+
+**Reducing transfer costs:** gateway endpoints, CloudFront, compressing data, S3 and DynamoDB in same Region as compute, caching, Direct Connect for large steady hybrid flows, avoiding cross-Region replication unless required, replicating only needed data (S3 replication filters), and using one NAT per AZ with endpoints.
+
+<Callout variant="warning" title="Exam Trap: High NAT Gateway Bill">
+Instances in private subnets pulling large amounts from S3 or DynamoDB through a NAT gateway: add free gateway VPC endpoints. This is one of the most common cost optimization answers.
+</Callout>
+
+## 3. Storage Tiering Cost Levers
+
+- S3 lifecycle rules and Intelligent-Tiering; Glacier classes for archives; delete incomplete multipart uploads and noncurrent versions; S3 Storage Lens finds waste.
+- EBS: gp3 over gp2/io1, delete unattached volumes and old snapshots (use Snapshots Archive and DLM).
+- EFS: Infrequent Access/Archive lifecycle; One Zone for non-critical.
+- Right-sized databases, Aurora Serverless v2 for variable loads, DynamoDB on-demand vs provisioned decisions, Standard-IA table class.
+- Move from self-managed to managed (lower operational cost), Graviton for price/performance.
+
+## 4. Visibility, Allocation and Governance Tools
+
+| Tool | Purpose |
+|---|---|
+| Cost Explorer | Visualize and forecast spend; RI/Savings Plans recommendations and coverage/utilization reports; rightsizing recommendations |
+| AWS Budgets | Cost, usage, RI/Savings Plans coverage and utilization budgets; alerts and **actions** (apply an IAM policy or SCP, stop instances) when thresholds are exceeded |
+| Cost and Usage Report (CUR) | Most granular billing data to S3, query with Athena, resource-level IDs |
+| Cost Anomaly Detection | ML-based alerts for unusual spend |
+| Cost allocation tags | User-defined and AWS-generated tags must be **activated** in the Billing console; map costs to business units; enforce with tag policies and SCPs |
+| Cost Categories | Group costs by rules (accounts, tags) for business-unit reporting |
+| Trusted Advisor | Checks including cost optimization (idle resources, low-utilization instances); full set requires Business/Enterprise support |
+| Compute Optimizer | Rightsizing for EC2, EBS, Lambda, ECS on Fargate and Auto Scaling groups using CloudWatch metrics |
+| S3 Storage Lens | Storage usage, cost efficiency and data protection metrics across the organization |
+| Pricing Calculator | Estimate costs for new architectures and migration TCO |
+| Billing alarms | CloudWatch alarm on EstimatedCharges (us-east-1) with SNS notification |
+
+**Tagging strategy:** define mandatory keys (CostCenter, BusinessUnit, Environment, Owner, Application), enforce with Organizations tag policies, Config rule `required-tags`, SCP conditions on `aws:RequestTag`, and IaC defaults (CloudFormation stack-level tags propagate). Activate keys as cost allocation tags. Use account structure as a first-order cost boundary.
+
+```bash
+aws budgets create-budget --account-id 111122223333 --budget file://budget.json --notifications-with-subscribers file://notif.json
+aws ce get-savings-plans-purchase-recommendation --savings-plans-type COMPUTE_SP --term-in-years ONE_YEAR \
+  --payment-option NO_UPFRONT --lookback-period-in-days THIRTY_DAYS
+aws organizations put-policy --name tags --type TAG_POLICY --content file://tagpolicy.json
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Savings Plans vs RIs Decision Flow">
+
+If the workload may move between instance families, Regions or into Fargate/Lambda, choose Compute Savings Plans. If it is stable on one family in one Region, EC2 Instance Savings Plans yield more. Use RIs mostly for non-EC2 services (RDS, ElastiCache, OpenSearch, Redshift) and when you need a zonal capacity reservation or want to sell unused commitments on the RI Marketplace. Commit to the steady baseline only, cover the spike with On-Demand or Spot.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Consolidated Billing Effects">
+
+Organizations aggregates usage to reach volume tiers and shares RI and Savings Plans discounts across linked accounts (sharing can be disabled per account). The management account pays; Budgets and Cost Explorer can be delegated. Use separate accounts to isolate cost visibility by business unit, then tags for finer granularity.
+
+</AccordionItem>
+</AccordionGroup>
+
+## 5. Cost-Conscious Architecture Choices
+
+- Serverless (Lambda, Fargate, DynamoDB on-demand, Aurora Serverless) for intermittent workloads; scale to zero.
+- Schedule non-production shutdowns (Instance Scheduler, EventBridge Scheduler + SSM Automation).
+- Spot for fault-tolerant tiers; Graviton for lower cost per performance.
+- Scale based on demand (target tracking), rightsize after observing metrics.
+- Use managed services to reduce staff and patching costs; weigh TCO instead of unit price only.
+- Delete unused resources: Trusted Advisor, Compute Optimizer idle findings, unattached EBS, idle load balancers, unused Elastic IPs (public IPv4 addresses are charged hourly).
+
+## 6. Common Traps & Distractors
+
+- "Predictable steady 3-year workload that may change instance types": Compute Savings Plan (not Standard RI).
+- "Batch processing that can be interrupted": Spot.
+- "Prevent budget overruns automatically in a dev account": Budgets action applying a restrictive policy.
+- "Allocate costs to departments": cost allocation tags activated in Billing plus Cost Categories.
+- "Highest discount with total flexibility": no such thing; flexibility trades against discount.
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between Savings Plans, Reserved Instances, Spot and On-Demand for a scenario.
+<details>
+<summary>Explanation</summary>
+
+Steady baseline with changing technology: Compute Savings Plan. Steady, fixed family: EC2 Instance Savings Plan or RI. Interruptible, fault-tolerant jobs: Spot. Unpredictable short-term: On-Demand. Capacity guarantees: Capacity Reservations in combination with commitment discounts.
+
+</details>
+
+- [ ] I can identify the largest hidden data transfer costs and mitigate them.
+<details>
+<summary>Explanation</summary>
+
+Common culprits are NAT gateway processing for S3/DynamoDB traffic (use gateway endpoints), cross-AZ chatter between tiers, cross-Region replication, internet egress (use CloudFront), and TGW per-GB charges for centralized patterns.
+
+</details>
+
+- [ ] I can implement cost allocation by business unit end to end.
+<details>
+<summary>Explanation</summary>
+
+Define a mandatory tag set, enforce with tag policies/SCP/Config, activate the tags as cost allocation tags in Billing, use Cost Categories and CUR with Athena to report by business unit, and set Budgets per unit with alerts.
+
+</details>
+
+- [ ] I can design guardrails that stop runaway spend.
+<details>
+<summary>Explanation</summary>
+
+Use AWS Budgets with actions, Cost Anomaly Detection alerts, SCPs denying expensive instance types or unneeded Regions in sandbox OUs, service quotas, and billing alarms to notify owners before the bill closes.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/13-purpose-built-databases-analytics" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 13: Purpose-Built Databases & Analytics Services
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Certified Solutions Architect - Professional Study Guide
+  </a>
+  <a href="/certifications/aws/solutions-architect-professional/study-notes/15-operational-excellence-observability-automation" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 15: Operational Excellence: Observability, Configuration & Automation →
+  </a>
+</div>

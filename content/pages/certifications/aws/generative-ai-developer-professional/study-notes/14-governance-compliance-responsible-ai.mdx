@@ -1,0 +1,182 @@
+---
+title: "Module 14: Governance, Compliance & Responsible AI"
+description: "Model cards, data lineage, CloudTrail audit, drift and bias monitoring, transparency, fairness evaluation (Tasks 3.3, 3.4)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 14
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 3.3 (Skills 3.3.1 - 3.3.4) and Task 3.4 (Skills 3.4.1 - 3.4.3): compliance frameworks, data source tracking, organizational governance, continuous monitoring, transparency, fairness, and policy-compliant AI.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 3, Tasks 3.3 and 3.4">
+Governance questions ask: **What proves what the system did, with which data, under which rules?** Think logs, lineage, model cards, and automated detection. Responsible AI questions focus on transparency, fairness evaluation, and enforceable policy.
+</Callout>
+
+---
+
+## 1. Compliance Frameworks (Skill 3.3.1)
+
+| Requirement | Mechanism |
+|---|---|
+| Document model purpose, limits, risks | **SageMaker AI model cards** (programmatic creation via API for consistency) |
+| Data lineage | **AWS Glue** (Data Catalog and job lineage) to track how data flows to knowledge bases and models |
+| Source attribution | Metadata tagging on chunks and outputs |
+| Decision logs | **CloudWatch Logs** capturing prompts, retrieved sources, model, guardrail results (with PII controls) |
+| Audit trail of API activity | **AWS CloudTrail** |
+
+```
+Source systems --> Glue Data Catalog (registered sources, lineage)
+   --> S3 (tagged: source, owner, classification) --> KB ingestion (metadata kept)
+   --> Response includes source citations + request ID
+   --> Decision log (CloudWatch Logs) + CloudTrail --> audit evidence
+```
+
+---
+
+## 2. Data Source Tracking (Skill 3.3.2)
+
+* Register data sources in the **Glue Data Catalog**.
+* Carry **metadata tags** (source system, owner, version, sensitivity) through chunking so every retrieved chunk can be traced.
+* Return **citations** with responses; Knowledge Bases provide source attribution you can surface.
+* **CloudTrail** logs who changed data sources, ran ingestion jobs, or modified models and guardrails.
+
+---
+
+## 3. Organizational Governance (Skill 3.3.3)
+
+| Governance element | Implementation |
+|---|---|
+| Policies aligned to regulation and responsible AI principles | Written standards translated into guardrails, IAM, SCPs, and CI/CD checks |
+| Approved model catalog | IAM and SCP allow-lists of model ARNs |
+| Standard patterns | Service Catalog products, shared constructs, gateway |
+| Review boards and approval workflows | Pipeline approval gates; model cards required before promotion |
+| Roles and accountability | Least-privilege roles; separation of duties between developers and approvers |
+
+---
+
+## 4. Continuous Monitoring and Advanced Controls (Skill 3.3.4)
+
+| Control | Approach |
+|---|---|
+| Misuse detection | Alarms on guardrail intervention spikes, unusual token usage, anomalous callers |
+| **Drift** monitoring | Compare current input and output distributions and quality scores with baselines (SageMaker Model Monitor for SageMaker-hosted models; custom metrics for Bedrock) |
+| **Bias drift** | SageMaker Clarify bias metrics over time; periodic fairness evaluations |
+| Policy violations | Output policy filters, automated classifiers, scheduled audits |
+| Automated remediation | CloudWatch alarm to EventBridge to Lambda or Step Functions: tighten guardrail, disable a key, route to fallback |
+| Redaction in logs | Token-level or field-level redaction before storing responses |
+| Response logging | Structured logs with request ID, model/version, prompt template version, guardrail outcome |
+
+```
+Metrics/logs --> CloudWatch alarms + anomaly detection
+   --> EventBridge --> Step Functions remediation
+        |-- notify owners (SNS)
+        |-- switch to safer model/config (AppConfig)
+        '-- open ticket + preserve evidence
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: What 'drift' means for foundation models">
+
+Classic ML drift focuses on feature and label distribution changes. For FM applications drift shows up as **input drift** (users ask different kinds of questions), **retrieval drift** (the knowledge base changes and relevant context disappears), **output drift** (tone, length, refusal rate, or quality shifts after a model version update or prompt change), and **provider-side model updates**. Monitor with fixed golden datasets run on a schedule, track output statistics (length, refusal rate, groundedness score), and alert when they leave expected bands.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 5. Transparent AI Systems (Skill 3.4.1)
+
+| Transparency technique | Implementation |
+|---|---|
+| Explanations for users | Display reasoning summaries or rationale sections (not necessarily raw chain-of-thought) |
+| Uncertainty and confidence | Collect confidence metrics (retrieval scores, grounding scores) in CloudWatch; show caution messages when low |
+| Source attribution | Show citations and document links with answers |
+| **Agent tracing** | Bedrock Agents trace shows orchestration steps, tool calls, knowledge base lookups, and rationale |
+| Disclosure | Tell users they are interacting with AI and its limitations |
+
+---
+
+## 6. Fairness Evaluation (Skill 3.4.2)
+
+| Approach | Detail |
+|---|---|
+| Pre-defined fairness metrics | Publish and monitor in CloudWatch |
+| **A/B testing of prompts** | Bedrock Prompt Management variants and Prompt Flows to compare outputs across demographic groups or phrasing |
+| **LLM-as-a-judge** | Bedrock evaluation with a judge model scoring for bias, stereotyping, harmfulness |
+| Counterfactual testing | Swap demographic attributes in otherwise identical prompts and compare outputs |
+| SageMaker Clarify | Bias and explainability analysis for models you host and datasets |
+
+---
+
+## 7. Policy-Compliant AI (Skill 3.4.3)
+
+* **Guardrails based on policy requirements**: translate each written policy into denied topics, word filters, content thresholds, and PII rules.
+* **Model cards** document intended use, limitations, evaluation results, and ethical considerations.
+* **Automated compliance checks**: Lambda functions in the pipeline or on outputs verifying required disclaimers, prohibited claims, citation presence.
+* Re-test after every model, prompt, or guardrail change.
+
+---
+
+## 8. Exam Traps & Common Distractors
+
+- **Trap 1:** Treating CloudTrail as a prompt/response log. CloudTrail records API activity; prompt content requires model invocation logging or application logging.
+- **Trap 2:** Logging everything including PII with no redaction or retention policy.
+- **Trap 3:** One-time fairness testing instead of continuous monitoring.
+- **Trap 4:** Governance by policy document only, with no technical enforcement.
+- **Trap 5:** Showing raw internal reasoning to end users as the transparency solution.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can assemble an audit trail for an AI-generated answer.
+<details>
+<summary>Explanation</summary>
+
+Combine the request ID, prompt template version, model and guardrail version, retrieved source citations, and guardrail outcome in structured logs (CloudWatch Logs), with CloudTrail for API actions and Glue Data Catalog lineage for data provenance.
+
+</details>
+
+- [ ] I can distinguish CloudTrail, invocation logging, and application logs.
+<details>
+<summary>Explanation</summary>
+
+CloudTrail logs control- and data-plane API calls (who did what). Bedrock model invocation logging captures request and response content and metadata when enabled. Application logs capture business context such as user, session, template version, and decisions.
+
+</details>
+
+- [ ] I can design continuous governance monitoring with automated remediation.
+<details>
+<summary>Explanation</summary>
+
+Collect metrics on guardrail interventions, tokens, quality and fairness scores; alarm on anomalies; route alarms through EventBridge to Step Functions or Lambda that notify, switch to safer configuration, or disable access, while preserving evidence.
+
+</details>
+
+- [ ] I can explain methods to evaluate and improve fairness.
+<details>
+<summary>Explanation</summary>
+
+Counterfactual prompt testing, A/B comparison of prompt variants, LLM-as-a-judge scoring for bias, Clarify analysis for hosted models, and recurring evaluations tied to alarms and release gates.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/13-data-security-privacy-controls" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 13: Data Security & Privacy: VPC Isolation, PII Handling & Retention
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/15-cost-performance-optimization-caching" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 15: Cost & Performance Optimization: Tokens, Caching, Throughput & Retrieval Tuning →
+  </a>
+</div>

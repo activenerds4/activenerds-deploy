@@ -1,0 +1,169 @@
+---
+title: "AWS Certifications Hub & Study Guides"
+description: "Comprehensive exam preparation, deep-dive architectural guides, and revision notes for AWS Solutions Architect, Developer, SysOps/CloudOps, Data Engineer, ML, and GenAI credentials."
+date: "2026-11-05"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+layout: "hub"
+---
+
+<Callout variant="tip" title="Mechanism-First AWS Exam Preparation">
+Master the core architectures, CLI patterns, failure modes, and trade-offs required for high-stakes **Amazon Web Services (AWS)** credentials. Each study track provides modular, high-density study notes with mechanism diagrams, comparison tables, CLI commands, and exam trap breakdowns.
+</Callout>
+
+## Official AWS Certification Tracks
+
+Choose your exam preparation track below. Each track features comprehensive modular study guides aligned with the latest AWS examination blueprints:
+
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 my-8 not-prose">
+  <CertTrackCard
+    title="Solutions Architect Associate"
+    badge="Core Architecture"
+    modules="16 Modules"
+    hours="~25 Hours"
+    exam="SAA-C03"
+    level="Associate"
+    icon="layers"
+    href="/certifications/aws/solutions-architect-associate"
+    description="Resilient VPC networking, compute decoupling, high-availability storage, multi-account governance, and cost-optimized disaster recovery."
+    resources={["Study Notes (16 Modules)", "Mock Tests (Coming Soon)", "Flash Cards (Coming Soon)"]}
+  />
+
+  <CertTrackCard
+    title="Solutions Architect Professional"
+    badge="Advanced Architecture"
+    modules="20 Modules"
+    hours="~40 Hours"
+    exam="SAP-C02 / SAP-C03"
+    level="Professional"
+    icon="award"
+    href="/certifications/aws/solutions-architect-professional"
+    description="Enterprise multi-account organizations, hybrid Transit Gateway & Direct Connect networking, continuous compliance, large-scale migrations, and multi-region resilience."
+    resources={["Study Notes (20 Modules)", "Mock Tests (Coming Soon)", "Flash Cards (Coming Soon)"]}
+  />
+
+  <CertTrackCard
+    title="Developer Associate"
+    badge="Cloud Development"
+    modules="16 Modules"
+    hours="~25 Hours"
+    exam="DVA-C02 / DVA-C03"
+    level="Associate"
+    icon="cpu"
+    href="/certifications/aws/developer-associate"
+    description="Serverless development with AWS Lambda, Amazon API Gateway, DynamoDB single-table design, Cognito authentication, CI/CD pipelines, and SDK instrumentation."
+    resources={["Study Notes (16 Modules)", "Mock Tests (Coming Soon)", "Flash Cards (Coming Soon)"]}
+  />
+
+  <CertTrackCard
+    title="SysOps Administrator (CloudOps)"
+    badge="Cloud Operations"
+    modules="16 Modules"
+    hours="~25 Hours"
+    exam="SOA-C02 / SOA-C03"
+    level="Associate"
+    icon="shield"
+    href="/certifications/aws/cloudops-engineer-associate"
+    description="Fleet monitoring with CloudWatch & EventBridge, automated remediation, Systems Manager patch baselines, multi-AZ scaling, backup/DR, and VPC security audits."
+    resources={["Study Notes (16 Modules)", "Mock Tests (Coming Soon)", "Flash Cards (Coming Soon)"]}
+  />
+
+  <CertTrackCard
+    title="Data Engineer Associate"
+    badge="Data & Analytics"
+    modules="15 Modules"
+    hours="~25 Hours"
+    exam="DEA-C01"
+    level="Associate"
+    icon="network"
+    href="/certifications/aws/data-engineer-associate"
+    description="Batch and streaming ingestion (Kinesis, MSK), transformation with Glue & EMR, pipeline orchestration via Step Functions & MWAA, and Lake Formation security."
+    resources={["Study Notes (15 Modules)", "Mock Tests (Coming Soon)", "Flash Cards (Coming Soon)"]}
+  />
+
+  <CertTrackCard
+    title="Machine Learning Engineer Associate"
+    badge="ML & MLOps"
+    modules="14 Modules"
+    hours="~25 Hours"
+    exam="MLA-C01 / MLA-C02"
+    level="Associate"
+    icon="cpu"
+    href="/certifications/aws/machine-learning-engineer-associate"
+    description="End-to-end ML engineering: SageMaker AI model training and tuning, Bedrock FM selection & RAG embeddings, GenAIOps pipelines, inference hosting, and drift observability."
+    resources={["Study Notes (14 Modules)", "Mock Tests (Coming Soon)", "Flash Cards (Coming Soon)"]}
+  />
+
+  <CertTrackCard
+    title="Generative AI Developer Professional"
+    badge="Generative AI & Agents"
+    modules="18 Modules"
+    hours="~35 Hours"
+    exam="AIP-C01"
+    level="Professional"
+    icon="sparkles"
+    href="/certifications/aws/generative-ai-developer-professional"
+    description="Advanced generative AI architectures: Bedrock FM orchestration, multi-agent frameworks, hybrid RAG with vector stores, automated prompt evaluation, and guardrails."
+    resources={["Study Notes (18 Modules)", "Mock Tests (Coming Soon)", "Flash Cards (Coming Soon)"]}
+  />
+</div>
+
+## Architectural Core Focus Areas
+
+<AccordionGroup type="single">
+  <AccordionItem title="Resilience & High Availability: Multi-AZ vs Multi-Region">
+    <div className="space-y-3 py-2 text-sm leading-relaxed">
+      <p>
+        Across both Associate and Professional exams, AWS tests your ability to design fault-tolerant systems matching strict RTO and RPO requirements:
+      </p>
+      <ul className="list-disc pl-5 space-y-1">
+        <li><strong>Multi-AZ Deployments:</strong> Synchronous replication for Aurora/RDS, Auto Scaling across 3 AZs behind an Application Load Balancer.</li>
+        <li><strong>Multi-Region Active-Active:</strong> DynamoDB Global Tables, Aurora Global Database, and Route 53 latency-based routing with health checks.</li>
+        <li><strong>Disaster Recovery Strategies:</strong> Backup & Restore (hours) → Pilot Light (tens of minutes) → Warm Standby (minutes) → Multi-Site Active/Active (zero/seconds).</li>
+      </ul>
+    </div>
+  </AccordionItem>
+
+  <AccordionItem title="Enterprise Identity & Zero-Trust Access: IAM, STS & AWS Organizations">
+    <div className="space-y-3 py-2 text-sm leading-relaxed">
+      <p>
+        Security is paramount across all AWS credentials:
+      </p>
+      <ul className="list-disc pl-5 space-y-1">
+        <li><strong>Service Control Policies (SCPs):</strong> Guardrail maximum permissions without granting permissions directly.</li>
+        <li><strong>Cross-Account Role Delegation:</strong> Use STS <code>AssumeRole</code> with external IDs to prevent confused deputy vulnerabilities.</li>
+        <li><strong>Permission Boundaries:</strong> Delegate administration to developers without risking privilege escalation to administrative roles.</li>
+      </ul>
+    </div>
+  </AccordionItem>
+
+  <AccordionItem title="Generative AI & Modern Workloads: Bedrock, SageMaker & Vector Embeddings">
+    <div className="space-y-3 py-2 text-sm leading-relaxed">
+      <p>
+        The latest blueprint revisions heavily emphasize serverless AI and retrieval-augmented generation:
+      </p>
+      <ul className="list-disc pl-5 space-y-1">
+        <li><strong>Amazon Bedrock:</strong> Serverless Foundation Models (Claude, Titan, Llama) with automated Guardrails and Knowledge Bases.</li>
+        <li><strong>Vector Stores:</strong> Amazon OpenSearch Serverless vector engine, pgvector on Amazon Aurora PostgreSQL, and MemoryDB for high-throughput similarity search.</li>
+        <li><strong>SageMaker Endpoints:</strong> Real-time, serverless, asynchronous, and batch transform inference hosting with multi-model endpoints.</li>
+      </ul>
+    </div>
+  </AccordionItem>
+</AccordionGroup>
+
+---
+
+<div className="rounded-xl border border-border bg-card/60 p-6 my-8 text-center space-y-3">
+  <h3 className="font-display text-lg font-bold text-foreground">Ready to start studying?</h3>
+  <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+    Choose your track and dive into Module 01 to master AWS architecture, developer workflows, data engineering, and generative AI systems.
+  </p>
+  <div className="pt-2 flex justify-center gap-4">
+    <a
+      href="/certifications/aws/solutions-architect-associate"
+      className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+    >
+      Explore SAA-C03 Track →
+    </a>
+  </div>
+</div>

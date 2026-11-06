@@ -1,0 +1,276 @@
+---
+title: "Module 15: Root Cause Analysis & Troubleshooting Across AWS Services"
+description: "Logs Insights queries, error code catalog for Lambda, API Gateway, DynamoDB, S3, IAM, and containers, deployment failure triage, and AI-assisted debugging."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Developer Associate Track"
+trackSlug: "/certifications/aws/developer-associate"
+moduleNumber: 15
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Developer - Associate (DVA-C03)
+**Domain:** Troubleshooting and Optimization
+
+<Callout variant="info" title="Exam Focus: Troubleshooting and Optimization (Task 4.1, Skills 4.1.1 to 4.1.5)">
+Debug code and **service integration issues**, interpret metrics/logs/traces, **query logs**, troubleshoot deployment failures from output logs, and (new in DVA-C03) **use AWS AI tools to analyze errors and generate troubleshooting suggestions**. Most questions give you an error message or symptom and ask for the most likely cause or fix, so the **error catalog** in this module is high-yield.
+</Callout>
+
+---
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: A Repeatable Root-Cause Method">
+
+1. **Define the symptom precisely:** which request, which error code, since when, how many users?
+2. **Scope it:** one function, one Region, one dependency, or everything?
+3. **Check what changed:** recent deployments, config changes, IAM or key policy edits, quota consumption (CloudTrail, CodeDeploy/CloudFormation events, AppConfig history).
+4. **Follow the request:** X-Ray service map and traces to find the failing hop.
+5. **Read the evidence at that hop:** logs (Logs Insights), metrics (errors, throttles, latency percentiles), configuration.
+6. **Form a hypothesis, test it, and fix the cause, not the symptom.**
+
+* **Exam Trap:** Distractors often "scale up" or "add retries" when the real cause is **permissions, a timeout mismatch, or a misconfiguration**. Read the exact error text.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 1. Querying Logs (Skills 4.1.2 and 4.1.3)
+
+### CloudWatch Logs Insights Essentials
+
+Commands you can chain with `|`: `fields`, `filter`, `stats`, `sort`, `limit`, `parse`, `display`. Useful functions: `count()`, `avg()`, `pct(field, 95)`, `max()`, `bin(5m)`.
+
+```
+# Errors per 5 minutes
+fields @timestamp, @message
+| filter @message like /ERROR/
+| stats count() as errors by bin(5m)
+
+# Slowest invocations and memory headroom for Lambda (REPORT lines)
+filter @type = "REPORT"
+| stats max(@duration) as maxMs, pct(@duration, 95) as p95Ms, max(@maxMemoryUsed / 1024 / 1024) as maxMemMB, max(@memorySize / 1024 / 1024) as configuredMB by bin(15m)
+
+# Cold starts
+filter @type = "REPORT" and ispresent(@initDuration)
+| stats count() as coldStarts, avg(@initDuration) by bin(1h)
+
+# Follow one request across structured JSON logs
+fields @timestamp, level, message
+| filter requestId = "8f1c2e0a-..."
+| sort @timestamp asc
+```
+
+```bash
+aws logs start-query --log-group-name /aws/lambda/orders-fn \
+  --start-time $(date -d '-1 hour' +%s) --end-time $(date +%s) \
+  --query-string 'fields @timestamp, @message | filter @message like /ERROR/ | limit 20'
+aws logs get-query-results --query-id <id>
+```
+
+**Reading the Lambda `REPORT` line:** `Duration`, `Billed Duration`, `Memory Size`, `Max Memory Used`, and `Init Duration` (only on cold starts). If `Max Memory Used` approaches `Memory Size` expect out-of-memory failures; if `Duration` approaches the timeout expect `Task timed out`.
+
+---
+
+## 2. Error Catalog by Service (Skill 4.1.1)
+
+### AWS Lambda
+
+| Symptom | Likely Cause | Fix |
+|---|---|---|
+| `Task timed out after N seconds` | Timeout too low, slow dependency, VPC function with no route to the internet or endpoint (calls hang) | Raise timeout, add timeouts in client code, VPC endpoint or NAT |
+| `Runtime exited with error: signal: killed` / out of memory | Memory exhausted | Increase memory, reduce payload, stream |
+| `429 TooManyRequestsException` / throttles | Concurrency limit or reserved concurrency exhausted, burst scaling limits | Raise limits, tune reserved concurrency, queue with SQS, backoff |
+| `AccessDeniedException` calling a service | Execution role lacks permission | Add least-privilege policy to the role |
+| `KMSAccessDeniedException` | Role cannot use the key encrypting env vars or data | Allow `kms:Decrypt` |
+| `ResourceConflictException` | Function being updated or in `Pending` state | Wait and retry |
+| `Runtime.ImportModuleError` / cannot find module | Wrong handler path, missing dependency in package or layer | Fix handler string, repackage |
+| Invoked twice | Async retries or at-least-once source | Idempotency |
+| Sync caller sees 502 from API Gateway | Function error or malformed proxy response | Check logs and response shape |
+| Stream consumer falling behind | High `IteratorAge`, poison record | Bisect, retry limits, on-failure destination, more shards or parallelization |
+
+### Amazon API Gateway
+
+| Code | Meaning |
+|---|---|
+| **400** | Failed request validation |
+| **401** | Authorizer rejected credentials (Cognito/Lambda authorizer) |
+| **403** | `Missing Authentication Token` (wrong path/method/stage), IAM denied, WAF block, resource policy denied |
+| **429** | Throttled (stage, usage plan, account) |
+| **500** | Authorizer or mapping template error |
+| **502** | Bad Lambda proxy response or backend crash |
+| **503** | Backend unavailable |
+| **504** | Integration timeout |
+| CORS error in browser | Missing `Access-Control-Allow-*` headers (OPTIONS and actual response) |
+
+Enable **execution logging** to see the integration request/response and mapping failures (requires the CloudWatch Logs role in API Gateway account settings).
+
+### Amazon DynamoDB
+
+| Exception | Meaning | Action |
+|---|---|---|
+| `ProvisionedThroughputExceededException` | Table, index, or partition throughput exceeded | Backoff, fix hot key, raise capacity or use on-demand; check GSI throttling |
+| `ConditionalCheckFailedException` | Condition expression false | Expected for locking/idempotency; re-read and retry or treat as duplicate |
+| `ValidationException` | Bad request (reserved word, missing key, wrong type, item over 400 KB) | Use `ExpressionAttributeNames`, fix request |
+| `TransactionCanceledException` | A transaction condition failed or conflicted | Inspect `CancellationReasons` |
+| `ItemCollectionSizeLimitExceededException` | LSI item collection above 10 GB | Redesign keys |
+| `ResourceNotFoundException` | Wrong table name or Region | Verify config |
+
+### Amazon S3
+
+| Symptom | Likely Cause |
+|---|---|
+| `AccessDenied` | IAM or bucket policy, Block Public Access, SCP, KMS key permission, VPC endpoint policy, or explicit deny |
+| `403` instead of `404` for missing key | Caller lacks `s3:ListBucket` (S3 hides existence); with it you get `NoSuchKey` |
+| `503 SlowDown` | Request rate on a prefix too high; spread prefixes, add backoff |
+| `SignatureDoesNotMatch` | Wrong secret key, modified headers, wrong Region/endpoint, proxy altering the request |
+| `ExpiredToken` / expired presigned URL | Temporary credentials or URL expired |
+| `RequestTimeTooSkewed` | Client clock off by more than 15 minutes |
+| Browser upload blocked | Missing **CORS** configuration on the bucket |
+
+### Messaging
+
+| Symptom | Likely Cause |
+|---|---|
+| Messages reappear in SQS | Visibility timeout shorter than processing time, or message not deleted |
+| Consumers see nothing but messages exist | Short polling returning empty samples; use long polling, check permissions and queue policy |
+| SNS to SQS delivers nothing | Queue policy does not allow the topic; subscription filter policy excludes messages |
+| EventBridge rule not triggering | Event pattern mismatch, rule on wrong bus, target permissions, check `FailedInvocations` and DLQ |
+| Step Functions state failed | Read **execution history** for the failing state input, output, and error |
+
+### IAM and Security
+
+* **Explicit deny wins:** check SCPs, permissions boundaries, session policies, and resource policies.
+* Decode an opaque authorization failure: `aws sts decode-authorization-message --encoded-message ...` (needs `sts:DecodeAuthorizationMessage`).
+* **Cross-account:** both sides must allow. **KMS:** the key policy must allow use; IAM alone is not enough unless delegated.
+* `ExpiredToken`: refresh credentials. `InvalidClientTokenId`: wrong or deleted keys.
+
+### Containers
+
+| Symptom | Likely Cause |
+|---|---|
+| `CannotPullContainerError` | Missing ECR permissions on execution role, wrong image tag, no network path to ECR (NAT or VPC endpoints for ECR and S3) |
+| Task stops with exit code **137** | Container killed for **out of memory** (or SIGKILL) |
+| Task keeps restarting | Essential container exited, failing health check, bad command |
+| Targets `unhealthy` behind ALB | Health check path or port wrong, security group blocks the ALB, app slow to start |
+| `kubectl` pod `CrashLoopBackOff` / `ImagePullBackOff` | App error (check `kubectl logs`, `describe pod`), image or registry access |
+
+---
+
+## 3. Debugging Service Integrations (Skill 4.1.1)
+
+1. **Confirm identity and permissions:** `aws sts get-caller-identity` from the same role/environment; check the **role used by the calling service** (execution, task, service role).
+2. **Test each hop independently:** invoke the Lambda with a test event; call the API Gateway **Test** console; send a test message to the queue.
+3. **Check the contract:** payload shape, base64 encoding, content type, headers.
+4. **Check networking:** VPC subnets, route tables, security groups, endpoints, NAT.
+5. **Check quotas and throttles:** CloudWatch `Throttles`, DynamoDB throttle metrics, service quotas.
+6. **Use the DLQ:** inspect failed messages in the dead-letter queue to reproduce failures with real payloads.
+7. **Trace:** X-Ray service map shows which node has faults, errors, or high latency.
+
+---
+
+## 4. Troubleshooting Deployment Failures from Output Logs (Skill 4.1.4)
+
+| Service | Where to Look | Frequent Causes |
+|---|---|---|
+| **CloudFormation** | `describe-stack-events` or Events tab: the **first `*_FAILED` event** in time order | Missing capabilities, name collision, insufficient permissions, invalid property, circular dependency, resource limit, custom resource not responding |
+| **CodeBuild** | Build **phase details** and CloudWatch Logs | YAML errors in `buildspec`, failed tests, missing permissions (ECR, S3, CodeArtifact), no Docker privileged mode, out of disk or memory |
+| **CodeDeploy (EC2)** | Deployment events, **lifecycle event logs**, agent logs at `/var/log/aws/codedeploy-agent/` and deployment logs under `/opt/codedeploy-agent/deployment-root/` | Script non-zero exit, wrong `appspec` path, agent not running, instance role lacks S3 access |
+| **CodeDeploy (Lambda/ECS)** | Hook function logs, alarm state | Hook returned failure, alarm fired, task failed health checks |
+| **CodePipeline** | **Action execution details** link to the provider's logs | Role permissions, artifact bucket/KMS access, wrong artifact name between stages |
+| **Elastic Beanstalk** | `eb logs`, `eb health`, event stream | Bad config files in `.ebextensions`, health failures after deploy |
+| **ECS service** | Service **events** tab, stopped task reason | Image pull errors, insufficient CPU/memory in the cluster, failing health checks, circuit breaker triggered |
+| **Lambda deploy** | CloudFormation event, `UpdateFunctionCode` errors | Package too large, missing layer version, unsupported runtime, role not assumable (trust policy) |
+
+---
+
+## 5. Using AWS AI Tools for Error Analysis (Skill 4.1.5, New in DVA-C03)
+
+AI-assisted tools (for example **Kiro** in your IDE or CLI, and generative AI assistants built on **Amazon Bedrock**) can **explain stack traces, summarize log patterns, correlate errors with recent changes, propose fixes, and generate troubleshooting checklists**.
+
+**Good practice (exam-aligned):**
+
+* **Verify** suggestions against logs, metrics, and documentation; models can be confidently wrong or suggest deprecated APIs.
+* **Sanitize inputs:** remove secrets, tokens, and PII from logs and traces before sharing them with any tool, and use approved, private-connectivity AI services (Module 10).
+* **Give context:** error text, relevant code, runtime and versions, recent changes, expected behavior.
+* **Apply fixes through the normal path:** code review, tests, and CI/CD, not by pasting generated commands into production.
+* Treat AI output as a **starting hypothesis**; confirm root cause with evidence before closing an incident.
+
+---
+
+## 6. Worked Example: "Orders API Returns 502 After Release"
+
+1. **Symptom:** API Gateway returns **502** for POST /orders since the 14:05 deployment.
+2. **Scope:** only POST; GET works. So likely the function behind POST, not API Gateway as a whole.
+3. **Logs Insights** on the function: `filter @message like /Error/` reveals `TypeError: Cannot read properties of undefined (reading 'orderId')`.
+4. **X-Ray** shows the fault in the Lambda segment, not in DynamoDB.
+5. **Root cause:** the new code expects `event.body` as an object, but with proxy integration it is a **string**; `JSON.parse` was removed.
+6. **Fix:** parse the body, add a request validator, add a unit test with a real proxy event, redeploy through the pipeline with canary and alarm.
+
+---
+
+## 7. Common Exam Traps and Scenario Distractors
+
+* **403 `Missing Authentication Token`** on API Gateway → check the URL path, method, and stage.
+* "Function times out only when placed in a VPC" → no NAT or endpoint for outbound calls.
+* "S3 returns 403 for a key that does not exist" → missing `s3:ListBucket`.
+* "Container killed with exit code 137" → memory limit.
+* "Stack failed; what is the root cause?" → the **earliest failed event**, not the final rollback events.
+* "CodeBuild cannot push the image" → ECR permissions on the build role or missing login step.
+* "CodeDeploy deployment fails at `ApplicationStart`" → inspect the script's exit code and agent logs.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] Which Logs Insights query pattern shows the 95th percentile Lambda duration per hour?
+<details>
+<summary>Explanation</summary>
+
+`filter @type = "REPORT" | stats pct(@duration, 95) by bin(1h)`.
+
+</details>
+- [ ] An ECS task stops with exit code 137 shortly after startup under load. Likely cause and fix?
+<details>
+<summary>Explanation</summary>
+
+The container exceeded its **memory limit** and was killed. Increase the task/container memory, fix leaks, or reduce concurrency per task.
+
+</details>
+- [ ] A CloudFormation stack shows many failed events after `ROLLBACK_IN_PROGRESS`. Where is the root cause?
+<details>
+<summary>Explanation</summary>
+
+At the **earliest `CREATE_FAILED` or `UPDATE_FAILED` event** (chronologically), whose status reason names the real problem. Later failures are consequences of the rollback.
+
+</details>
+- [ ] S3 `GetObject` returns `403` for a key that you are sure was never uploaded, but returns `404` for another role. Why?
+<details>
+<summary>Explanation</summary>
+
+The first role lacks **`s3:ListBucket`**, so S3 returns 403 instead of revealing that the key does not exist.
+
+</details>
+- [ ] What is the right way to use an AI assistant when analyzing a production error log?
+<details>
+<summary>Explanation</summary>
+
+Remove secrets and PII, provide context, treat suggestions as hypotheses to verify with evidence, and implement the fix via normal review and CI/CD.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/developer-associate/study-notes/14-logging-monitoring-and-tracing" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 14: Logging, Metrics, Alarms, Tracing & Health Checks
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Developer Associate Track
+  </a>
+  <a href="/certifications/aws/developer-associate/study-notes/16-performance-optimization-and-concurrency" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 16: Performance Optimization: Concurrency, Memory Tuning & Caching →
+  </a>
+</div>

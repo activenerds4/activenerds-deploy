@@ -1,0 +1,178 @@
+---
+title: "Module 12: High-Performing Network Architecture & Edge Delivery"
+description: "CloudFront, Global Accelerator, Transit Gateway, PrivateLink, Direct Connect, VPN, and load balancer selection."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Solutions Architect Associate Track"
+trackSlug: "/certifications/aws/solutions-architect-associate"
+moduleNumber: 12
+totalModules: 16
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Solutions Architect - Associate (SAA-C03)
+**Scope:** Task 3.4 — CloudFront, Global Accelerator, VPC design and IP planning, VPC peering, Transit Gateway, PrivateLink, Direct Connect, VPN, and load balancer selection
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 3, Task 3.4 — Determine high-performing and/or scalable network architectures">
+Two classics: choosing CloudFront versus Global Accelerator, and choosing peering versus Transit Gateway versus PrivateLink. Memorize the differentiators in the tables below.
+</Callout>
+
+---
+
+## 1. Architectural Overview & Fundamentals
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: CloudFront behavior">
+
+CloudFront caches content at edge locations, backed by **regional edge caches**. Origins include S3, ALB, EC2, API Gateway, or any HTTP server.
+
+* **Cache behaviors** map URL path patterns to origins and cache policies; control TTLs and use invalidations (or versioned object names) to refresh.
+* **Origin Access Control (OAC)** lets only CloudFront read a private S3 bucket.
+* **Signed URLs and signed cookies** restrict content to authorized viewers; **field-level encryption** protects specific form fields; **geo restriction** allows or blocks countries.
+* **CloudFront Functions** (lightweight viewer request or response changes) and **Lambda@Edge** (heavier logic) run code at the edge.
+* Also accelerates dynamic content by using AWS's backbone network to the origin, and supports HTTP, HTTPS, and WebSocket.
+
+</AccordionItem>
+<AccordionItem title="Deep-Dive: Direct Connect components">
+
+A **dedicated connection** is a physical port (1, 10, or 100 Gbps) at a Direct Connect location; **hosted connections** are provisioned through partners at various speeds. **Virtual interfaces (VIFs):** *private* to a VPC, *public* to AWS public endpoints, and *transit* to a Transit Gateway through a **Direct Connect gateway**. Use **link aggregation groups (LAG)** for more bandwidth and two connections in separate locations for resiliency. Lead time is typically weeks.
+
+</AccordionItem>
+</AccordionGroup>
+
+| Dimension | Amazon CloudFront | AWS Global Accelerator |
+|---|---|---|
+| Layer / protocol | HTTP/HTTPS, WebSocket | TCP and UDP (any application) |
+| Caching | Yes | No |
+| IP addresses | Changing edge IPs | Two static anycast IPs |
+| Failover | Origin failover groups | Health-based regional endpoint failover, traffic dials |
+| Best for | Cacheable content, websites, video | Gaming, VoIP, IoT, non-HTTP, need static IPs, fast regional failover |
+
+| Connectivity need | Choose | Key facts |
+|---|---|---|
+| Two VPCs, simple | VPC peering | One-to-one, **non-transitive**, no overlapping CIDRs, cross-Region and cross-account OK |
+| Many VPCs and on-premises | AWS Transit Gateway | Hub-and-spoke, transitive routing, route tables, VPN and Direct Connect attachments, ECMP across VPN tunnels |
+| Expose one service privately to many consumers | AWS PrivateLink | Unidirectional, overlapping CIDRs fine, service behind NLB or GWLB |
+| Remote users | AWS Client VPN | TLS VPN client access |
+| Encrypted site link quickly | Site-to-Site VPN | Up to 1.25 Gbps per tunnel; accelerated VPN uses Global Accelerator |
+| Dedicated private bandwidth | Direct Connect | Consistent latency, not encrypted by default |
+
+---
+
+## 2. Core Mechanisms & Flow
+
+```
+Global users
+     |
+     +--> Route 53 (latency routing) --> CloudFront --> ALB (Region A)
+     |
+     +--> Global Accelerator (2 static anycast IPs) --> NLB/ALB in Region A or Region B (health-based)
+
+Hub-and-spoke with Transit Gateway
+
+ VPC A --\                      /-- Direct Connect gateway -- On-premises
+ VPC B ---+-- Transit Gateway --+-- Site-to-Site VPN ------- Branch office
+ VPC C --/   (route tables)     \-- Peered TGW in other Region
+```
+
+### Load balancer selection
+
+| Feature | ALB | NLB | GWLB |
+|---|---|---|---|
+| OSI layer | 7 (HTTP/HTTPS/gRPC) | 4 (TCP/UDP/TLS) | 3 (IP, GENEVE on port 6081) |
+| Routing | Path, host, header, query; weighted target groups | Port and protocol | Transparent traffic to appliances |
+| Targets | Instances, IPs, Lambda, containers | Instances, IPs, ALB | Virtual appliances |
+| Static IP | No (use Global Accelerator) | Yes (Elastic IP per AZ) | N/A |
+| Notes | WAF integration, WebSockets, sticky sessions, Cognito and OIDC auth | Millions of requests per second, ultra-low latency, preserves client source IP | Inline firewalls, IPS, deep packet inspection |
+
+### IP and subnet design
+
+* Plan **non-overlapping CIDRs** from the start; peering and Transit Gateway cannot route between overlapping ranges.
+* Size subnets for growth (remember 5 reserved addresses), add secondary CIDR blocks if needed, and consider IPv6 dual stack.
+* Use separate subnet tiers (public, application, data) per AZ, and place resources close to users or dependent services (Regions, Local Zones, Wavelength) to meet latency needs.
+
+---
+
+## 3. Configuration & Practical Implementation
+
+```bash
+# Create a VPC peering connection and accept it
+aws ec2 create-vpc-peering-connection --vpc-id vpc-0aaa --peer-vpc-id vpc-0bbb
+aws ec2 accept-vpc-peering-connection --vpc-peering-connection-id pcx-0abc
+# Add routes on BOTH sides
+aws ec2 create-route --route-table-id rtb-0aaa --destination-cidr-block 10.1.0.0/16 \
+  --vpc-peering-connection-id pcx-0abc
+
+# Create a Transit Gateway and attach a VPC
+aws ec2 create-transit-gateway --description "hub"
+aws ec2 create-transit-gateway-vpc-attachment --transit-gateway-id tgw-0abc \
+  --vpc-id vpc-0aaa --subnet-ids subnet-a subnet-b
+
+# Invalidate a CloudFront path
+aws cloudfront create-invalidation --distribution-id E123EXAMPLE --paths "/index.html"
+```
+
+**Performance extras:** use enhanced networking (ENA), the Elastic Fabric Adapter for HPC and ML, jumbo frames (MTU 9001) within a VPC, and cluster placement groups for low-latency node-to-node traffic.
+
+---
+
+## 4. Exam Traps & Common Distractors
+
+- **Trap 1:** Choosing CloudFront for non-HTTP traffic or when static IPs are required. Choose Global Accelerator.
+- **Trap 2:** Assuming VPC peering is transitive, or peering VPCs with overlapping CIDRs.
+- **Trap 3:** Building a full mesh of peering connections for many VPCs. Use Transit Gateway.
+- **Trap 4:** Using peering to expose a single service to hundreds of VPCs with overlapping IPs. Use PrivateLink.
+- **Trap 5:** Forgetting to update route tables on both sides after creating a peering connection.
+- **Trap 6:** Choosing ALB when static IP addresses or extreme TCP/UDP throughput are required. Choose NLB.
+- **Trap 7:** Using Direct Connect when the requirement is "ready in minutes". VPN is the quick option.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can choose between CloudFront and Global Accelerator.
+<details>
+<summary>Explanation</summary>
+
+CloudFront caches HTTP content at the edge and suits websites and media. Global Accelerator provides static anycast IPs and routes TCP or UDP traffic over the AWS backbone to the closest healthy endpoint with fast failover, without caching.
+
+</details>
+
+- [ ] I can pick peering, Transit Gateway, or PrivateLink for a connectivity requirement.
+<details>
+<summary>Explanation</summary>
+
+Peering for a few VPCs with non-overlapping CIDRs and simple one-to-one routing. Transit Gateway for many VPCs or on-premises networks needing transitive routing. PrivateLink for exposing a single service to consumers one-way, even with overlapping IP ranges.
+
+</details>
+
+- [ ] I can select the right load balancer type.
+<details>
+<summary>Explanation</summary>
+
+ALB for HTTP routing and Lambda or container targets, NLB for static IPs, TCP or UDP, and extreme performance, and GWLB for transparently inserting third-party virtual appliances such as firewalls.
+
+</details>
+
+- [ ] I can design hybrid connectivity with bandwidth, encryption, and resiliency in mind.
+<details>
+<summary>Explanation</summary>
+
+Use Direct Connect for consistent high bandwidth, add VPN as backup or for encryption, use two connections in different locations for resilience, and terminate on a Transit Gateway via a Direct Connect gateway when connecting many VPCs.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/11-high-performing-databases" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 11: High-Performing Database Solutions
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Solutions Architect Associate Track
+  </a>
+  <a href="/certifications/aws/solutions-architect-associate/study-notes/13-data-ingestion-analytics" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 13: Data Ingestion, Transformation & Analytics →
+  </a>
+</div>

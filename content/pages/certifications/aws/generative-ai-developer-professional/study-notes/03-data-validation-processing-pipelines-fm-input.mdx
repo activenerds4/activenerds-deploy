@@ -1,0 +1,206 @@
+---
+title: "Module 03: Data Validation & Processing Pipelines for FM Consumption"
+description: "Glue Data Quality, multimodal processing, Converse/InvokeModel request formatting, and input quality enhancement (Task 1.3)."
+date: "2026-11-04"
+author: "ActiveNerds Cloud Architecture Team"
+category: "aws"
+track: "AWS Generative AI Developer Professional Track"
+trackSlug: "/certifications/aws/generative-ai-developer-professional"
+moduleNumber: 3
+totalModules: 18
+layout: "article"
+---
+
+**Audience:** Candidates preparing for the AWS Certified Generative AI Developer - Professional (AIP-C01)
+**Scope:** Task 1.3 (Skills 1.3.1 - 1.3.4): data validation workflows, multimodal processing, model-specific input formatting, and input quality enhancement.
+
+<Callout variant="info" title="Exam Blueprint Focus: Domain 1, Task 1.3">
+Questions test whether you can match a **data type** (text, image, audio, tabular) and a **quality problem** (missing fields, noise, inconsistent format) to the right AWS service, and whether you format requests correctly for Bedrock. Data engineering and feature engineering are out of scope, so focus on what the FM needs as input.
+</Callout>
+
+---
+
+## 1. Data Validation Workflows (Skill 1.3.1)
+
+Bad input produces bad output regardless of model quality. Validate before data reaches an FM or a knowledge base.
+
+| Tool | Best for | Notes |
+|---|---|---|
+| AWS Glue Data Quality | Rule-based checks on datasets (completeness, uniqueness, value ranges) using DQDL | Integrates with Glue jobs and the Data Catalog; emits scores and results |
+| SageMaker Data Wrangler | Interactive profiling and transformation of tabular data | Visual analysis, data quality insights report |
+| Lambda custom validators | Per-record or per-document checks at ingestion (schema, size, language, encoding) | Triggered by S3 events, SQS, or API Gateway |
+| CloudWatch metrics | Track validation pass/fail counts and alarm on quality drops | Custom metrics via `PutMetricData` or Embedded Metric Format |
+
+```
+S3 upload --> EventBridge/S3 event --> Lambda validator
+                                   |-- valid   --> processing queue --> embeddings / FM
+                                   |-- invalid --> quarantine bucket + DLQ + CloudWatch metric
+```
+
+```
+Rules = [
+  IsComplete "document_id",
+  Uniqueness "document_id" > 0.99,
+  ColumnLength "body" between 50 and 200000,
+  ColumnValues "language" in ["en","es","fr"]
+]
+```
+
+<Callout variant="tip" title="Exam Tip">
+Quarantine, do not drop. A pattern with an invalid-records bucket, a dead-letter queue, and a CloudWatch alarm is the complete answer; silently discarding data is not.
+</Callout>
+
+---
+
+## 2. Processing Complex Data Types (Skill 1.3.2)
+
+| Data type | Service | Output for FM |
+|---|---|---|
+| Scanned documents, forms, tables | Amazon Textract | Text, key-value pairs, tables |
+| Audio / calls | Amazon Transcribe | Timestamped transcript, speaker labels |
+| Images | Amazon Rekognition, or a multimodal FM via Bedrock | Labels, text in image, or direct image input |
+| Mixed documents, video, audio extraction at scale | Amazon Bedrock Data Automation | Structured extraction from multimodal content |
+| Large tabular / batch transforms | SageMaker Processing, Glue | Cleaned rows, serialized to text or JSON |
+| Images plus text together | Bedrock multimodal models | Image content blocks in Converse |
+
+```
+Audio --> Transcribe --> text transcript --\
+Images --> multimodal FM / Rekognition -----+--> normalize --> chunk/embed or prompt
+PDF/scan --> Textract ---------------------/
+Tabular --> Glue/Processing --> JSON/CSV summaries --/
+```
+
+**Multimodal input to Bedrock (Converse):** images are sent as content blocks with a format and raw bytes.
+
+```python
+with open("chart.png", "rb") as f:
+    img = f.read()
+resp = brt.converse(
+    modelId="us.amazon.nova-lite-v1:0",
+    messages=[{"role": "user", "content": [
+        {"image": {"format": "png", "source": {"bytes": img}}},
+        {"text": "Describe the trend shown in this chart."}]}],
+)
+```
+
+<AccordionGroup type="single">
+<AccordionItem title="Deep-Dive: Tabular data and FMs">
+
+FMs read text, so tabular data must be serialized. Options: convert rows to compact JSON or markdown, summarize aggregates with SQL (Athena) and pass the result, or use text-to-SQL so the model generates a query and the database computes the answer deterministically. Passing a million rows into the prompt is the classic wrong answer: it blows the context window and cost. Pre-aggregate or retrieve only relevant rows.
+
+</AccordionItem>
+</AccordionGroup>
+
+---
+
+## 3. Formatting Input for FM Inference (Skill 1.3.3)
+
+Two Bedrock invocation styles:
+
+| API | Request shape | Use when |
+|---|---|---|
+| **InvokeModel** | Provider-specific JSON body in `body` | You need provider-native features or exact control |
+| **Converse / ConverseStream** | Unified `messages`, `system`, `inferenceConfig`, `toolConfig` | Portability, multi-turn, tool use, guardrails |
+
+```python
+# InvokeModel: body schema differs per provider/model
+import json
+resp = brt.invoke_model(
+    modelId="amazon.titan-embed-text-v2:0",
+    body=json.dumps({"inputText": "reset my password", "dimensions": 1024, "normalize": True}),
+)
+vec = json.loads(resp["body"].read())["embedding"]
+```
+
+```python
+# Converse: unified multi-turn format
+resp = brt.converse(
+    modelId="us.amazon.nova-lite-v1:0",
+    system=[{"text": "You are a concise support assistant."}],
+    messages=[
+        {"role": "user", "content": [{"text": "My invoice is wrong."}]},
+        {"role": "assistant", "content": [{"text": "I can help. What is the invoice number?"}]},
+        {"role": "user", "content": [{"text": "INV-2291"}]},
+    ],
+    inferenceConfig={"maxTokens": 400, "temperature": 0.1},
+)
+```
+
+**Dialog formatting rules:** roles alternate between `user` and `assistant`; the system prompt is separate from messages; keep history within the context window by truncating or summarizing older turns. **SageMaker endpoints** require the payload schema the serving container expects (often JSON with `inputs` and `parameters`), so prepare structured data accordingly.
+
+---
+
+## 4. Enhancing Input Data Quality (Skill 1.3.4)
+
+| Technique | Service | Example |
+|---|---|---|
+| Reformat and clean text | Bedrock FM call | Rewrite messy OCR text into clean paragraphs |
+| Entity extraction | Amazon Comprehend | Pull people, organizations, dates to enrich metadata |
+| Normalization | Lambda | Lowercase, strip HTML, unify date formats and units, dedupe |
+| Language detection / translation | Comprehend, Amazon Translate pattern | Route by language or translate to a pivot language |
+| PII handling before the FM | Comprehend PII detection | Mask before sending (Module 13) |
+
+```
+raw text --> Lambda normalize --> Comprehend entities/language
+         --> (optional) FM rewrite to canonical format --> validated JSON --> FM / KB ingestion
+```
+
+---
+
+## 5. Exam Traps & Common Distractors
+
+- **Trap 1:** Sending raw scanned PDFs as plain text to a text-only model; Textract (or a multimodal model/Data Automation) is required first.
+- **Trap 2:** Using InvokeModel with the wrong provider body schema; Converse avoids this.
+- **Trap 3:** Dumping entire tables into the prompt rather than aggregating or using text-to-SQL.
+- **Trap 4:** Dropping invalid records without a quarantine and alerting path.
+- **Trap 5:** Using an FM to clean data at scale when a deterministic Lambda or Glue transform is cheaper and more reliable.
+
+---
+
+## Self-Assessment & Exam Traps Checklist
+
+- [ ] I can pick the right service to validate a dataset before FM consumption.
+<details>
+<summary>Explanation</summary>
+
+Glue Data Quality for rule-based dataset checks, Data Wrangler for interactive profiling, Lambda for per-record ingestion validation, and CloudWatch metrics and alarms to monitor pass rates. Invalid data goes to a quarantine location with a DLQ rather than being discarded.
+
+</details>
+
+- [ ] I can map each data modality to a processing service.
+<details>
+<summary>Explanation</summary>
+
+Documents and forms to Textract, audio to Transcribe, images to Rekognition or a multimodal FM, mixed or video content to Bedrock Data Automation, large tabular transformations to SageMaker Processing or Glue.
+
+</details>
+
+- [ ] I can explain when to use InvokeModel versus Converse.
+<details>
+<summary>Explanation</summary>
+
+Converse provides a unified message format across supporting models, simplifies multi-turn dialog, tool use, and guardrail attachment. InvokeModel is needed for provider-native bodies, embeddings, image generation, or features Converse does not expose.
+
+</details>
+
+- [ ] I know how to improve input quality cheaply and reliably.
+<details>
+<summary>Explanation</summary>
+
+Prefer deterministic normalization in Lambda and entity extraction in Comprehend; use an FM for reformatting only where rules cannot do the job. Enrich with extracted metadata and mask PII before the data reaches the model.
+
+</details>
+
+---
+
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6 border-t border-border mt-10 not-prose">
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/02-fm-selection-dynamic-routing-resilience-customization" className="w-full sm:w-auto inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors shadow-sm">
+    ← Module 02: FM Selection, Dynamic Model Switching, Resilience & Customization Lifecycle
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes" className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors text-center px-2">
+    AWS Generative AI Developer Professional Track
+  </a>
+  <a href="/certifications/aws/generative-ai-developer-professional/study-notes/04-vector-stores-metadata-maintenance" className="w-full sm:w-auto inline-flex items-center justify-end gap-2 px-4 py-2.5 rounded-xl border border-border/80 bg-card/60 hover:bg-card hover:border-primary/50 text-sm font-medium transition-colors text-right shadow-sm">
+    Next: Module 04: Vector Store Architecture, Metadata Frameworks & Data Maintenance →
+  </a>
+</div>
